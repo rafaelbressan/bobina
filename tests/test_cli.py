@@ -158,3 +158,13 @@ def test_config_keeps_numbers_as_numbers():
     run("printer", "add", "mtp", "AA:BB:CC:DD:EE:FF")
     run("calibrate", "tear", "5")
     assert "tear_mm = 5.0" in config.path().read_text()
+
+
+def test_the_version_comes_from_pyproject():
+    import tomllib
+    from pathlib import Path
+
+    import bobina
+
+    meta = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    assert bobina.__version__ == meta["project"]["version"]

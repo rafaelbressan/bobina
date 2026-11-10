@@ -1,5 +1,6 @@
-# A version is a tag. vX.Y.Z-rc.N goes to TestPyPI and is installed on Linux, macOS and Windows; vX.Y.Z goes to
-# PyPI and becomes a GitHub release. PyPI and TestPyPI trust this workflow (trusted publishing): no token.
+# A version is a tag, published to PyPI by trusted publishing (no token) and installed on Linux, macOS and Windows.
+# vX.Y.Z-rc.N is a pre-release (0.1.0rc1): pip and uv only install it when asked by version or with --pre, so
+# nobody gets it by accident; it becomes a GitHub pre-release. vX.Y.Z is the release.
 name: release
 
 on:
@@ -45,47 +46,8 @@ jobs:
           name: dist
           path: dist/
 
-  testpypi:
-    needs: build
-    if: needs.build.outputs.prerelease == 'true'
-    runs-on: ubuntu-latest
-    environment: testpypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
-  install-test:
-    needs: [build, testpypi]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install from TestPyPI (dependencies from PyPI) and run
-        shell: bash
-        run: |
-          for i in 1 2 3 4 5 6; do
-            python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ \
-              "bobina==${{ needs.build.outputs.version }}" && break
-            sleep 20  # the index takes a moment to show a new upload
-          done
-          bobina --version
-          bobina check "hello from the release check" --json
-
   pypi:
     needs: build
-    if: needs.build.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -97,8 +59,29 @@ jobs:
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
 
-  github-release:
+  install-test:
     needs: [build, pypi]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install this version from PyPI and run it
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5 6; do
+            python -m pip install "bobina==${{ needs.build.outputs.version }}" && break
+            sleep 20  # the index takes a moment to show a new upload
+          done
+          bobina --version
+          bobina check "hello from the release check" --json
+
+  github-release:
+    needs: [build, pypi, install-test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -113,6 +96,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${{ needs.build.outputs.version }}"
-          awk -v v="$v" '$0 ~ "^## "v" " || $0 ~ "^## "v"$" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          base=$(python3 -c "import re,sys; print(re.sub(r'(a|b|rc)\d+$', '', sys.argv[1]))" "$v")  # 0.1.0rc1 -> 0.1.0
+          awk -v v="$base" '$0 ~ "^## "v" " || $0 ~ "^## "v"$" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "bobina $v" > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md
+          pre=""; [ "${{ needs.build.outputs.prerelease }}" = "true" ] && pre="--prerelease"
+          gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md $pre

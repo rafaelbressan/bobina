@@ -10,8 +10,8 @@
   full command names in docs and output; English everywhere.
 - Never commit personal data: `python tools/leakscan.py` runs in CI on every push and pull request.
   `tools/install-hooks.sh` installs the same scan as git hooks (staged files and commit messages).
-- Releases are tags: `vX.Y.Z-rc.N` publishes to TestPyPI and installs on Linux, macOS and Windows; `vX.Y.Z`
-  publishes to PyPI and makes the GitHub release (`.github/workflows/release.yml`). The tag must match the version
+- Releases are tags (`.github/workflows/release.yml`): each one is published to PyPI, installed on Linux, macOS and
+  Windows, and becomes a GitHub release. `vX.Y.Z-rc.N` is a pre-release (only installed when asked for). The tag must match the version
   in `pyproject.toml` (`0.2.0rc1` for `v0.2.0-rc.1`), and CHANGELOG.md gets a `## 0.2.0` section first.
 
 ## A new command or option
