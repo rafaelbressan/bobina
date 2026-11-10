@@ -86,25 +86,30 @@ jobs:
     # A release (not a pre-release) bumps Formula/bobina.rb in rafaelbressan/homebrew-tap: contrib/homebrew/bobina.rb
     # with this version's sdist, its resources regenerated, built from source and tested before the push. Off until
     # the HOMEBREW_TAP_TOKEN secret exists (contrib/homebrew/README.md). A failure here pushes nothing.
+    # The token is only in the first and last steps: brew builds third-party sdists in between, so it is never in
+    # the job's environment, a clone URL or .git/config.
     needs: [build, install-test]
     if: needs.build.outputs.prerelease == 'false'
     runs-on: macos-latest
     env:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       VERSION: ${{ needs.build.outputs.version }}
     steps:
       - name: Off without the HOMEBREW_TAP_TOKEN secret
         id: on
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           if [ -n "$HOMEBREW_TAP_TOKEN" ]; then echo "on=true" >> "$GITHUB_OUTPUT"
           else echo "::notice::no HOMEBREW_TAP_TOKEN secret: the Homebrew tap was not bumped"; fi
       - uses: actions/checkout@v4
         if: steps.on.outputs.on == 'true'
+        with:
+          persist-credentials: false
       - name: The formula for this version, built and tested
         if: steps.on.outputs.on == 'true'
         run: |
           tap="$(brew --repository)/Library/Taps/rafaelbressan/homebrew-tap"
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/rafaelbressan/homebrew-tap.git" "$tap"
+          git clone https://github.com/rafaelbressan/homebrew-tap.git "$tap"  # public: no credentials
           brew trust --tap rafaelbressan/tap || true  # Homebrew 7 loads third-party taps only when trusted
           sdist=$(curl -fsSL "https://pypi.org/pypi/bobina/$VERSION/json" | python3 -c '
           import json, sys
@@ -121,13 +126,18 @@ jobs:
           brew audit --strict rafaelbressan/tap/bobina
       - name: Push to the tap
         if: steps.on.outputs.on == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           cd "$(brew --repository)/Library/Taps/rafaelbressan/homebrew-tap"
           git add Formula/bobina.rb
           if git diff --cached --quiet; then echo "the tap already has bobina $VERSION"; exit 0; fi
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -m "bobina $VERSION"
-          git push origin HEAD
+          # the token as a header for this one command (git -c), never written to .git/config
+          auth=$(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$auth"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin HEAD
 
   github-release:
     needs: [build, pypi, install-test]
