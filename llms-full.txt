@@ -53,7 +53,7 @@ anything; bobina only warns, and tells you why (`warning[Q101] … (evidence: N6
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh   # installs uv if missing
-# or: uv tool install bobina · pipx install bobina · brew install rafaelbressan/tap/bobina
+# or: uv tool install bobina · pipx install bobina · Homebrew: docs/INSTALL.md
 bobina printer scan           # find the Bluetooth address
 bobina printer add mtp AA:BB:CC:DD:EE:FF
 bobina status                 # paper, cover, errors
@@ -1604,7 +1604,7 @@ bobina needs Python 3.11 or newer. Pick one way:
 | Linux or macOS, nothing set up | `curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh \| sh` |
 | uv | `uv tool install bobina` |
 | Debian 12+, Ubuntu 24.04+ | `sudo apt install pipx && pipx ensurepath && pipx install bobina` |
-| Homebrew (macOS) | `brew install rafaelbressan/tap/bobina` |
+| Homebrew (macOS) | `brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina && brew install bobina` |
 | Windows | `uv tool install bobina` or `pipx install bobina` (printer driver: `drivers/windows/`) |
 | A checkout, to change bobina | `./install.sh` (editable install, plus the Bluetooth service on Linux) |
 
@@ -1619,7 +1619,8 @@ downloads and Homebrew's do not (checked on uv 0.13 and Homebrew 7). Without the
 the printer) printers work everywhere.
 
 - `get.sh` picks a system Python 3.11+ with Bluetooth sockets on Linux, and says so when there is none.
-- By hand: `uv tool install --reinstall --python /usr/bin/python3 bobina` (also moves an install off uv's Python). pipx from apt already uses the system Python.
+- pipx from apt uses the system Python.
+- By hand: `uv tool install --reinstall --python /usr/bin/python3 bobina` (also moves an install off uv's Python).
 - Ubuntu 22.04 has Python 3.10: `sudo apt install python3.11`, then `pipx install --python python3.11 bobina`.
 - Pairing and the boot service need BlueZ: `sudo apt install bluez`.
 
@@ -1651,7 +1652,6 @@ repository so that upgrades reach anyone. That is a build to keep per release fo
 
 ## Homebrew
 
-The formula installs the runtime dependencies, not the extras (`pdf`, `svg`, `xlsx`, `mcp`): for those, use
-`get.sh` with `--extras`, or `uv tool install 'bobina[pdf,svg,xlsx,mcp]'`. With Homebrew's Python, Bluetooth
-printers do not work (see above): on Linux prefer `get.sh`.
-How the tap is published and bumped: `contrib/homebrew/README.md`.
+This repository is the tap. The formula has no extras (`pdf`, `svg`, `xlsx`, `mcp`): for them, `get.sh --extras`
+or `uv tool install 'bobina[pdf,svg,xlsx,mcp]'`. Homebrew's Python has no Bluetooth sockets: on Linux prefer
+`get.sh`.

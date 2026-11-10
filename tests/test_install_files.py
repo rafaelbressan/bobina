@@ -30,11 +30,11 @@ def test_get_sh_is_posix_sh():
 def test_the_homebrew_formula_has_every_runtime_dependency():
     deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
     names = {re.split(r"[<>=!~;\[ ]", d, maxsplit=1)[0].lower().replace("_", "-") for d in deps}
-    formula = (ROOT / "contrib/homebrew/bobina.rb").read_text(encoding="utf-8")
+    formula = (ROOT / "Formula/bobina.rb").read_text(encoding="utf-8")
     resources = set(re.findall(r'^  resource "([^"]+)" do', formula, flags=re.M))
     assert 'depends_on "pillow"' in formula  # Homebrew's bottle, not built from source
     missing = names - resources - {"pillow"}
-    assert not missing, f"run brew update-python-resources (contrib/homebrew/README.md): {sorted(missing)}"
+    assert not missing, f"run brew update-python-resources (CONTRIBUTING.md, Homebrew): {sorted(missing)}"
 
 
 def test_get_sh_runs_nothing_until_its_last_line():

@@ -46,7 +46,7 @@ anything; bobina only warns, and tells you why (`warning[Q101] … (evidence: N6
 
 ```bash
 curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh   # installs uv if missing
-# or: uv tool install bobina · pipx install bobina · brew install rafaelbressan/tap/bobina
+# or: uv tool install bobina · pipx install bobina · Homebrew: docs/INSTALL.md
 bobina printer scan           # find the Bluetooth address
 bobina printer add mtp AA:BB:CC:DD:EE:FF
 bobina status                 # paper, cover, errors

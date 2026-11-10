@@ -14,6 +14,28 @@
   Windows, and becomes a GitHub release. `vX.Y.Z-rc.N` is a pre-release (only installed when asked for). The tag must match the version
   in `pyproject.toml` (`0.2.0rc1` for `v0.2.0-rc.1`), and CHANGELOG.md gets a `## 0.2.0` section first.
 
+## Homebrew
+
+- **Homebrew**: this repository is the tap `rafaelbressan/bobina` (`Formula/bobina.rb`: Pillow from Homebrew's
+  bottle, every other dependency a `resource`). On each release that is not a pre-release, the `homebrew` job of
+  the release workflow points `url` and `sha256` at the new sdist, regenerates the resources, builds from source,
+  runs `brew test` and `brew audit --strict`, then commits the formula to `main` with the job's own token. When it
+  fails, bump by hand on a Mac, in the tap (a clone of this repository):
+
+  ```bash
+  cd "$(brew --repository rafaelbressan/bobina)" && git pull
+  # url and sha256 of the new sdist (https://pypi.org/project/bobina/#files) into Formula/bobina.rb, then:
+  brew trust --tap rafaelbressan/bobina
+  brew update-python-resources --ignore-main-package-cooldown --exclude-packages pillow rafaelbressan/bobina/bobina
+  brew install --build-from-source rafaelbressan/bobina/bobina && brew test rafaelbressan/bobina/bobina
+  git commit -am "Formula/bobina.rb: bobina X.Y.Z" && git push
+  ```
+
+  Homebrew 7 resolves only packages uploaded more than a day ago (`--ignore-main-package-cooldown` lifts that for
+  bobina itself) and loads third-party taps only once trusted. Keep `depends_on "python@3.X"` on a Python the
+  `pillow` formula is built for (`brew info pillow`). A new runtime dependency fails `tests/test_install_files.py`
+  until the resources are regenerated.
+
 ## A new command or option
 
 A test fails until each step is done, so nothing is forgotten when the CLI grows:
