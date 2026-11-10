@@ -38,6 +38,7 @@ Facts an agent needs first:
 ## Optional
 
 - [Everything above in one file](llms-full.txt)
+- [Install](docs/INSTALL.md): the installer script, apt, Homebrew; Bluetooth needs the system Python
 - [Printer notes: Goldensky MTP-II](docs/printers/mtp-ii-58.md)
 - [Example documents and data](examples/batch/)
 - [Agent skill](skills/bobina/SKILL.md)

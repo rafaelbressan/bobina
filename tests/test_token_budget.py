@@ -17,6 +17,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/templates.md": 2500,
     "docs/pay.md": 3000,
     "docs/SECURITY.md": 2000,
+    "docs/INSTALL.md": 1100,  # set on 10/11, as above
     "docs/printers/mtp-ii-58.md": 3000,
     "docs/problems/README.md": 2500,
     "llms-full.txt": 25000,
