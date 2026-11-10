@@ -14,3 +14,4 @@ local/
 tests/out/
 security-audit-runs/
 build/
+.claude/
