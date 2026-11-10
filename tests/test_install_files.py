@@ -35,3 +35,10 @@ def test_the_homebrew_formula_has_every_runtime_dependency():
     assert 'depends_on "pillow"' in formula  # Homebrew's bottle, not built from source
     missing = names - resources - {"pillow"}
     assert not missing, f"run brew update-python-resources (contrib/homebrew/README.md): {sorted(missing)}"
+
+
+def test_get_sh_runs_nothing_until_its_last_line():
+    """curl | sh runs what has arrived: a download cut short must not run half of the installer."""
+    lines = [ln for ln in GET.splitlines() if ln.strip()]
+    assert lines[-1].startswith('main "$@"')
+    assert [ln for ln in lines if ln.startswith("main ")] == [lines[-1]]
