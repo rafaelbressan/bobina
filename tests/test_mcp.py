@@ -207,12 +207,155 @@ def test_status_of_a_file_printer_is_e404(file_printer):
     assert r.is_error and "E404" in "\n".join(texts(r))
 
 
+@needs_mcp
 def test_a_child_never_waits_for_a_terminal():
     """BOBINA_NONINTERACTIVE: a print without --yes stops at once with E107 (no question on any terminal)."""
+    import anyio
+
     from bobina.mcp_server import run
 
-    r = run(["print", "-"], "# Hello")
+    r = anyio.run(run, ["print", "-"], "# Hello")
     assert r.code == 7 and "E107" in r.stderr
+
+
+linux = pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads /proc to see the printer command end")
+
+
+@pytest.fixture
+def slow_printer(tmp_path):
+    """A command printer that never finishes (it writes its pid, then sleeps): a print stuck on the printer."""
+    pid = tmp_path / "pid"
+    assert main(["printer", "add", "slow", "--command", f"sh -c 'echo $$ > {pid}; exec sleep 60'", "--default"]) == 0
+    return pid
+
+
+def _ended(pidfile, wait=10.0) -> bool:
+    """The printer command started and is no longer running (gone, or a zombie waiting to be reaped)."""
+    import time
+
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if pidfile.exists() and pidfile.read_text().strip():
+            status = f"/proc/{pidfile.read_text().strip()}/status"
+            try:
+                with open(status) as f:
+                    if "\nState:\tZ" in f.read():
+                        return True
+            except FileNotFoundError:
+                return True
+        time.sleep(0.1)
+    return False
+
+
+@needs_mcp
+@linux
+def test_a_print_that_does_not_finish_is_stopped_with_its_command_and_says_so(slow_printer, monkeypatch):
+    """Never 'exit 1 (usage)': an agent would read a bad call and print again. The command the printer runs (its
+    process group) is stopped too."""
+    from bobina import mcp_server
+
+    monkeypatch.setattr(mcp_server, "PRINT_TIMEOUT", 4)
+    monkeypatch.setattr(mcp_server, "GRACE", 1)
+    r = call("print", {"text": "# Hello", "confirm": True})
+    head = texts(r)[0]
+    assert r.is_error and "no exit code, stopped after 4 s" in head and "exit 1" not in head
+    assert "may already be on paper" in head and "bobina history" in head
+    assert _ended(slow_printer)
+
+
+@needs_mcp
+@linux
+def test_a_cancelled_print_stops_its_process_group(slow_printer, monkeypatch, capsys):
+    import anyio
+
+    from bobina import mcp_server
+
+    monkeypatch.setattr(mcp_server, "GRACE", 1)
+    s = mcp_server.Server()
+
+    async def go():
+        with anyio.move_on_after(4):  # the client cancels the call
+            await s.print(text="# Hello", confirm=True)
+            return "finished"
+        return "cancelled"
+
+    assert anyio.run(go) == "cancelled"
+    assert _ended(slow_printer)
+    e = capsys.readouterr().err
+    assert "the call was cancelled" in e and "may already be on paper" in e
+
+
+@needs_mcp
+def test_check_and_preview_use_the_printer_print_will_use(file_printer, tmp_path):
+    assert main(["printer", "add", "wide", "--path", str(tmp_path / "w.bin"), "--profile", "epson-tm-t70"]) == 0
+    assert output(call("check", {"text": "# Hi"}))["stats"]["profile"] == "mtp-ii-58"
+    assert output(call("check", {"text": "# Hi", "printer": "wide"}))["stats"]["profile"] == "epson-tm-t70"
+    r = call("preview", {"text": "# Hi", "printer": "wide"})
+    assert "--printer=wide" in texts(r)[0] and output(r)["stats"]["profile"] == "epson-tm-t70"
+    assert output(call("check", {"text": "# Hi"}, printer="wide"))["stats"]["profile"] == "epson-tm-t70"
+
+
+@needs_mcp
+def test_a_preview_of_several_labels_returns_every_one(tmp_path, monkeypatch):
+    rows = tmp_path / "rows.csv"
+    rows.write_text("item\nrice\nbeans\nflour\n")
+    pattern = str(tmp_path / "out" / "label-{n}.png")
+    r = call("preview", {"text": "# {{ item }}", "data": str(rows), "output": pattern})
+    files = output(r)["files"]
+    assert len(files) == 3 and all(os.path.isfile(f) for f in files)
+    assert len([c for c in r.content if c.type == "image"]) == 3
+    listing = next(t for t in texts(r) if "file(s) written" in t)
+    assert all(f in listing for f in files)
+    from bobina import mcp_server
+
+    monkeypatch.setattr(mcp_server, "IMAGES_MAX", 2)
+    r = call("preview", {"text": "# {{ item }}", "data": str(rows), "output": str(tmp_path / "b-{n}.png")})
+    assert len([c for c in r.content if c.type == "image"]) == 2
+    listing = next(t for t in texts(r) if "file(s) written" in t)
+    assert "not attached" in listing and output(r)["files"][2] in listing.split("not attached")[1]
+
+
+@needs_mcp
+def test_field_names_and_data_paths_are_checked(tmp_path):
+    for bad in ({"": "x"}, {" ": "x"}, {"a=b": "x"}):
+        r = call("check", {"text": "# {{ a }}", "set": bad})
+        assert r.is_error and "E304" in texts(r)[0], bad
+    odd = tmp_path / "a=b.csv"
+    odd.write_text("item\nrice\n")
+    r = call("check", {"text": "# {{ item }}", "data": str(odd)})
+    assert r.is_error and "NAME=FILE" in texts(r)[0]
+    rows = tmp_path / "rows.csv"
+    rows.write_text("item\nrice\n")
+    r = call("check", {"text": "# {{ src.item }}", "data": f"src={rows}"})
+    assert not r.is_error, texts(r)
+
+
+@needs_mcp
+def test_a_path_with_at_is_a_file_when_one_exists_else_a_saved_label(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "@shelf.bob.md").write_text("# Shelf\n")
+    r = call("check", {"path": "@shelf.bob.md"})
+    assert not r.is_error and str(tmp_path / "@shelf.bob.md") in texts(r)[0]
+    r = call("check", {"path": "@nothing"})
+    assert r.is_error and "check @nothing" in texts(r)[0] and "E206" in "\n".join(texts(r))
+    assert main(["library", "add", "bread", "# BREAD"]) == 0
+    assert not call("check", {"path": "@bread"}).is_error
+    r = call("check", {"path": "@bad name"})
+    assert r.is_error and "E206" in texts(r)[0]
+
+
+@needs_mcp
+def test_the_temporary_previews_go_with_the_server():
+    import anyio
+
+    from bobina import mcp_server
+
+    s = mcp_server.Server()
+    anyio.run(lambda: s.preview(text="# Hi"))
+    folder = s.previews
+    assert folder is not None and any(folder.iterdir())
+    s.cleanup()
+    assert not folder.exists() and s.previews is None
 
 
 @needs_mcp

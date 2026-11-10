@@ -819,7 +819,7 @@ def make_parser():
         "a server for AI agents (MCP)",
         "a Model Context Protocol server on stdin/stdout: check, preview, print (only with confirm), templates,"
         " help, status and paper as tools. Needs the extra: uv tool install 'bobina[mcp]'. --printer, --profile,"
-        " --allow and --strict apply to every tool call",
+        " --allow and --strict are the defaults of check, preview and print; --printer also of status and paper",
         ["claude mcp add bobina -- bobina mcp", "bobina mcp --printer test"],
         cmd_mcp,
     )

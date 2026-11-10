@@ -69,7 +69,12 @@ def template_meta(name: str) -> dict:
 
 def starter(name: str) -> str:
     """A document that fills template NAME, every field with a # required / # optional comment."""
-    fields = engine.template_fields(template_meta(name))
+    return starter_from_fields(name, engine.template_fields(template_meta(name)))
+
+
+def starter_from_fields(name: str, fields: dict) -> str:
+    """The starter of template NAME from its fields (bobina template show NAME --json): bobina mcp builds it from
+    that JSON."""
     out = ["---", f"template: {name}"]
     for k, spec in fields.items():
         val = "[]" if spec.get("type") == "table" or k in ("items", "lines") else '""'
