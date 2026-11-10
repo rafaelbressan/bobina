@@ -82,6 +82,51 @@ jobs:
           bobina --version
           bobina check "hello from the release check" --json
 
+  deb:
+    # bobina_X.Y.Z_amd64.deb and _arm64.deb (tools/build_deb.py): this run's wheel with its dependencies (wheels for
+    # each Python 3.11+, downloaded, nothing compiled), run by the distribution's python3. The PyPI publish does not
+    # wait for it, and a broken .deb only leaves it out of the GitHub release.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Build the .debs
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          for arch in amd64 arm64; do
+            python tools/build_deb.py --arch "$arch" --wheel dist/bobina-*-py3-none-any.whl --out deb/
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: deb/*.deb
+
+  deb-test:
+    # each .deb installed by apt in a clean container of each distribution, on its own architecture
+    needs: deb
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        image: ["debian:12", "debian:13", "ubuntu:24.04", "ubuntu:26.04"]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: deb/
+      - name: apt install the .deb and run it
+        run: contrib/deb/test-in-container.sh "${{ matrix.image }}" deb/bobina_*_${{ matrix.arch }}.deb
+
   homebrew:
     # This repository is the tap (brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina). A release
     # (not a pre-release) commits Formula/bobina.rb with this version's sdist to main, its resources regenerated,
@@ -130,7 +175,9 @@ jobs:
           push || { git fetch origin main && bot rebase origin/main && push; }  # main moved meanwhile: rebase once
 
   github-release:
-    needs: [build, pypi, install-test]
+    # with the .debs when they passed their test; without them (and a warning) when not: the release still happens
+    needs: [build, pypi, install-test, deb-test]
+    if: ${{ !cancelled() && needs.install-test.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -139,6 +186,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        if: needs.deb-test.result == 'success'
+        with:
+          name: deb
           path: dist/
       - name: Release with the CHANGELOG section
         env:
@@ -149,4 +201,5 @@ jobs:
           awk -v v="$base" '$0 ~ "^## "v" " || $0 ~ "^## "v"$" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "bobina $v" > notes.md
           pre=""; [ "${{ needs.build.outputs.prerelease }}" = "true" ] && pre="--prerelease"
+          [ "${{ needs.deb-test.result }}" = "success" ] || echo "::warning::no .deb in this release: deb-test did not pass"
           gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md $pre

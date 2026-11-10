@@ -6,7 +6,7 @@ bobina needs Python 3.11 or newer. Pick one way:
 |---|---|
 | Linux or macOS, nothing set up | `curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh \| sh` |
 | uv | `uv tool install bobina` |
-| Debian 12+, Ubuntu 24.04+ | `sudo apt install pipx && pipx ensurepath && pipx install bobina` |
+| Debian 12+, Ubuntu 24.04+ | the .deb (below), or `sudo apt install pipx && pipx ensurepath && pipx install bobina` |
 | Homebrew (macOS) | `brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina && brew install bobina` |
 | Windows | `uv tool install bobina` or `pipx install bobina` (printer driver: `drivers/windows/`) |
 | A checkout, to change bobina | `./install.sh` (editable install, plus the Bluetooth service on Linux) |
@@ -21,8 +21,7 @@ downloads and Homebrew's do not (checked on uv 0.13 and Homebrew 7). Without the
 "was built without Bluetooth sockets", which says how to reinstall; file (`--path`) and command (`--command`, e.g. ssh to the host with
 the printer) printers work everywhere.
 
-- `get.sh` picks a system Python 3.11+ with Bluetooth sockets on Linux, and says so when there is none.
-- pipx from apt uses the system Python.
+- The .deb and pipx from apt use the system Python; `get.sh` picks one with Bluetooth sockets, or says there is none.
 - By hand: `uv tool install --reinstall --python /usr/bin/python3 bobina` (also moves an install off uv's Python).
 - Ubuntu 22.04 has Python 3.10: `sudo apt install python3.11`, then `pipx install --python python3.11 bobina`.
 - Pairing and the boot service need BlueZ: `sudo apt install bluez`.
@@ -46,15 +45,15 @@ curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | 
 Uninstall: `uv tool uninstall bobina`; the service: `systemctl --user disable bt-printer.service`, then delete
 `~/.config/systemd/user/bt-printer.service` and `~/.local/share/bobina/`.
 
-## Debian and Ubuntu: why no .deb
+## Debian and Ubuntu: the .deb
 
-pipx from apt installs bobina on Debian's own Python (Bluetooth works) and upgrades with `pipx upgrade bobina`.
-A .deb would have to bundle a virtualenv built for each distribution's Python (Debian 12 has 3.11, Ubuntu 24.04
-3.12), or Debian packages of every dependency (some, like `ppf-datamatrix`, are not in Debian), plus an apt
-repository so that upgrades reach anyone. That is a build to keep per release for what one apt line already does.
+Each [release](https://github.com/rafaelbressan/bobina/releases) has `bobina_X.Y.Z_amd64.deb` and `_arm64.deb`
+(64-bit Raspberry Pi OS too): `sudo apt install ./bobina_X.Y.Z_arm64.deb`. It runs on the system `python3` (3.11
+to 3.14) with its own copies of the dependencies, not Debian's. There is no apt repository: upgrade by installing
+the next release's .deb. No extras: for them use pipx from apt (above), which upgrades with `pipx upgrade bobina`.
 
 ## Homebrew
 
 This repository is the tap. The formula has no extras (`pdf`, `svg`, `xlsx`, `mcp`): for them, `get.sh --extras`
 or `uv tool install 'bobina[pdf,svg,xlsx,mcp]'`. Homebrew's Python has no Bluetooth sockets: on Linux prefer
-`get.sh`.
+`get.sh` or the .deb.
