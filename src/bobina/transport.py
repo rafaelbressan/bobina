@@ -25,9 +25,24 @@ class PrinterUnreachable(Exception):
     pass
 
 
+def no_bluetooth_sockets() -> str:
+    """Why a Bluetooth printer cannot be reached from this Python, and what to do instead."""
+    if sys.platform.startswith("linux"):
+        return (
+            f"this Python ({sys.executable}) was built without Bluetooth sockets, like the Pythons uv downloads and"
+            " Homebrew's: reinstall bobina on the system Python (uv tool install --reinstall --python /usr/bin/python3"
+            " bobina, or pipx install --force bobina from apt's pipx)"
+        )
+    return (
+        "Bluetooth printers need Linux (this system has no RFCOMM sockets): use a printer on a Linux host"
+        ' (bobina printer add NAME --command "ssh HOST bobina send --yes -") or a USB or serial device'
+        " (bobina printer add NAME --path DEVICE)"
+    )
+
+
 def _bt_connect(mac: str, channel: int, timeout: float = 15):
     if not hasattr(socket, "AF_BLUETOOTH"):
-        raise PrinterUnreachable("this system has no Bluetooth sockets (WSL?) — use a 'command' printer via ssh")
+        raise PrinterUnreachable(no_bluetooth_sockets())
     s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
     s.settimeout(timeout)
     s.connect((mac, channel))

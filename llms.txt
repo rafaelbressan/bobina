@@ -31,6 +31,7 @@ Facts an agent needs first:
 - [Payment codes](docs/pay.md): every `pay` scheme (Pix, UPI, SEPA…), what each field means in it and its limits
 - [Templates guide](docs/guides/templates.md): label, card and to-do recipes, and a gallery of shop tags
 - [Security](docs/SECURITY.md): data is printed literally, templates run in a sandbox
+- [Install](docs/INSTALL.md): the installer script, the .deb, pipx from apt, Homebrew; Bluetooth needs the system Python
 - [Problem codes](docs/problems/README.md): one page per code, with what to do
 - [JSON schemas](docs/schemas/README.md): check --json, problems, history
 - [What was tested on paper](docs/TESTED.md): features marked ⚠ not tested on paper (note P301)

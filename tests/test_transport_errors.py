@@ -57,3 +57,19 @@ def test_a_failed_send_says_the_printer_has_no_paper(monkeypatch, capsys):
     assert cli.main(["print", "oi", "--yes"]) == cli.UNREACHABLE
     e = capsys.readouterr().err
     assert "no paper" in e and "cover" in e and "bobina paper new" in e
+
+
+def test_no_bluetooth_sockets_says_what_to_do_on_each_system(monkeypatch):
+    """uv's and Homebrew's Pythons have no AF_BLUETOOTH: on Linux the fix is the system Python; elsewhere there are
+    no RFCOMM sockets at all, so the way out is a command or device printer."""
+    import socket
+
+    import pytest
+
+    monkeypatch.delattr(socket, "AF_BLUETOOTH", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    with pytest.raises(transport.PrinterUnreachable, match=r"--python /usr/bin/python3"):
+        transport._bt_connect("AA:BB:CC:DD:EE:FF", 1)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    with pytest.raises(transport.PrinterUnreachable, match=r"need Linux.*--command.*--path"):
+        transport._bt_connect("AA:BB:CC:DD:EE:FF", 1)

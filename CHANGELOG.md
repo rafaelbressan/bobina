@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Install without a checkout: `curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh`
+  (installs uv when missing; the Bluetooth boot service on request). A .deb for Debian and Ubuntu (amd64, arm64)
+  on each GitHub release, on the system Python with its dependencies inside. A Homebrew formula in this repository
+  (`brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina`), bumped by the release workflow.
+  docs/INSTALL.md has every way, apt's pipx included.
+- uv's and Homebrew's Pythons have no Bluetooth sockets: `get.sh` and `./install.sh` use a system Python that has
+  them, and the error says so.
+
 ## 0.1.0 — 2026-11-10
 
 First version, calibrated on a Goldensky MTP-II (58 mm).

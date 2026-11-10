@@ -45,12 +45,16 @@ anything; bobina only warns, and tells you why (`warning[Q101] … (evidence: N6
 ## Install
 
 ```bash
-uv tool install bobina        # or: pipx install bobina   (from a checkout: ./install.sh)
+curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh   # installs uv if missing
+# or: uv tool install bobina · pipx install bobina · a .deb or Homebrew: docs/INSTALL.md
 bobina printer scan           # find the Bluetooth address
 bobina printer add mtp AA:BB:CC:DD:EE:FF
 bobina status                 # paper, cover, errors
 ```
 
+Bluetooth printing needs Linux and the system Python (uv's and Homebrew's Pythons have no Bluetooth sockets;
+`get.sh` picks the right one). The .deb, pipx from apt, the Bluetooth boot service, extras and a checkout
+(`./install.sh`): [docs/INSTALL.md](docs/INSTALL.md).
 Printer on another machine? `bobina printer add tower --command "ssh tower bobina send --yes -"`.
 No printer at hand? `bobina printer add test --path out.bin` appends every job's bytes to `out.bin` (a file
 printer: `status` and `paper` need Bluetooth; `bobina printer list` shows where each printer goes).

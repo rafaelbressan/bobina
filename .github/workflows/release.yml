@@ -75,15 +75,129 @@ jobs:
         shell: bash
         run: |
           # PyPI's index is cached by a CDN: a runner can miss a new upload for a few minutes (0.1.0: macOS did)
-          for i in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             python -m pip install --no-cache-dir "bobina==${{ needs.build.outputs.version }}" && break
             sleep 30
           done
           bobina --version
           bobina check "hello from the release check" --json
 
+  deb:
+    # bobina_X.Y.Z_amd64.deb and _arm64.deb (tools/build_deb.py): this run's wheel with its dependencies (wheels for
+    # each Python 3.11+, downloaded, nothing compiled), run by the distribution's python3. The PyPI publish does not
+    # wait for it, and a broken .deb only leaves it out of the GitHub release.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Build the .debs
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          for arch in amd64 arm64; do
+            python tools/build_deb.py --arch "$arch" --wheel dist/bobina-*-py3-none-any.whl --out deb/
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: deb/*.deb
+
+  deb-test:
+    # each .deb installed by apt in a clean container of each distribution, on its own architecture
+    needs: deb
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        image: ["debian:12", "debian:13", "ubuntu:24.04", "ubuntu:26.04"]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: deb/
+      - name: apt install the .deb and run it
+        run: contrib/deb/test-in-container.sh "${{ matrix.image }}" deb/bobina_*_${{ matrix.arch }}.deb
+
+  homebrew:
+    # This repository is the tap (brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina). A release
+    # (not a pre-release) points Formula/bobina.rb at this version's sdist, regenerates its resources, builds it from
+    # source and tests it. brew builds third-party sdists here, so this job can only read the repository: the
+    # formula leaves as an artifact, and homebrew-push commits it.
+    needs: [build, install-test]
+    if: needs.build.outputs.prerelease == 'false'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: The formula for this version, built and tested
+        run: |
+          brew tap rafaelbressan/bobina "$GITHUB_WORKSPACE"  # a clone of this checkout, as users tap it from GitHub
+          brew trust --tap rafaelbressan/bobina || true  # Homebrew 7 loads third-party taps only when trusted
+          formula="$(brew --repository rafaelbressan/bobina)/Formula/bobina.rb"
+          read -r url sha256 <<<"$(curl -fsSL "https://pypi.org/pypi/bobina/$VERSION/json" | python3 -c '
+          import json, sys
+          u = [u for u in json.load(sys.stdin)["urls"] if u["packagetype"] == "sdist"][0]
+          print(u["url"], u["digests"]["sha256"])')"
+          sed -i '' -E -e "s|^  url \".*\"|  url \"$url\"|" -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|" "$formula"
+          # bobina itself was uploaded minutes ago; its dependencies keep Homebrew's release cooldown
+          brew update-python-resources --ignore-main-package-cooldown --exclude-packages pillow rafaelbressan/bobina/bobina
+          brew install --build-from-source rafaelbressan/bobina/bobina
+          brew test rafaelbressan/bobina/bobina
+          brew audit --strict rafaelbressan/bobina/bobina
+          mkdir formula && cp "$formula" formula/bobina.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formula
+          path: formula/bobina.rb
+
+  homebrew-push:
+    # commits the tested formula to main: a fresh checkout, nothing built; the only Homebrew job that can write
+    needs: [build, homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: formula
+          path: formula/
+      - name: Personal-data scan (a push with this job's token runs no workflow, so ci.yml does not scan it)
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: |
+          cp formula/bobina.rb Formula/bobina.rb
+          python3 tools/leakscan.py Formula/bobina.rb
+      - name: Commit it to main
+        run: |
+          if git diff --quiet -- Formula/bobina.rb; then echo "Formula/bobina.rb already has bobina $VERSION"; exit 0; fi
+          bot() { git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" "$@"; }
+          bot commit -m "Formula/bobina.rb: bobina $VERSION" -- Formula/bobina.rb
+          git push origin HEAD:main || { git fetch origin main && bot rebase origin/main && git push origin HEAD:main; }  # once
+
   github-release:
-    needs: [build, pypi, install-test]
+    # with the .debs when they passed their test; without them (and a warning) when not: the release still happens
+    needs: [build, pypi, install-test, deb-test]
+    if: ${{ !cancelled() && needs.install-test.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -92,6 +206,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        if: needs.deb-test.result == 'success'
+        with:
+          name: deb
           path: dist/
       - name: Release with the CHANGELOG section
         env:
@@ -102,4 +221,5 @@ jobs:
           awk -v v="$base" '$0 ~ "^## "v" " || $0 ~ "^## "v"$" {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "bobina $v" > notes.md
           pre=""; [ "${{ needs.build.outputs.prerelease }}" = "true" ] && pre="--prerelease"
+          [ "${{ needs.deb-test.result }}" = "success" ] || echo "::warning::no .deb in this release: deb-test did not pass"
           gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md $pre
