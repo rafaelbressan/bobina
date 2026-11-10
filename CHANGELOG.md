@@ -4,6 +4,9 @@
 
 First version, calibrated on a Goldensky MTP-II (58 mm).
 
+- `bobina mcp`: a Model Context Protocol server (stdio) for agents, with the extra `bobina[mcp]`. Its tools
+  (check, preview, print, template_list, template_show, help, status, paper) run the CLI and return its JSON,
+  problem codes and exit code; print is a dry run unless the call says `confirm: true`.
 - Printer profiles: 32 more, generated from escpos-printer-db (CC BY 4.0) by `tools/import_profiles.py`: model facts
   only, `measured = false`, conservative (ASCII native text, raster barcodes, safe mode) until `bobina calibrate tear`
   and `bobina calibrate feed`; `bobina profile list` says which are measured. Sources: `src/bobina/profiles/SOURCES.md`.

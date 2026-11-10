@@ -19,6 +19,8 @@ Facts an agent needs first:
   7 confirmation, 8 security, 9 a payment code left out (Q111).
 - Reprint: `print --last` (identical bytes) or `--again` (re-rendered); `-o FILE` saves bytes instead of printing.
 - Try without hardware: `bobina printer add test --path out.bin` (a file printer).
+- An MCP client (Claude Code, Cursor): `uv tool install 'bobina[mcp]'`, `claude mcp add bobina -- bobina mcp`;
+  tools check, preview, print (prints only with `confirm: true`), help, templates ([CLI](docs/CLI.md#agents-bobina-mcp)).
 
 ## Docs
 
