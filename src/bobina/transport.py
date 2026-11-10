@@ -27,7 +27,11 @@ class PrinterUnreachable(Exception):
 
 def _bt_connect(mac: str, channel: int, timeout: float = 15):
     if not hasattr(socket, "AF_BLUETOOTH"):
-        raise PrinterUnreachable("this system has no Bluetooth sockets (WSL?) — use a 'command' printer via ssh")
+        raise PrinterUnreachable(
+            "this Python has no Bluetooth sockets (WSL, macOS, or a Python built without them, like uv's and"
+            " Homebrew's: reinstall bobina with the system Python, see docs/INSTALL.md) — or use a 'command'"
+            " printer via ssh"
+        )
     s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
     s.settimeout(timeout)
     s.connect((mac, channel))
