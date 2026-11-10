@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-11-10
 
 First version, calibrated on a Goldensky MTP-II (58 mm).
 
