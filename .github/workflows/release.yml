@@ -74,9 +74,10 @@ jobs:
       - name: Install this version from PyPI and run it
         shell: bash
         run: |
-          for i in 1 2 3 4 5 6; do
-            python -m pip install "bobina==${{ needs.build.outputs.version }}" && break
-            sleep 20  # the index takes a moment to show a new upload
+          # PyPI's index is cached by a CDN: a runner can miss a new upload for a few minutes (0.1.0: macOS did)
+          for i in $(seq 1 20); do
+            python -m pip install --no-cache-dir "bobina==${{ needs.build.outputs.version }}" && break
+            sleep 30
           done
           bobina --version
           bobina check "hello from the release check" --json
