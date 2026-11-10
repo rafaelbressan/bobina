@@ -17,10 +17,13 @@
 ## Homebrew and the .deb
 
 - **Homebrew**: this repository is the tap `rafaelbressan/bobina` (`Formula/bobina.rb`: Pillow from Homebrew's
-  bottle, every other dependency a `resource`). On each release that is not a pre-release, the `homebrew` job of
-  the release workflow points `url` and `sha256` at the new sdist, regenerates the resources, builds from source,
-  runs `brew test` and `brew audit --strict`, then commits the formula to `main` with the job's own token. When it
-  fails, bump by hand on a Mac, in the tap (a clone of this repository):
+  bottle, every other dependency a `resource`); users run `brew tap rafaelbressan/bobina
+  https://github.com/rafaelbressan/bobina`, then `brew install rafaelbressan/bobina/bobina` (the full name:
+  Homebrew 7 trusts a tap only then). On each release that is not a pre-release, the `homebrew` job of the release
+  workflow points `url` and `sha256` at the new sdist, regenerates the resources, builds from source, runs
+  `brew test` and `brew audit --strict` with read-only access; `homebrew-push` then commits the formula to `main`
+  with its own token (after the personal-data scan). When that fails, bump by hand on a Mac, in the tap (a clone
+  of this repository):
 
   ```bash
   cd "$(brew --repository rafaelbressan/bobina)" && git pull
@@ -36,9 +39,11 @@
   `pillow` formula is built for (`brew info pillow`). A new runtime dependency fails `tests/test_install_files.py`
   until the resources are regenerated.
 - **The .deb**: `.venv/bin/python tools/build_deb.py --arch amd64` (or `arm64`; needs dpkg-deb, downloads wheels,
-  compiles nothing) writes `dist/bobina_X.Y.Z_amd64.deb`; `contrib/deb/test-in-container.sh debian:12 dist/...deb`
-  installs it with apt in docker and runs it. A new Python version goes in `PYTHONS` (tools/build_deb.py); a
-  dependency whose compiled code needs a system library, in `SYSTEM_LIBS` (the build stops and says so).
+  compiles nothing) writes `dist/bobina_X.Y.Z_amd64.deb` from a fresh wheel of the checkout (or `--wheel W`);
+  `contrib/deb/test-in-container.sh debian:12 dist/...deb` installs it with apt in docker and runs it. A new
+  Python version goes in `PYTHONS` (tools/build_deb.py); a dependency whose compiled code needs a system library,
+  in `SYSTEM_LIBS`; the build stops and says so, as it does when a dependency's environment marker would choose
+  otherwise for a target than for the Python running the build.
 
 ## A new command or option
 

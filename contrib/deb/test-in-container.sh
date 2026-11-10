@@ -14,6 +14,11 @@ docker run --rm --platform "linux/$arch" -v "$dir:/deb:ro" "$image" sh -euxc "
     apt-get install -y -qq --no-install-recommends /deb/$name >/dev/null
     python3 -c 'import socket, sys; print(sys.version, socket.AF_BLUETOOTH)'
     find /usr/lib/bobina/common/bobina -name '*.pyc' | grep -q .
+    test -z \"\$(find /usr/lib/bobina -name direct_url.json)\"
+    find /usr/lib/bobina -name '*.pyc' -delete
+    dpkg-reconfigure python3  # python3 runs its runtime.d hooks, as on a new version: bobina's compiles again
+    find /usr/lib/bobina/common/bobina -name '*.pyc' | grep -q .
+    bob --version
     bobina --version
     bobina check 'hello from the .deb' --json
     bobina preview '# hello from the .deb' -o /tmp/hello.png

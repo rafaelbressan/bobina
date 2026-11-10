@@ -129,14 +129,14 @@ jobs:
 
   homebrew:
     # This repository is the tap (brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina). A release
-    # (not a pre-release) commits Formula/bobina.rb with this version's sdist to main, its resources regenerated,
-    # built from source and tested first; a failure commits nothing. brew builds third-party sdists, so the job's
-    # token is only in the last step: never in the checkout's .git/config, the environment or the build.
+    # (not a pre-release) points Formula/bobina.rb at this version's sdist, regenerates its resources, builds it from
+    # source and tests it. brew builds third-party sdists here, so this job can only read the repository: the
+    # formula leaves as an artifact, and homebrew-push commits it.
     needs: [build, install-test]
     if: needs.build.outputs.prerelease == 'false'
     runs-on: macos-latest
     permissions:
-      contents: write
+      contents: read
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
@@ -159,20 +159,40 @@ jobs:
           brew install --build-from-source rafaelbressan/bobina/bobina
           brew test rafaelbressan/bobina/bobina
           brew audit --strict rafaelbressan/bobina/bobina
-          cp "$formula" Formula/bobina.rb
-      - name: Commit it to main
+          mkdir formula && cp "$formula" formula/bobina.rb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formula
+          path: formula/bobina.rb
+
+  homebrew-push:
+    # commits the tested formula to main: a fresh checkout, nothing built; the only Homebrew job that can write
+    needs: [build, homebrew]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: formula
+          path: formula/
+      - name: Personal-data scan (a push with this job's token runs no workflow, so ci.yml does not scan it)
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
         run: |
-          git add Formula/bobina.rb
-          if git diff --cached --quiet; then echo "Formula/bobina.rb already has bobina $VERSION"; exit 0; fi
-          bot() { git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" "$@"; }
-          bot commit -m "Formula/bobina.rb: bobina $VERSION"
-          # the token as a header for each push (git -c), never written to .git/config
-          auth=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')
-          echo "::add-mask::$auth"
-          push() { git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin HEAD:main; }
-          push || { git fetch origin main && bot rebase origin/main && push; }  # main moved meanwhile: rebase once
+          cp formula/bobina.rb Formula/bobina.rb
+          python3 tools/leakscan.py Formula/bobina.rb
+      - name: Commit it to main
+        run: |
+          if git diff --quiet -- Formula/bobina.rb; then echo "Formula/bobina.rb already has bobina $VERSION"; exit 0; fi
+          bot() { git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" "$@"; }
+          bot commit -m "Formula/bobina.rb: bobina $VERSION" -- Formula/bobina.rb
+          git push origin HEAD:main || { git fetch origin main && bot rebase origin/main && git push origin HEAD:main; }  # once
 
   github-release:
     # with the .debs when they passed their test; without them (and a warning) when not: the release still happens

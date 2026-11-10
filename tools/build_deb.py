@@ -8,7 +8,7 @@ PyYAML, MarkupSafe, fonttools) once per Python version to /usr/lib/bobina/cpXY. 
 (contrib/deb/launcher.py) picks the directory of the running Python. The extras are not included.
 
 Usage: .venv/bin/python tools/build_deb.py [--arch amd64|arm64] [--wheel dist/bobina-X-py3-none-any.whl] [--out dist]
-Needs dpkg-deb, and pip in the Python that runs it. Without --wheel it builds one from this checkout.
+Needs dpkg-deb, and pip in the Python that runs it. Without --wheel it builds a fresh one from this checkout.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ MACHINE = {"amd64": "x86_64", "arm64": "aarch64"}
 GLIBC = (2, 36)  # wheels up to this glibc (Debian 12; Ubuntu 24.04 has 2.39); Depends says what they need
 INDEX = "https://pypi.org/simple"
 HOME = "https://github.com/rafaelbressan/bobina"
-MAINTAINER = f"bobina <{HOME}/issues>"
+MAINTAINER = "bobina <rafaelbressan@users.noreply.github.com>"  # leak-ok: GitHub's public noreply address
 LEGACY_MANYLINUX = {"manylinux1": (2, 5), "manylinux2010": (2, 12), "manylinux2014": (2, 17)}
 # also published as a pure-Python wheel; the compiled one is only faster and 24 MB per Python: distribution: package
 PURE = {"fonttools": "fontTools"}
@@ -50,30 +50,32 @@ SYSTEM_LIBS = {
     "libstdc++.so.6": "libstdc++6",
 }
 
-POSTINST = """#!/bin/sh
+# .pyc files: the launcher never writes them; this hook (contrib/deb/bobina.rtupdate) compiles them for one
+# Python, run by the postinst and by Debian's python3 whenever it is installed or changes version
+HOOK = "usr/share/python3/runtime.d/bobina.rtupdate"
+POSTINST = f"""#!/bin/sh
 set -e
-# byte-compile for the python3 installed now (the launcher never writes .pyc files); prerm removes them
 if [ "$1" = configure ]; then
-    tag=$(python3 -c 'import sys; print("cp%d%d" % sys.version_info[:2])') || exit 0
-    if [ -d "/usr/lib/bobina/$tag" ]; then
-        python3 -m compileall -q -j0 /usr/lib/bobina/common "/usr/lib/bobina/$tag" >/dev/null 2>&1 || true
-    fi
+    /{HOOK} rtupdate - python3
 fi
 """
-PRERM = """#!/bin/sh
+PRERM = f"""#!/bin/sh
 set -e
-find /usr/lib/bobina -name '*.pyc' -delete 2>/dev/null || true
-find /usr/lib/bobina -depth -type d -name __pycache__ -empty -delete 2>/dev/null || true
+/{HOOK} clean
 """
+# environment markers pip would evaluate for the Python running the build: the target's values instead
+MARKER_ENV = {"sys_platform": "linux", "platform_system": "Linux", "os_name": "posix", "implementation_name": "cpython",
+              "platform_python_implementation": "CPython", "platform_release": "", "platform_version": ""}  # fmt: skip
 
 
 def deb_version(version: str) -> str:
-    """A Python version as a Debian one: 0.2.0rc1 sorts before 0.2.0 only as 0.2.0~rc1."""
-    m = re.fullmatch(r"(\d+(?:\.\d+)*)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?", version)
+    """A Python version as a Debian one that sorts the same: 1.0.dev1 < 1.0a1 < 1.0rc1 < 1.0 < 1.0.post1 is
+    1.0~~dev1 < 1.0~a1 < 1.0~rc1 < 1.0 < 1.0+post1 ("~" sorts before anything, even the end; "~~" before "~")."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)*)(?:(a|b|rc)(\d+))?(?:\.post(\d+))?(?:\.dev(\d+))?", version)
     if not m:
         raise SystemExit(f"build_deb: no Debian version for {version!r}")
-    base, pre, n, dev = m.groups()
-    return base + (f"~{pre}{n}" if pre else "") + (f"~dev{dev}" if dev else "")
+    base, pre, n, post, dev = m.groups()
+    return base + (f"~{pre}{n}" if pre else "") + (f"+post{post}" if post else "") + (f"~~dev{dev}" if dev else "")
 
 
 def platforms(arch: str) -> list[str]:
@@ -103,6 +105,38 @@ def pip_install(wheel: Path, python: str, arch: str, target: Path) -> None:
             shutil.rmtree(target / top)
             version = info[0].name[len(name) + 1 : -len(".dist-info")]
             run("--no-deps", "--implementation", "py", "--abi", "none", "--platform", "any", f"{name}=={version}")
+    for url in target.glob("*.dist-info/direct_url.json"):  # the wheel's path on the build machine
+        url.unlink()
+    check_markers(target, python, arch)
+
+
+def _markers():
+    try:
+        from packaging.markers import Marker, default_environment
+    except ImportError:  # pip always has it
+        from pip._vendor.packaging.markers import Marker, default_environment
+    return Marker, default_environment
+
+
+def check_markers(target: Path, python: str, arch: str, here: dict | None = None) -> None:
+    """pip decides a dependency's environment markers (python_version, platform_machine...) for the Python running
+    it, whatever --python-version and --platform say: stop when a bundled one would decide otherwise for the target."""
+    Marker, default_environment = _markers()
+    here = {**(here or default_environment()), "extra": ""}
+    there = {**here, **MARKER_ENV, "python_version": python, "python_full_version": f"{python}.0",
+             "implementation_version": f"{python}.0", "platform_machine": MACHINE[arch]}  # fmt: skip
+    for meta in sorted(target.glob("*.dist-info/METADATA")):
+        for req in Parser().parsestr(meta.read_text(encoding="utf-8"), headersonly=True).get_all("Requires-Dist") or []:
+            if ";" not in req:
+                continue
+            marker = Marker(req.split(";", 1)[1])
+            if marker.evaluate(here) != marker.evaluate(there):
+                raise SystemExit(
+                    f"build_deb: {meta.parent.name} requires {req!r}. pip decided that marker for the Python running"
+                    f" this build ({here['python_version']} on {here['platform_machine']}), and it decides otherwise"
+                    f" for Python {python} on {arch}: build on a matching Python, or install that dependency for"
+                    " each target by hand here."
+                )
 
 
 def _digest(path: Path) -> str:
@@ -247,8 +281,11 @@ def changelog_gz(version: str, epoch: int) -> bytes:
 def _normalize(root: Path, epoch: int) -> int:
     """Modes as Debian expects (executables only where meant), mtimes clamped; returns Installed-Size in KiB."""
     kb = 0
-    executable = {root / "usr/bin/bobina", root / "DEBIAN/postinst", root / "DEBIAN/prerm"}
+    executable = {root / "usr/bin/bobina", root / HOOK, root / "DEBIAN/postinst", root / "DEBIAN/prerm"}
     for p in sorted(root.rglob("*")):
+        if p.is_symlink():  # chmod would change what it points to
+            kb += 1
+            continue
         p.chmod(0o755 if p.is_dir() or p in executable else 0o644)
         if "DEBIAN" not in p.relative_to(root).parts:
             kb += 1 if p.is_dir() else -(-p.stat().st_size // 1024)
@@ -273,6 +310,9 @@ def build(wheel: Path, arch: str, out: Path) -> Path:
             raise SystemExit("build_deb: bobina itself did not end up in common/: is the wheel pure Python?")
         (root / "usr/bin").mkdir(parents=True)
         shutil.copy(ROOT / "contrib/deb/launcher.py", root / "usr/bin/bobina")
+        (root / "usr/bin/bob").symlink_to("bobina")  # the short name, as pip installs it
+        (root / HOOK).parent.mkdir(parents=True)
+        shutil.copy(ROOT / "contrib/deb/bobina.rtupdate", root / HOOK)
         doc = root / "usr/share/doc/bobina"
         doc.mkdir(parents=True)
         (doc / "copyright").write_text(copyright_text(bundled(lib)), encoding="utf-8")
@@ -284,7 +324,7 @@ def build(wheel: Path, arch: str, out: Path) -> Path:
         sums = [
             f"{hashlib.md5(p.read_bytes()).hexdigest()}  {p.relative_to(root)}"
             for p in sorted(root.rglob("*"))
-            if p.is_file() and "DEBIAN" not in p.relative_to(root).parts
+            if p.is_file() and not p.is_symlink() and "DEBIAN" not in p.relative_to(root).parts
         ]
         (debian / "md5sums").write_text("\n".join(sums) + "\n")
         size = _normalize(root, epoch)
@@ -298,22 +338,21 @@ def build(wheel: Path, arch: str, out: Path) -> Path:
     return deb
 
 
-def _wheel(out: Path) -> Path:
-    built = sorted(out.glob("bobina-*-py3-none-any.whl"), key=lambda p: p.stat().st_mtime)
-    if built:
-        return built[-1]
-    subprocess.run([sys.executable, "-m", "pip", "wheel", "--quiet", "--no-deps", "--index-url", INDEX, "-w", str(out),
-                    str(ROOT)], check=True)  # fmt: skip
-    return _wheel(out)
+def build_from_checkout(arch: str, out: Path) -> Path:
+    """A fresh wheel of this checkout (never an older one lying in dist/), then the .deb."""
+    with tempfile.TemporaryDirectory(prefix="bobina-wheel-") as tmp:
+        subprocess.run([sys.executable, "-m", "pip", "wheel", "--quiet", "--no-deps", "--index-url", INDEX, "-w", tmp,
+                        str(ROOT)], check=True)  # fmt: skip
+        return build(next(Path(tmp).glob("bobina-*-py3-none-any.whl")), arch, out)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--arch", choices=sorted(MACHINE), default="amd64")
-    ap.add_argument("--wheel", type=Path, help="bobina's wheel (default: the newest in --out, else built)")
+    ap.add_argument("--wheel", type=Path, help="bobina's wheel (default: one built now from this checkout)")
     ap.add_argument("--out", type=Path, default=ROOT / "dist")
     args = ap.parse_args()
-    deb = build(args.wheel or _wheel(args.out), args.arch, args.out)
+    deb = build(args.wheel, args.arch, args.out) if args.wheel else build_from_checkout(args.arch, args.out)
     print(f"wrote {deb} ({deb.stat().st_size // 1024} KB)")
 
 

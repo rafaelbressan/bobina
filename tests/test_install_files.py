@@ -91,13 +91,30 @@ def test_the_deb_copyright_file_is_machine_readable():
     assert max(map(len, lines)) <= 80
 
 
-@pytest.mark.parametrize(("python", "debian"), [("0.1.0", "0.1.0"), ("0.2.0rc1", "0.2.0~rc1"), ("1.0.0b2", "1.0.0~b2")])
-def test_deb_versions_sort_like_python_ones(python, debian):
-    assert deb.deb_version(python) == debian
+# Python versions in PEP 440 order, each with the Debian version it becomes
+VERSIONS = [("1.0.dev1", "1.0~~dev1"), ("1.0a1", "1.0~a1"), ("1.0b2", "1.0~b2"), ("1.0rc1.dev2", "1.0~rc1~~dev2"),
+            ("1.0rc1", "1.0~rc1"), ("1.0rc1.post1", "1.0~rc1+post1"), ("1.0", "1.0"), ("1.0.post1.dev1", "1.0+post1~~dev1"),
+            ("1.0.post1", "1.0+post1"), ("1.0.1", "1.0.1")]  # fmt: skip
+
+
+def test_deb_versions_sort_like_python_ones():
+    assert [deb.deb_version(py) for py, _ in VERSIONS] == [d for _, d in VERSIONS]
     if shutil.which("dpkg"):
-        subprocess.run(["dpkg", "--compare-versions", debian, "lt", "1.0.0"], check=True)
-        if "~" in debian:
-            subprocess.run(["dpkg", "--compare-versions", debian, "lt", debian.split("~")[0]], check=True)
+        for (_, low), (_, high) in zip(VERSIONS, VERSIONS[1:], strict=False):
+            subprocess.run(["dpkg", "--compare-versions", low, "lt", high], check=True)
+
+
+def test_the_deb_stops_when_a_marker_would_choose_otherwise_for_the_target(tmp_path):
+    info = tmp_path / "dep-1.dist-info"
+    info.mkdir()
+    build_machine = {**deb._markers()[1](), "python_version": "3.12", "platform_machine": "x86_64"}
+    same = 'Requires-Dist: pytz; python_version < "3.9"\nRequires-Dist: pypdfium2; extra == "pdf"\n'
+    (info / "METADATA").write_text("Name: dep\nVersion: 1\n" + same)
+    deb.check_markers(tmp_path, "3.11", "amd64", build_machine)  # false for both: nothing to say
+    for marker, python, arch in [('python_version < "3.12"', "3.11", "amd64"), ('platform_machine == "aarch64"', "3.12", "arm64")]:  # fmt: skip
+        (info / "METADATA").write_text(f"Name: dep\nVersion: 1\n{same}Requires-Dist: other; {marker}\n")
+        with pytest.raises(SystemExit, match="decides otherwise"):
+            deb.check_markers(tmp_path, python, arch, build_machine)
 
 
 def test_the_deb_shares_what_is_the_same_for_every_python(tmp_path):
@@ -140,8 +157,16 @@ def test_the_deb_reads_which_system_libraries_a_compiled_module_needs():
 
 
 @pytest.mark.skipif(not shutil.which("dash"), reason="dash (a strict POSIX sh) is not installed")
-@pytest.mark.parametrize("script", ["POSTINST", "PRERM"])
-def test_the_deb_maintainer_scripts_are_posix_sh(script, tmp_path):
-    (tmp_path / "script").write_text(getattr(deb, script))
-    subprocess.run(["dash", "-n", str(tmp_path / "script")], check=True)
-    subprocess.run(["dash", "-n", str(ROOT / "contrib/deb/test-in-container.sh")], check=True)
+def test_the_deb_shell_scripts_are_posix_sh(tmp_path):
+    for name in ("POSTINST", "PRERM"):
+        (tmp_path / name).write_text(getattr(deb, name))
+    for script in [tmp_path / "POSTINST", tmp_path / "PRERM", *(ROOT / "contrib/deb").glob("*.sh"),
+                   ROOT / "contrib/deb/bobina.rtupdate"]:  # fmt: skip
+        subprocess.run(["dash", "-n", str(script)], check=True)
+    assert deb.HOOK.endswith("/runtime.d/bobina.rtupdate") and f"/{deb.HOOK} rtupdate - python3" in deb.POSTINST
+
+
+def test_the_deb_python_hook_never_fails():
+    """Debian's python3 fails its own upgrade when a runtime.d hook fails."""
+    hook = (ROOT / "contrib/deb/bobina.rtupdate").read_text(encoding="utf-8")
+    assert "set -e" not in hook and hook.rstrip().endswith("exit 0")

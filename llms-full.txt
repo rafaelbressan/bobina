@@ -1604,7 +1604,7 @@ bobina needs Python 3.11 or newer. Pick one way:
 | Linux or macOS, nothing set up | `curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh \| sh` |
 | uv | `uv tool install bobina` |
 | Debian 12+, Ubuntu 24.04+ | the .deb (below), or `sudo apt install pipx && pipx ensurepath && pipx install bobina` |
-| Homebrew (macOS) | `brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina && brew install bobina` |
+| Homebrew (macOS) | `brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina && brew install rafaelbressan/bobina/bobina` |
 | Windows | `uv tool install bobina` or `pipx install bobina` (printer driver: `drivers/windows/`) |
 | A checkout, to change bobina | `./install.sh` (editable install, plus the Bluetooth service on Linux) |
 
@@ -1651,6 +1651,6 @@ the next release's .deb. No extras: for them use pipx from apt (above), which up
 
 ## Homebrew
 
-This repository is the tap. The formula has no extras (`pdf`, `svg`, `xlsx`, `mcp`): for them, `get.sh --extras`
+This repository is the tap; install with the full name (Homebrew 7 trusts a tap only then). The formula has no extras (`pdf`, `svg`, `xlsx`, `mcp`): for them, `get.sh --extras`
 or `uv tool install 'bobina[pdf,svg,xlsx,mcp]'`. Homebrew's Python has no Bluetooth sockets: on Linux prefer
 `get.sh` or the .deb.
