@@ -17,6 +17,7 @@ PARTS = [
     "docs/guides/batch-printing.md",
     "docs/guides/templates.md",
     "docs/SECURITY.md",
+    "docs/INSTALL.md",
 ]
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")
 
