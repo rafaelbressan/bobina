@@ -70,6 +70,8 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("help", "--quite", "--quiet"),
     ("library", "--overwrite", "--force"),
     ("library", "--notes", "--note"),
+    ("mcp", "--impressora", "--printer"),
+    ("mcp", "--allow-net", "belongs:print"),  # a tool argument (allow_net), not an option of the server
     ("mode", "--confirm", "--yes"),
     ("paper", "--diametro", "--diameter"),
     ("paper", "--thicknes", "--thickness"),

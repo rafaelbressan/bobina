@@ -34,7 +34,8 @@ dependencies = [
 pdf = ["pypdfium2>=5.14"]
 svg = ["resvg-py>=0.5"]
 xlsx = ["openpyxl>=3.1"]
-dev = ["pytest>=8", "ruff>=0.6", "pypdfium2>=5.14", "resvg-py>=0.5", "openpyxl>=3.1"]
+mcp = ["mcp>=2,<3"]  # bobina mcp: the official SDK (MCPServer; 1.x called it FastMCP)
+dev = ["pytest>=8", "ruff>=0.6", "pypdfium2>=5.14", "resvg-py>=0.5", "openpyxl>=3.1", "mcp>=2,<3"]
 
 [project.scripts]
 bobina = "bobina.cli:main"

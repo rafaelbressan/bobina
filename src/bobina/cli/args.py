@@ -18,6 +18,13 @@ from .documents import cmd_check, cmd_edit, cmd_preview, cmd_print, cmd_view
 from .history import cmd_history
 from .library import cmd_fonts, cmd_library, cmd_profile, cmd_seq, cmd_template
 
+
+def cmd_mcp(args):
+    from ..mcp_server import serve  # the MCP SDK is an extra: imported only by this command
+
+    return serve(args)
+
+
 HELP_FORMAT = """\
 .bob.md — Markdown for thermal roll printers (full spec: docs/FORMAT.md)
 
@@ -103,19 +110,22 @@ def _help_json() -> dict:
         "commands": {name: _command_json(name) for name in COMMANDS},
         "topics": [*TOPICS, "CODE (a problem code, e.g. E302)", "COMMAND (a command name)"],
         "problems": _problems_json(),
-        "exit_codes": {
-            common.OK: "ok",
-            common.USAGE: "usage",
-            common.DOC: "document",
-            common.STRICT: "strict nudges",
-            common.UNREACHABLE: "unreachable",
-            common.PRINTER_ERR: "printer not ready",
-            common.MODE: "command language",
-            common.CONFIRM: "confirmation needed or declined",
-            common.SECURITY: "security",
-            common.LEFT_OUT: "part of the job left out (a payment code, Q111)",
-        },  # fmt: skip
+        "exit_codes": EXIT_CODES,
     }
+
+
+EXIT_CODES = {  # bobina help --json and the tools of bobina mcp say what each exit code means
+    common.OK: "ok",
+    common.USAGE: "usage",
+    common.DOC: "document",
+    common.STRICT: "strict nudges",
+    common.UNREACHABLE: "unreachable",
+    common.PRINTER_ERR: "printer not ready",
+    common.MODE: "command language",
+    common.CONFIRM: "confirmation needed or declined",
+    common.SECURITY: "security",
+    common.LEFT_OUT: "part of the job left out (a payment code, Q111)",
+}  # fmt: skip
 
 
 def _help_code(code: str, as_json: bool) -> int:
@@ -251,7 +261,7 @@ def _common(printing: bool = True):
 
 
 # Commands with nothing to write as JSON: --json is accepted (it is a global option) and a note says it does nothing.
-NO_JSON = {"view", "edit", "send", "mode"}
+NO_JSON = {"view", "edit", "send", "mode", "mcp"}
 
 # Every command declares its kind; a new command must be added here (and to tests/test_option_hints.py CASES):
 # "prints" commands take --yes, --dry-run and --editor; "reads" commands never print, so those options are not
@@ -262,6 +272,7 @@ COMMAND_KIND = {
     "check": "reads", "preview": "reads", "view": "reads", "status": "reads", "printer": "reads",
     "profile": "reads", "template": "reads", "seq": "reads", "fonts": "reads", "library": "reads",
     "paper": "reads", "help": "reads",
+    "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
 }  # fmt: skip
 _PARENTS: dict = {}
 
@@ -802,6 +813,16 @@ def make_parser():
     )
     p.add_argument("topic", nargs="?")
     p.add_argument("name", nargs="?", help="with pay: one scheme (bobina help pay pix)")
+    _cmd(
+        sub,
+        "mcp",
+        "a server for AI agents (MCP)",
+        "a Model Context Protocol server on stdin/stdout: check, preview, print (only with confirm), templates,"
+        " help, status and paper as tools. Needs the extra: uv tool install 'bobina[mcp]'. --printer, --profile,"
+        " --allow and --strict apply to every tool call",
+        ["claude mcp add bobina -- bobina mcp", "bobina mcp --printer test"],
+        cmd_mcp,
+    )
     PARSER = ap
     return ap
 
