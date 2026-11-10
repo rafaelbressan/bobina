@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check src tests tools
+          ruff format --check src tests
+      - name: Tests (no printer needed)
+        run: pytest -q
+
+  privacy:
+    # Generic patterns for everyone; the owner's personal patterns come from a secret, which GitHub does not give
+    # to pull requests from forks (so a fork's PR gets the generic scan, and main is scanned again after merge).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Personal-data scan of the files
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: python tools/leakscan.py
+      - name: Personal-data scan of the commit messages
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then range="HEAD~1..HEAD"; else range="$BEFORE..HEAD"; fi
+          git rev-parse -q --verify HEAD~1 >/dev/null || range="HEAD"
+          git log --format='%B' "$range" > "$RUNNER_TEMP/messages.txt"
+          python tools/leakscan.py "$RUNNER_TEMP/messages.txt"

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.history/1",
+  "title": "One job in ~/.local/state/bobina/history.jsonl (bobina history --json)",
+  "type": "object",
+  "required": [
+    "schema",
+    "id",
+    "time",
+    "command",
+    "argv",
+    "outcome",
+    "exit",
+    "problems"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.history/1"
+    },
+    "id": {
+      "type": "string"
+    },
+    "time": {
+      "type": "string"
+    },
+    "command": {
+      "type": "string"
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "--set/--where values masked"
+    },
+    "outcome": {
+      "type": "string",
+      "description": "printed, reprinted, saved, dry run, cancelled, failed, interrupted, …"
+    },
+    "exit": {
+      "type": "integer"
+    },
+    "duration_s": {
+      "type": "number"
+    },
+    "printer": {
+      "type": "string"
+    },
+    "saved_to": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "integer"
+    },
+    "length_mm": {
+      "type": "number"
+    },
+    "cuts": {
+      "type": "integer"
+    },
+    "tears": {
+      "type": "integer"
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "counters": {
+      "type": "object"
+    },
+    "bytes_sha256": {
+      "type": "string"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "note"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "data values masked"
+          }
+        }
+      }
+    }
+  }
+}

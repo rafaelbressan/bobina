@@ -1,0 +1,12 @@
+[Unit]
+Description=bobina: Bluetooth on and the thermal printer paired
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=@BOBINA_REPO@/contrib/bt-printer-up.sh
+RemainAfterExit=yes
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

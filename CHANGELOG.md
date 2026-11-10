@@ -1,0 +1,75 @@
+# Changelog
+
+## 0.1.0 — unreleased
+
+First version, calibrated on a Goldensky MTP-II (58 mm).
+
+- Printer profiles: 32 more, generated from escpos-printer-db (CC BY 4.0) by `tools/import_profiles.py`: model facts
+  only, `measured = false`, conservative (ASCII native text, raster barcodes, safe mode) until `bobina calibrate tear`
+  and `bobina calibrate feed`; `bobina profile list` says which are measured. Sources: `src/bobina/profiles/SOURCES.md`.
+- `--marks none|cut|tear|both`: a fine dashed line where one label or order ends (none by default).
+- Payment codes: the ```` ```pay ```` block, one set of fields (`to`, `name`, `amount`, `ref`, `note`) for 15 schemes
+  (Pix, UPI, SEPA/EPC, PromptPay, PayNow, bitcoin, lightning, PayPal, Cash App, Venmo, Revolut, Wise, PicPay,
+  Mercado Pago, and `other` for a pasted payload). Pix is `pay {scheme=pix}`; template `pay-sign`. `bobina help pay SCHEME` (and
+  docs/pay.md) says what each field means in that scheme, its official name and its limit. A value over a limit
+  is `Q111`, never cut. Only Pix was scanned with real apps; the others carry the note `P302`.
+- Any ```` ```qr ```` takes `caption=`: `auto` under a payment code ("Pix · R$ 10,00"), `none`, or your own text.
+- Money without a `locale:` is written as the currency's country does (R$ 24,90, ₹120.00), not as the system
+  LANG would (R$24.90 on an en_US machine). A document that declares `locale:` keeps its own.
+- Exit code 9: the job went out without its payment code (`Q111`); the rest printed. `--allow Q111` gives 0.
+- `print --json` and `preview --json` write the outcome, the figures and the problems (schemas `bobina.print/1`,
+  `bobina.preview/1`); before, `print --json` hid the warnings. `paper` and `calibrate tear|feed` answer in JSON
+  too; `view`, `edit`, `send` and `mode` say that `--json` does nothing there.
+- `bobina help CODE` (what a problem means and what to do, docs/problems/), `bobina help --json` (commands,
+  options, topics, problems and exit codes for programs), `llms.txt`, `llms-full.txt` and an agent skill
+  (`skills/bobina`).
+- Templates for shops: `clothing-tag`, `jewelry-tag`, `shelf-price`, `sale-price`, `food-label`, `shipping-label`
+  (docs/guides/templates.md); prices typed as people type them (`24,90`, `R$ 1.890,00`), `M202` when a value is
+  not a number. Notes `P301` (a feature not tested on paper yet) and `P302` (a payment code not tested in its app).
+- Safe by default for printers nobody measured: feeds after images as white raster rows, idle wait before the end
+  of an image job; `bobina calibrate feed` turns it off for printers that do not need it.
+
+- Speed and memory: each QR is encoded once (cache), a batch decodes a logo once (per-file cache keyed by size and
+  modification time), big JPEGs are decoded reduced (6000x4000 target: 250 MB -> 72 MB); `--pages` writes the PDF
+  page by page at 1:1 (copies share one image); image export draws each label once.
+- Long jobs: previews drawn page by page and split above ~2.5 m (1000 labels: 422 MB -> 88 MB); a print keeps only
+  the shown labels' preview for `--last` (425 MB -> 68 MB); 1-bit PNGs. Bounded waits: download deadline and DNS
+  timeout, device-file and bluetoothctl timeouts, stdin size caps, `BOBINA_NONINTERACTIVE=1`.
+- Concurrency: a print reserves its seq numbers when it is built (given back when it is not printed and nobody took
+  later ones), one job per printer at a time (`busy_timeout`, `E405`), and every state file (counters, paper,
+  history, library, config, last job, exports) is written atomically under a lock; a damaged one is `E209`.
+- `.bob.md`: Markdown + Pandoc attributes, fenced objects (QR, barcodes, payment codes, Data Matrix, PDF417, images,
+  raw bytes), Jinja variables in a sandbox, CLDR dates/numbers per locale, persistent counters, templates.
+- Engine: one set of print rows feeds the exact preview and the ESC/POS bytes; native when the printer does it
+  well, raster per line when it does not; host word wrap; printer-font emulation for previews.
+- CLI: `print` with a confirmation screen (`--yes` to skip), `check`, `preview` (`--realistic`), `view`, `edit`,
+  `template`, `seq`, `printer`, `status`, `mode`, `paper` (roll odometer), `calibrate compare|tear|feed`, `fonts`.
+- Spacing attributes: `tracking=` (letter spacing), `indent=` (columns or mm/px), `leading=` (line spacing), in the
+  printer font (`ESC SP`, `ESC 3`) and in raster fonts.
+- Text filters: `titlecase` (by language), `deaccent`, `camel`, `pascal`, `snake`, `kebab`, `slug`, `smallcaps`; also
+  in export names (`{item|slug}`). Security: filters, string methods and joins keep data marked (no image path
+  from data through `| lower` or `'img/' ~ value`).
+- `bobina history` (list, show, stats, clear): every print job recorded privately (schema `bobina.history/1`).
+- `--problems pretty|plain|json|jsonl` (or `BOBINA_PROBLEMS`): every error and warning, also usage errors, in a
+  stable schema (`bobina.problem/1`) for scripts and logs.
+- Export: `-o` with `{n}`, `{i}`, `{file}`, `{part}`, `{column}` saves one file per label (printer bytes from
+  `print`, images from `preview`); `preview --pages -o x.pdf` makes one page per label.
+- Several data sources: `--data a=FILE --join b=FILE --on KEY` (left join; bare column names when unambiguous,
+  `{{ b.col }}` to choose; warnings for unmatched/duplicate keys and shared columns).
+- Every problem has a code: errors `E1xx`–`E5xx` join the nudge catalog; one format for all of them.
+- One strip: several files and `--then` parts in one job (one preview, confirmation and paper count);
+  `--compact`/`--no-compact` per part and `--compact-all`; ✂ cut lines inside compact parts and between two
+  compact parts, the tear feed elsewhere; counters continue across parts.
+- Data for batches: `--data` reads CSV, TSV/TXT (delimiter detected, cp1252 fallback), Excel `.xlsx`
+  (`--sheet`, `bobina[xlsx]`) and JSON; `--rows`, `--where`, `--copies-from` (copies per row).
+- Saved labels: `bobina library add|list|show|rm` and `bobina print @NAME` (with `--set`/`--ask`).
+- `--ask`: the missing template fields (or a document's undeclared `{{ variables }}`) are asked on the
+  terminal, with help, examples, defaults and table rows; answers are literal data like `--set`.
+- Images: SVG and PDF pages rendered at the paper width (`bobina[svg]`, `bobina[pdf]`); `bobina print`
+  takes a photo, SVG, PDF (`--page N-M`) or https image directly; https images only with `--allow-net`,
+  public hosts only (see `docs/SECURITY.md`).
+- Codes fill the paper: `size=full|half` for QR/Data Matrix, stretched barcodes, long barcodes turned vertical.
+- Safety: data from CSV/`--set` is literal (no Markdown, template or printer-command injection), template paths
+  confined, sandbox limits; see `docs/SECURITY.md`.
+- Profile `mtp-ii-58` with measured limits (`docs/printers/mtp-ii-58.md`) and conformance tickets
+  (`spec/conformance/`).

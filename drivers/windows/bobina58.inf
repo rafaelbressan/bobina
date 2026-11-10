@@ -1,0 +1,38 @@
+; bobina58.inf - installs bobina58.gpd on top of Windows' own Unidrv (no vendor binaries).
+; Part of bobina (MIT). Unsigned: Windows warns on install.
+
+[Version]
+Signature="$Windows NT$"
+Provider=%BOBINA%
+ClassGUID={4D36E979-E325-11CE-BFC1-08002BE10318}
+Class=Printer
+DriverVer=11/06/2026,0.1.0.0
+
+[Manufacturer]
+%BOBINA%=BOBINA,NTamd64,NTx86
+
+[BOBINA.NTamd64]
+"bobina 58mm ESC/POS raster" = BOBINA58,bobina58_escpos_raster
+
+[BOBINA.NTx86]
+"bobina 58mm ESC/POS raster" = BOBINA58,bobina58_escpos_raster
+
+[BOBINA58]
+CopyFiles=@bobina58.gpd
+DataSection=UNIDRV_DATA
+DataFile=bobina58.gpd
+Include=NTPRINT.INF
+Needs=UNIDRV.OEM
+
+[DestinationDirs]
+DefaultDestDir=66000
+
+[SourceDisksNames]
+1=%DISK%,,,
+
+[SourceDisksFiles]
+bobina58.gpd=1
+
+[Strings]
+BOBINA="bobina"
+DISK="bobina driver files"

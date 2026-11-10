@@ -1,0 +1,16 @@
+# artefatos grandes/baixados ficam fora do git; o manifesto registra hash e origem
+artifacts/
+*.apk
+*.xapk
+*.bin
+!teste.bin
+!minimo.bin
+__pycache__/
+.remember/
+local/
+.venv/
+*.egg-info/
+.pytest_cache/
+tests/out/
+security-audit-runs/
+build/

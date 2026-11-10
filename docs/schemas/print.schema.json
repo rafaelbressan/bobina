@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.print/1",
+  "title": "bobina print ... --json (and preview --json: bobina.preview/1)",
+  "type": "object",
+  "required": [
+    "schema",
+    "outcome",
+    "exit",
+    "printer",
+    "saved_to",
+    "stats",
+    "problems"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.print/1"
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "exit": {
+      "type": "integer"
+    },
+    "printer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "saved_to": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stats": {
+      "type": "object"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    }
+  }
+}

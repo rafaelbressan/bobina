@@ -1,0 +1,157 @@
+*%  bobina58.gpd - Windows Unidrv description for 58 mm ESC/POS roll printers.
+*%  Part of bobina (MIT). Values come from bobina's measured profile mtp-ii-58
+*%  (docs/printers/mtp-ii-58.md): 384 dots, 203 dpi, raster with GS v 0, start feed
+*%  ESC J 24 (faded start), tear feed ESC J 64. No vendor code: Windows' own Unidrv
+*%  renders and halftones the page; this file only says which bytes to send.
+
+*GPDSpecVersion: "1.0"
+*Include: "StdNames.gpd"
+*GPDFileVersion: "0.1"
+*GPDFileName: "bobina58.gpd"
+*ModelName: "bobina 58mm ESC/POS raster"
+*MasterUnits: PAIR(203, 203)
+*PrinterType: SERIAL
+*MaxCopies: 1
+
+*Feature: Orientation
+{
+    *rcNameID: =ORIENTATION_DISPLAY
+    *DefaultOption: PORTRAIT
+    *Option: PORTRAIT
+    {
+        *rcNameID: =PORTRAIT_DISPLAY
+    }
+    *Option: LANDSCAPE_CC270
+    {
+        *rcNameID: =LANDSCAPE_DISPLAY
+    }
+}
+
+*Feature: InputBin
+{
+    *rcNameID: =PAPER_SOURCE_DISPLAY
+    *DefaultOption: FORMSOURCE
+    *ConcealFromUI?: TRUE
+    *Option: FORMSOURCE
+    {
+        *rcNameID: =AUTO_DISPLAY
+    }
+}
+
+*Feature: Resolution
+{
+    *rcNameID: =RESOLUTION_DISPLAY
+    *DefaultOption: R203
+    *Option: R203
+    {
+        *Name: "203 x 203 " =DOTS_PER_INCH
+        *DPI: PAIR(203, 203)
+        *TextDPI: PAIR(203, 203)
+        *PinsPerPhysPass: 1
+        *PinsPerLogPass: 24
+        *SpotDiameter: 100
+        *EXTERN_GLOBAL: *StripBlanks: LIST(LEADING, TRAILING)
+        *%  GS v 0 m=0, width in bytes (xL xH), height 24 rows (yL yH), then the bitmap.
+        *Command: CmdSendBlockData { *Cmd : "<1D>v0<00>" %l{NumOfDataBytes / 24} "<1800>" }
+    }
+}
+
+*%  Pick the size closest to the content: blank space at the end is printed as paper.
+*Feature: PaperSize
+{
+    *rcNameID: =PAPER_SIZE_DISPLAY
+    *DefaultOption: R48x100
+    *Option: L48x30
+    {
+        *Name: "Label 48 x 30 mm"
+        *PageDimensions: PAIR(384, 240)
+        *PrintableArea: PAIR(384, 240)
+        *PrintableOrigin: PAIR(0, 0)
+    }
+    *Option: L48x50
+    {
+        *Name: "Label 48 x 50 mm"
+        *PageDimensions: PAIR(384, 400)
+        *PrintableArea: PAIR(384, 400)
+        *PrintableOrigin: PAIR(0, 0)
+    }
+    *Option: R48x100
+    {
+        *Name: "Receipt 48 x 100 mm"
+        *PageDimensions: PAIR(384, 800)
+        *PrintableArea: PAIR(384, 800)
+        *PrintableOrigin: PAIR(0, 0)
+    }
+    *Option: R48x210
+    {
+        *Name: "Receipt 48 x 210 mm"
+        *PageDimensions: PAIR(384, 1678)
+        *PrintableArea: PAIR(384, 1678)
+        *PrintableOrigin: PAIR(0, 0)
+    }
+    *Option: R48x600
+    {
+        *Name: "Receipt 48 x 600 mm"
+        *PageDimensions: PAIR(384, 4800)
+        *PrintableArea: PAIR(384, 4800)
+        *PrintableOrigin: PAIR(0, 0)
+    }
+    *Option: CUSTOMSIZE
+    {
+        *rcNameID: =USER_DEFINED_SIZE_DISPLAY
+        *MinSize: PAIR(80, 80)
+        *MaxSize: PAIR(384, 8000)
+        *MaxPrintableWidth: 384
+        *MinLeftMargin: 0
+        *TopMargin: 0
+        *BottomMargin: 0
+        *CenterPrintable?: FALSE
+    }
+}
+
+*Feature: Halftone
+{
+    *rcNameID: =HALFTONING_DISPLAY
+    *DefaultOption: HT_PATSIZE_AUTO
+    *Option: HT_PATSIZE_AUTO
+    {
+        *rcNameID: =HT_AUTO_SELECT_DISPLAY
+    }
+    *Option: HT_PATSIZE_SUPERCELL_M
+    {
+        *rcNameID: =HT_SUPERCELL_DISPLAY
+    }
+    *Option: HT_PATSIZE_6x6_M
+    {
+        *rcNameID: =HT_DITHER6X6_DISPLAY
+    }
+    *Option: HT_PATSIZE_8x8_M
+    {
+        *rcNameID: =HT_DITHER8X8_DISPLAY
+    }
+}
+
+*%  ESC @ resets; ESC J 24 feeds 3 mm (the first lines of a job print faded otherwise).
+*Command: CmdStartJob
+{
+    *Order: JOB_SETUP.1
+    *Cmd: "<1B40><1B4A18>"
+}
+*%  ESC J 64: 8 mm so the last line clears the tear bar (bobina calibrate tear).
+*Command: CmdEndJob
+{
+    *Order: JOB_FINISH.1
+    *Cmd: "<1B4A40>"
+}
+
+*RotateCoordinate?: FALSE
+*RotateRaster?: FALSE
+*RotateFont?: FALSE
+*Command: CmdCR { *Cmd : "<>" }
+*Command: CmdLF { *Cmd : "<0A>" }
+*Command: CmdFF { *Cmd : "<>" }
+*EjectPageWithFF?: FALSE
+*OutputDataFormat: H_BYTE
+*OptimizeLeftBound?: FALSE
+*CursorXAfterSendBlockData: AT_GRXDATA_END
+*CursorYAfterSendBlockData: AUTO_INCREMENT

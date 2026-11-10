@@ -1,0 +1,42 @@
+# bobina
+
+> A command-line tool that prints Markdown (receipts, lists, labels, QR codes, payment codes like Pix, UPI or SEPA, images) on 58/80 mm thermal
+> roll printers over Bluetooth, a device file or a command. Every print shows a confirmation screen first. Nothing
+> is refused: problems are "nudges" with a code, a message and a suggestion.
+
+Facts an agent needs first:
+
+- Without a terminal, add `--yes`: `bobina print FILE --yes`. Otherwise the print stops with E107 (exit 7).
+- To look without printing: `bobina check FILE` (paper length and problems), `bobina view FILE` (terminal preview),
+  `bobina preview FILE -o out.png` (exact image). `print -n` shows the confirmation screen and prints nothing.
+- Inline text works as a document: `bobina print "# TITLE\n- [ ] item" --yes`.
+- One label per row: `--data rows.csv` (CSV, TSV, JSON, .xlsx with `--sheet`), `--where COL=VAL`,
+  `--copies-from COL`, `--join FILE --on KEY`, `--set KEY=VALUE`; `bobina help data` has them on one screen.
+- A problem code in an error or warning: `bobina help CODE` (that code) says what to do.
+- The whole CLI for programs: `bobina help --json` (commands, options, topics, every problem code).
+- Machine output: `check --json` gives `{"stats", "problems"}`; `--problems json|jsonl` writes problems to stderr;
+  exit codes: 0 ok, 1 usage, 2 document, 3 strict, 4 unreachable, 5 printer not ready, 6 language,
+  7 confirmation, 8 security, 9 a payment code left out (Q111).
+- Reprint: `print --last` (identical bytes) or `--again` (re-rendered); `-o FILE` saves bytes instead of printing.
+- Try without hardware: `bobina printer add test --path out.bin` (a file printer).
+
+## Docs
+
+- [README](README.md): install, the document format in one screen, every command in one table
+- [CLI reference](docs/CLI.md): commands and options, problems and exit codes, strips (`--compact`, `--marks`), calibration
+- [Document format](docs/FORMAT.md): the `.bob.md` format and the catalog of problem codes
+- [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
+- [Payment codes](docs/pay.md): every `pay` scheme (Pix, UPI, SEPA…), what each field means in it and its limits
+- [Templates guide](docs/guides/templates.md): label, card and to-do recipes, and a gallery of shop tags
+- [Security](docs/SECURITY.md): data is printed literally, templates run in a sandbox
+- [Problem codes](docs/problems/README.md): one page per code, with what to do
+- [JSON schemas](docs/schemas/README.md): check --json, problems, history
+- [What was tested on paper](docs/TESTED.md): features marked ⚠ not tested on paper (note P301)
+
+## Optional
+
+- [Everything above in one file](llms-full.txt)
+- [Printer notes: Goldensky MTP-II](docs/printers/mtp-ii-58.md)
+- [Example documents and data](examples/batch/)
+- [Agent skill](skills/bobina/SKILL.md)
+- [Changelog](CHANGELOG.md)

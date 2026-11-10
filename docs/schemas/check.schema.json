@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.check/1",
+  "title": "bobina check FILE --json",
+  "type": "object",
+  "required": [
+    "stats",
+    "problems"
+  ],
+  "properties": {
+    "stats": {
+      "type": "object",
+      "required": [
+        "length_mm",
+        "native_rows",
+        "raster_rows",
+        "bytes",
+        "profile"
+      ],
+      "properties": {
+        "length_mm": {
+          "type": "number"
+        },
+        "native_rows": {
+          "type": "integer"
+        },
+        "raster_rows": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "counters": {
+          "type": "object"
+        },
+        "renders": {
+          "type": "integer"
+        },
+        "copies": {
+          "type": "integer"
+        }
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    }
+  }
+}

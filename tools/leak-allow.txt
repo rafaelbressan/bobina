@@ -1,0 +1,11 @@
+# Fake values and fake-data paths the leak scan accepts (tools/leakscan.py). Public on purpose: these are test
+# data, never anyone's real data. Every entry needs a reason after " #". Real personal values never go here:
+# they belong in the private local/leak-patterns.txt, which still catches them everywhere.
+#
+#   value: TEXT   # reason     a fake value allowed in any file
+#   path: GLOB    # reason     a file or folder that holds only fake data (generic patterns are off there)
+#
+# The test kit (use these in tests, docs and examples; Pix keys of type EVP are random UUIDs and need no entry):
+value: 000.000.001-91  # fake CPF for tests and Pix examples (valid check digits, issued to nobody on purpose)
+value: +55 11 90000-0000  # fake mobile phone for tests and Pix examples
+path: tests/fixtures/fake/*  # folder of generated fake data (Pix payloads, receipts, contact lists)

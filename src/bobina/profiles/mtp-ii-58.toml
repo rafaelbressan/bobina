@@ -1,0 +1,114 @@
+# Goldensky MTP-II / PT-210, 58 mm, firmware MTP-II-6114, ESC/POS mode.
+# Every value here comes from a printed and photographed test; see docs/printers/mtp-ii-58.md.
+# This is the baseline "minimum quality" printer: other profiles start from a copy of it.
+
+id = "mtp-ii-58"
+name = "Goldensky MTP-II (58 mm)"
+evidence = "docs/printers/mtp-ii-58.md: N1-N7, F1-F2, R2-R6, codes and tear tests (2026-11)"
+width_dots = 384          # 48 mm printable at 8 dots/mm
+dpi = 203
+paper_mm = 58
+command_set = "escpos"
+language_switch = false   # 1F 1B 1F FC … is accepted and ignored by this firmware (tested 2026-11-06)
+encoding = "utf-8"        # UTF-8 accepted directly, no ESC t
+
+[margins]
+top_dots = 24             # ESC J 24: avoids the faded start (N-series)
+block_gap_dots = 12       # space between Markdown blocks
+tear_dots = 40            # head to tear bar, 5 mm (calibrate tear ruler, 05/11 and again 08/11)
+feed_after_dots = 88      # tear bar 5 mm after the head + 6 mm to spare (08/11: with 2 mm the last line stopped at
+                          # the tear bar)
+
+[transport]
+chunk_bytes = 4096        # B1: 4 KB, no pause, no stripes
+pause_s = 0.0
+band_rows = 64            # GS v 0 band height
+print_mm_per_s = 40       # conservative print speed: keep the link open this long (tail of long jobs was lost)
+idle_before_tail = true   # drops commands sent while it prints a big image: the end of a job that ends with one
+                          # waits until GS r 1 is answered again (08/11, docs/printers/mtp-ii-58.md)
+
+[escpos]
+blank_rows_after_raster = true  # ESC J right after a GS v 0 image is ignored: feeds there go as blank raster rows
+                                # (08/11: a 10 mm ESC J between two raster lines moved nothing; a --marks tear line
+                                # stopped 3 mm short whatever the feed after it; blank raster rows do move the paper)
+
+[native]
+cell = [12, 24]           # font A, 32 columns
+line_gap_dots = 6         # ESC 3 n with n = cell height + gap (n < height prints a big gap, N3)
+emulation_font = "spleen-12x24.otf"   # closest free 12x24 font, used for previews
+scales_ok = [1, 2, 3, 4]  # GS ! 6x6 and 8x8 are jagged (N1)
+bold = true
+underline = true          # does not underline spaces (N2)
+invert = "words"          # GS B leaves spaces white; continuous bands go raster (N2)
+italic = false            # ESC 4 ignored (N2)
+strike = false
+tracking_unscaled_at = [2]  # ESC SP n stays n dots at 2x width (paper, 09/11); 3x, 4x not measured
+upside_down = true        # ESC {, line order not reversed (N2)
+absolute_position = true  # ESC $ works: native tables (N4)
+# Unicode ranges the internal font prints (N5). Anything else goes raster for that line.
+glyph_ranges = [
+  [0x20, 0x7E], [0xA0, 0xFF], [0x100, 0x17F],
+  [0x2010, 0x2027], [0x2030, 0x203A], [0x20A0, 0x20BF],
+  [0x2500, 0x257F], [0x2580, 0x259F],
+  [0x3040, 0x30FF], [0x4E00, 0x9FFF],
+]
+
+[native.sizes]            # named size -> GS ! [width, height]
+small = [1, 1]
+normal = [1, 1]
+large = [2, 2]
+title = [2, 2]
+huge = [3, 3]
+
+[native.headings]         # decided 2026-11-05: headings native by default
+h1 = { scale = [2, 2], bold = true }
+h2 = { scale = [1, 2], bold = true }
+h3 = { scale = [1, 1], bold = true }
+
+[qr]
+native = true
+default_module = 4        # N6: 3-8 read; 4 is the safe default
+min_module_native = 3
+min_module_raster = 4     # R5-05: 2 and 3 did not read in raster
+default_ecc = "M"         # ECC L read with difficulty (N6)
+
+[barcode]
+native = ["upca", "ean13", "ean8", "code39", "itf", "codabar", "code93", "code128"]   # N6
+weak = ["itf"]            # phone detects but does not read (N6)
+unsupported = ["upce"]    # did not print (N6; retest with 8 digits)
+min_module = 2            # module 1 is too thin to scan (N6)
+default_module = 2
+default_height = 80       # dots (10 mm)
+code39_wide = 2            # wide bars are 2 modules, not 3 (paper, 09/11)
+min_module_feed = 4       # vertical barcodes: modules 2 and 3 along the paper did not scan, 4 did (05/11)
+quiet_modules = 10        # white margin before/after a vertical barcode (horizontal ones get it from the paper sides)
+
+[raster]
+min_stroke_dots = 2       # R4-01
+min_gap_dots = 2          # R5-02
+min_text_px = 12          # R5-04, F2 (Terminus); 14 for Atkinson
+invert_min_px = 20        # R2-12, bold, with >= 4 dots of margin
+invert_margin_dots = 4
+
+[image]
+dither = "floyd-steinberg"
+gamma = 1.8               # R6
+gamma_atkinson = 1.5
+
+[preview]
+calibrated = false        # dot-gain curve pending (R6 ramps photographed in daylight)
+
+[preview.realistic]       # estimates until fitted from photos
+spread_px = 0.6           # ink spread around each dot
+gain = 1.25
+ink = [38, 36, 42]
+paper = [247, 245, 239]
+fade_dots = 0             # faded start: measure on the fidelity ticket (fade at the start of raster jobs)
+fade_strength = 0.0
+scale = 2
+
+[status]
+# Tested 2026-11-07: cover open answers 16 32 12 72 (paper-end bits only), closed with paper 16 12 12 12.
+# There is no cover bit: an open cover and a missing roll look the same. Closing the cover without the paper
+# end over the sensor makes the printer beep until the paper is pulled out.
+cover_sensor = false

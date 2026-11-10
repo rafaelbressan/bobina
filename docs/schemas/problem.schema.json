@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.problem/1",
+  "title": "A problem bobina reports (check --json, --problems json|jsonl)",
+  "type": "object",
+  "required": [
+    "schema",
+    "code",
+    "severity",
+    "message"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.problem/1"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][0-9]{3}$",
+      "description": "catalog code: bobina help CODE, docs/problems/CODE.md"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warning",
+        "note"
+      ]
+    },
+    "line": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "line in the document, or null"
+    },
+    "message": {
+      "type": "string"
+    },
+    "suggestion": {
+      "type": "string",
+      "description": "what to do; may be empty"
+    },
+    "evidence": {
+      "type": "string",
+      "description": "printed test behind a limit; may be empty"
+    },
+    "outcome": {
+      "type": "string",
+      "description": "--problems json|jsonl only: what was stopped (empty for check)"
+    },
+    "source": {
+      "type": "string"
+    },
+    "part": {
+      "type": "integer"
+    },
+    "file": {
+      "type": "string"
+    }
+  }
+}

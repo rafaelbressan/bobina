@@ -1,0 +1,6 @@
+[
+  { "product": "Brown rice",  "packed": "2026-11-07", "best_before": "2027-05-07", "shelf": "A", "jars": 2 },
+  { "product": "Black beans", "packed": "2026-11-07", "best_before": "2027-11-07", "shelf": "A", "jars": 1 },
+  { "product": "Coffee",      "packed": "2026-11-01", "best_before": "2027-02-01", "shelf": "B", "jars": 1 },
+  { "product": "Salt",        "packed": "2026-10-20", "best_before": "",           "shelf": "B", "jars": 0 }
+]
