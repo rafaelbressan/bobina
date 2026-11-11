@@ -1,0 +1,51 @@
+name: site
+
+# The website (site/, deployed by Vercel's GitHub integration; nothing is deployed from here). This builds it the way
+# Vercel does (a shallow clone without tags) and runs its checks: .md twins, links and anchors, the Accept routes of
+# vercel.json, personal data, JavaScript budget (site/scripts/check.mjs).
+
+on:
+  push:
+    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", ".github/workflows/site.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1 # like Vercel: the build fetches the latest release tag itself
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm ci --prefix site --registry=https://registry.npmjs.org/
+      - name: The site of the latest release, with its checks
+        run: npm run build --prefix site
+      - name: The docs on this branch build too (what the next release will publish)
+        env:
+          BOBINA_SITE_REF: WORKTREE
+        run: npm run build --prefix site
+
+  captures:
+    # The casts and tickets are recorded from the released bobina (site/capture/capture.py); this records them again
+    # and fails when they differ: after a release, run `npm run capture` in site/ and commit the result.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record again
+        run: cd site && node scripts/release.mjs && python3 capture/capture.py
+      - name: Same as the committed ones
+        run: git diff --stat --exit-code -- site/src/captures site/public/captures
