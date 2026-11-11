@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.init/1",
+  "title": "bobina init --json",
+  "type": "object",
+  "required": ["schema", "dry_run", "changed", "printer", "found", "picked", "profile", "locale", "roll",
+    "test_strip", "problems", "next"],
+  "properties": {
+    "schema": {"const": "bobina.init/1"},
+    "dry_run": {"type": "boolean"},
+    "changed": {"type": "array", "items": {"enum": ["printer", "profile", "locale", "roll", "test strip"]}},
+    "printer": {
+      "type": "object",
+      "required": ["name", "transport", "where", "found_by"],
+      "properties": {
+        "name": {"type": "string"},
+        "transport": {"enum": ["bluetooth", "file", "command"]},
+        "where": {"type": "string"},
+        "found_by": {"enum": ["bluetooth", "usb", "file", "command", "option", "config"]}
+      }
+    },
+    "found": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "name", "where", "profile", "printer_like"],
+        "properties": {
+          "kind": {"enum": ["bluetooth", "usb"]},
+          "name": {"type": "string"},
+          "where": {"type": "string"},
+          "profile": {"type": ["string", "null"]},
+          "printer_like": {"type": "boolean"}
+        }
+      }
+    },
+    "picked": {"type": ["string", "null"]},
+    "profile": {
+      "type": "object",
+      "required": ["id", "name", "paper_mm", "measured", "by"],
+      "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "paper_mm": {"type": "number"},
+        "measured": {"type": "boolean"},
+        "by": {"enum": ["name", "chosen", "option", "default", "config"]}
+      }
+    },
+    "locale": {
+      "type": "object",
+      "required": ["value", "source", "example"],
+      "properties": {
+        "value": {"type": "string"},
+        "source": {"enum": ["config", "time zone", "environment", "default"]},
+        "example": {"type": "object", "required": ["date", "number", "money"]}
+      }
+    },
+    "roll": {
+      "type": "object",
+      "required": ["roll_mm", "left_mm", "width_mm"],
+      "properties": {
+        "roll_mm": {"type": ["number", "null"]},
+        "left_mm": {"type": ["number", "null"]},
+        "width_mm": {"type": ["number", "null"]}
+      }
+    },
+    "test_strip": {
+      "type": ["object", "null"],
+      "properties": {
+        "printed": {"type": "boolean"},
+        "length_mm": {"type": "number"},
+        "modules": {"type": "array", "items": {"enum": ["sample", "feed", "tear"]}},
+        "tear_mm": {"type": ["number", "null"]},
+        "blank_rows_after_raster": {"type": ["boolean", "null"]}
+      }
+    },
+    "problems": {"type": "array", "items": {"$ref": "problem.schema.json"}},
+    "next": {"type": "array", "items": {"type": "string"}}
+  }
+}

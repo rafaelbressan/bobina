@@ -6,7 +6,15 @@ from pathlib import Path
 from bobina import cli
 
 SCHEMAS = Path(__file__).resolve().parents[1] / "docs" / "schemas"
-TYPES = {"object": dict, "array": list, "string": str, "integer": int, "number": (int, float), "null": type(None)}
+TYPES = {
+    "object": dict,
+    "array": list,
+    "string": str,
+    "integer": int,
+    "number": (int, float),
+    "null": type(None),
+    "boolean": bool,
+}
 
 
 def _check(value, schema, where="$"):

@@ -125,6 +125,7 @@ from this list.
 | `E403` | error | printer not ready (paper, cover, error) |  |
 | `E404` | error | operation not supported by this printer's transport |  |
 | `E405` | error | printer busy: another bobina job kept it too long |  |
+| `E406` | error | bobina init found no printer to set up |  |
 
 ### Document (errors)
 
@@ -241,6 +242,10 @@ from this list.
 | `P101` | warning | the paper roll is almost over (estimate) |  |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |  |
 | `P103` | warning | the roll is not as wide as this printer's paper (recorded anyway) |  |
+| `P104` | note | the roll length is not set: no estimate of the paper left |  |
 | `P301` | note | this job uses a feature not tested on paper yet |  |
 | `P302` | note | a payment code nobody has scanned with its app yet |  |
 | `P201` | warning | raw bytes bypass every check and are not previewed |  |
+| `P401` | note | Bluetooth or USB printers cannot be looked for on this machine (the message says why) |  |
+| `P402` | note | no profile matches the printer's name: the default profile was taken |  |
+| `P403` | warning | a USB printer this user cannot write to |  |

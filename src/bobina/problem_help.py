@@ -85,6 +85,8 @@ FIX = {
     "E403": "Load paper or close the cover (bobina status); a printer without a cover sensor reports both as no paper.",
     "E404": "This printer's transport (a file or a command) cannot do that; printing works the same.",
     "E405": "Wait for the other job, or raise busy_timeout for the printer in config.toml.",
+    "E406": "Turn the printer on (Bluetooth: in range; USB: plugged in), or name it: bobina init --printer ADDRESS"
+    " (or DEVICE), --command 'ssh HOST bobina send --yes -' for one on another machine.",
     "E501": "The message has the line and the template error; often a block not closed: {% if x %} needs {% endif %}.",
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
@@ -94,6 +96,11 @@ FIX = {
     "P301": "The bytes follow the ESC/POS spec but nobody has seen them on paper: look at the result (docs/TESTED.md).",
     "P302": "Scan a printed code with the real app before customers use it, and tell us (docs/TESTED.md).",
     "P201": "Raw bytes are sent as they are: make sure they are meant for this printer.",
+    "P104": "When you know the roll: bobina paper new 30m (its length) or bobina paper new --diameter 40mm.",
+    "P401": "Install or turn on what the message names, or set up another kind of printer: USB, a printer on"
+    " another machine (ssh) or a file printer.",
+    "P402": "Check the profile: bobina profile list, then bobina init --profile ID (80 mm printers need another).",
+    "P403": "Add the user to the lp group (sudo usermod -aG lp $USER), then log out and in again.",
     # M markup and data
     "M101": "Check the attribute name (bobina help format).",
     "M102": "Use a block type bobina knows (bobina help format); the block printed as plain text.",
