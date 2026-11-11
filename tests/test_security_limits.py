@@ -425,3 +425,120 @@ def test_windows_device_names_are_never_output_names(monkeypatch):
         "_lpt9",
         "console",
     ]
+
+
+# -- text going to the printer: C0/C1 controls never reach the stream ---------------------------------------
+
+CONTROLS = [chr(c) for c in [*range(0, 9), *range(11, 32), 0x7F, *range(0x80, 0xA0)]]  # not \t, \n
+PLACES = [
+    "{{ d }}", "# {{ d }}", "### {{ d }}", "- {{ d }}", "1. {{ d }}", "- [ ] {{ d }}", "> {{ d }}",
+    "| a | b |\n|---|---|\n| {{ d }} | x |", "```text\n{{ d }}\n```", "`{{ d }}`", "**{{ d }}**",
+    "[{{ d }}](https://example.com)", "{{ d | markdown }}", "{{ d | upper }}", "[{{ d }}]{.invert}",
+    "::: {size=small}\n{{ d }}\n:::",
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("profile", [None, "epson-tm-t88v"])  # UTF-8 text, and a printer with code pages
+@pytest.mark.parametrize("src", PLACES)
+def test_control_characters_never_reach_the_printer_from_any_block(src, profile):
+    """Text reaches the stream only as the characters of TextRow cells (escpos.text_row; raster rows are pixels):
+    none of them may be a control, and no raw row may appear."""
+    from bobina.rows import RawRow, TextRow
+
+    payload = " ".join(f"Z{c}Q" for c in CONTROLS) + " é ß"
+    for fields, text in (
+        ({"d": Tainted(payload)}, src),
+        ({"d": payload}, src),
+        (None, src.replace("{{ d }}", payload)),
+    ):
+        res = build(text, fields=fields, profile_name=profile)  # data, a value of the author, the author's own text
+        if fields is None and "{{" in text:
+            continue  # {{ d | upper }}: only as a value
+        cells = [cell.ch for r in res.rows if isinstance(r, TextRow) for cell in r.cells]
+        assert "Z" in cells and not set(cells) & set(CONTROLS), src
+        assert not [r for r in res.rows if isinstance(r, RawRow)]
+
+
+def test_no_code_page_turns_a_letter_into_a_control_byte():
+    """Native text goes out in the profile's code pages: no character any profile can send becomes a byte below
+    0x20 or 0x7F (they would be printer commands)."""
+    import tomllib
+    from importlib import resources
+
+    from bobina.layout import CTRL
+    from bobina.profile import plain_ascii
+
+    codecs = set()
+    for f in (resources.files("bobina") / "profiles").iterdir():
+        if f.name.endswith(".toml"):
+            codecs |= set(tomllib.loads(f.read_text(encoding="utf-8")).get("codepages") or {})
+    assert codecs, "no profile with code pages: the test would prove nothing"
+    chars = [
+        chr(c) for c in range(0x80, 0x10000) if not (CTRL.match(chr(c)) or plain_ascii(chr(c)) or 0xD800 <= c < 0xE000)
+    ]
+    for codec in sorted(codecs):
+        for ch in chars:
+            try:
+                b = ch.encode(codec)
+            except UnicodeEncodeError:
+                continue
+            assert all(x >= 0x20 and x != 0x7F for x in b), (codec, hex(ord(ch)), b)
+
+
+# -- the --command printer and the MCP server: argv entries, never a shell ----------------------------------
+
+
+def test_a_command_printer_runs_without_a_shell(tmp_path):
+    import shlex
+    import sys
+
+    out, pwned = tmp_path / "job.bin", tmp_path / "pwned"
+    copy = f"import sys; open({str(out)!r}, 'wb').write(sys.stdin.buffer.read())"
+    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(copy)} ; touch {shlex.quote(str(pwned))} $(id)"
+    assert cli.main(["printer", "add", "cmd", "--command", command]) == cli.OK
+    assert cli.main(["print", "hello", "--yes", "--printer", "cmd"]) == cli.OK
+    assert b"hello" in out.read_bytes()
+    assert not pwned.exists()  # ';', 'touch' and '$(id)' were arguments of python, not shell syntax
+
+
+def test_mcp_tool_arguments_are_single_argv_entries_and_text_goes_on_stdin(monkeypatch):
+    anyio = pytest.importorskip("anyio")
+    pytest.importorskip("mcp")
+    from bobina import mcp_server
+
+    runs = []
+
+    async def run(argv, stdin=None, timeout=mcp_server.TIMEOUT):
+        runs.append((argv, stdin))
+        return mcp_server.Run(argv, 0, "{}", "")
+
+    monkeypatch.setattr(mcp_server, "run", run)
+    s = mcp_server.Server()
+    evil = "x; touch /tmp/pwned $(id) `id` | rm -rf ~ --yes"
+    doc = "# hi\n--yes\n$(id)"
+    anyio.run(lambda: s.print(text=doc, set_={"a": evil}, data=f"d={evil}.csv", printer=evil, profile=evil))
+    argv, stdin = runs[-1]
+    assert stdin == doc and doc not in argv and argv[1] == "-"
+    assert "--dry-run" in argv and "--yes" not in argv  # no confirm: true
+    for entry in (f"--set=a={evil}", f"--data=d={evil}.csv", f"--printer={evil}", f"--profile={evil}"):
+        assert entry in argv
+
+
+def test_mcp_children_are_started_from_a_list_never_a_shell(monkeypatch):
+    anyio = pytest.importorskip("anyio")
+    import sys
+
+    from bobina import mcp_server
+
+    started = []
+
+    async def open_process(command, **kw):
+        started.append((command, kw))
+        raise OSError("not started in tests")
+
+    monkeypatch.setattr(anyio, "open_process", open_process)
+    with pytest.raises(OSError):
+        anyio.run(mcp_server.run, ["check", "-", "--set=a=$(id)"], "text")
+    (command, kw) = started[0]
+    assert command == [sys.executable, "-m", "bobina", "check", "-", "--set=a=$(id)"]
+    assert "shell" not in kw
