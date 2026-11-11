@@ -175,6 +175,12 @@ def cmd_printer(args):
             cfg["default_printer"] = args.name
         config.save(cfg)
         print(f"added {args.name} → {config.path()}")
+        _, notes = common.machine_locale().get()  # a new machine: its locale is chosen (and said) here too
+        if notes and not args.quiet:
+            from ..nudges import Nudge
+
+            for line in common.render_problems([Nudge(c, m, None, h) for c, m, h in notes], ""):
+                err(line)
         return OK
     if args.action in ("use", "remove"):
         if args.name not in printers:

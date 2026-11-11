@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.config/1",
+  "title": "bobina config locale [TAG] --json",
+  "type": "object",
+  "required": [
+    "schema",
+    "key",
+    "value",
+    "source",
+    "prints_as",
+    "time_zone",
+    "path",
+    "example",
+    "problems"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.config/1"
+    },
+    "key": {
+      "const": "locale"
+    },
+    "value": {
+      "type": ["string", "null"]
+    },
+    "source": {
+      "enum": ["config", "time zone", "default"]
+    },
+    "prints_as": {
+      "type": "string"
+    },
+    "time_zone": {
+      "type": ["string", "null"]
+    },
+    "path": {
+      "type": "string"
+    },
+    "example": {
+      "type": "object",
+      "required": ["date", "number", "money"]
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    }
+  }
+}

@@ -1,12 +1,14 @@
-"""~/.config/bobina/config.toml — printers, default profile, editor. Addresses live here, never in code."""
+"""~/.config/bobina/config.toml — printers, default profile, editor, locale. Addresses live here, never in code."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 
 from . import fileio, paths
 
 EXAMPLE = """# bobina configuration
+# locale = "pt-BR"                 # documents without locale: (bobina config locale TAG)
 # default_printer = "mtp"
 # editor = "cursor --wait"
 #
@@ -60,6 +62,42 @@ def save(cfg: dict):
         for k, v in pr.items():
             lines.append(f"{k} = {_toml_value(v)}")
     fileio.atomic_write(path(), "\n".join(lines) + "\n")  # a reader never sees half a config
+
+
+TABLE = re.compile(r"^\s*\[\[?[^\[\]]+\]\]?\s*(#.*)?$")  # [printers.mtp], [[x]]
+
+
+def set_value(key: str, value) -> None:
+    """Sets one top-level KEY in config.toml and keeps the rest of the file as it is: comments, tables, the order
+    (save() rewrites the whole file). Under the file's lock; a file that would no longer read is never written."""
+    p = path()
+    with fileio.locked(p):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = ""
+        except OSError as e:
+            raise fileio.StateError(f"cannot read {p}: {e.strerror or e}") from e
+        lines = text.splitlines()
+        first_table = next((i for i, line in enumerate(lines) if TABLE.match(line)), len(lines))
+        line = f"{key} = {_toml_value(value)}"
+        same = re.compile(rf"^\s*{re.escape(key)}\s*=")
+        hit = next((i for i in range(first_table) if same.match(lines[i])), None)
+        if hit is not None:
+            lines[hit] = line
+        else:
+            i = first_table
+            while i > 0 and not lines[i - 1].strip():  # before the blank lines that open the first table
+                i -= 1
+            lines.insert(i, line)
+        new = "\n".join(lines) + "\n"
+        try:
+            ok = tomllib.loads(new).get(key) == value
+        except tomllib.TOMLDecodeError:
+            ok = False
+        if not ok:
+            raise fileio.StateError(f"{p}: could not set {key} without changing the rest; set {line} by hand")
+        fileio.atomic_write(p, new)
 
 
 def printer(cfg: dict, name: str | None) -> tuple[str | None, dict | None]:

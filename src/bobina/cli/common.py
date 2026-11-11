@@ -157,6 +157,20 @@ def command_word(argv: list[str]) -> str:
 def set_command(argv: list[str]) -> None:
     """The command of this run, so errors end with the right outcome."""
     _STOPPED[0] = STOPPED_BY_COMMAND.get(command_word(argv) or "print", "nothing changed")
+    _MACHINE[0] = None  # each command reads config.toml again
+
+
+_MACHINE: list = [None]
+
+
+def machine_locale():
+    """This command's locales.Machine: the locale of documents without locale: (config.toml, else inferred from the
+    time zone and saved). One per command, so a batch, its parts and its rebuilds give its note once."""
+    from .. import locales
+
+    if _MACHINE[0] is None:
+        _MACHINE[0] = locales.Machine()
+    return _MACHINE[0]
 
 
 def stopped() -> str:
@@ -622,6 +636,7 @@ def _build(args, source, base_dir, counters=None):
             plain=getattr(args, "plain", False),
             allow=allow_set(args),
             net=getattr(args, "allow_net", False),
+            locale=machine_locale(),
             **({"counters": counters} if counters is not None else {}),
         )
     except KeyError as e:

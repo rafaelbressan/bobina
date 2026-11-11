@@ -63,6 +63,8 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("history", "--outcom", "--outcome"),
     ("history", "--longo", "--long"),
     ("calibrate", "--out", "--output"),
+    ("config", "--josn", "--json"),
+    ("config", "--data", "belongs:print"),
     ("calibrate", "--dryrun", "--dry-run"),
     ("edit", "--templte", "--template"),
     ("edit", "--yse", "--yes"),

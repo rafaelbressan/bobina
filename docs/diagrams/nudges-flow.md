@@ -169,6 +169,8 @@ from this list.
 | `M160` | note | Excel formula cells without a saved value print empty |  |
 | `M201` | warning | date pattern looks like Moment.js |  |
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |  |
+| `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |  |
+| `M204` | note | no locale for this machine: dates, numbers and money in English |  |
 
 ### Text and fonts
 
@@ -177,6 +179,7 @@ from this list.
 | `F301` | note | glyph not in the printer font: line printed as an image | N5 |
 | `F302` | warning | glyph missing in every available font |  |
 | `F303` | note | size not supported natively, nearest native size used | N1 |
+| `F304` | note | no font for the locale's script yet: English words with its country's formats |  |
 | `F201` | warning | font below its tested minimum size | F1, F2 |
 | `F202` | warning | untested font with strokes thinner than 2 dots | R4-01 |
 | `F203` | warning | font not found, a bundled font was used |  |

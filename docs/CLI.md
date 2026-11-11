@@ -34,6 +34,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `fonts list \| test \| mark` | recommended fonts and the font test registry | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
+| `config locale [TAG]` | show or save the locale of documents without `locale:` ([FORMAT.md §7.1](FORMAT.md#71-dates-and-languages)) | — |
 | `profile list \| show \| use` | printer profiles | — |
 | `template list \| show \| new` | ready-made documents (receipt, label, todo, card, shop tags…) | — |
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
@@ -461,7 +462,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 
 - `uv tool install bobina` (or `pipx`) → `bobina` and `bob`.
 - Implementation: Python + Pillow (reuses the test tooling), `jinja2` (sandboxed), `babel` (CLDR). Modules: parser → layout → render → transport.
-- Config: `~/.config/bobina/config.toml` (default profile, printers, editor, preferences).
+- Config: `~/.config/bobina/config.toml` (default profile, printers, editor, locale, preferences).
 - Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
 

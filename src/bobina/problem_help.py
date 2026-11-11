@@ -11,6 +11,10 @@ FIX = {
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
     "F303": "Use a size the printer has natively (small, normal, large, title, huge), or a font size in px (raster).",
+    "F304": (
+        "Nothing to fix: the dates and numbers are readable, in English with the country's formats (th-TH prints as "
+        "en-TH). Another locale: bobina config locale TAG, or locale: in the document."
+    ),
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
     "F203": "Check the font name (bobina fonts list); install the font or use a bundled one.",
@@ -101,6 +105,14 @@ FIX = {
     "M159": "Rename one of the two columns so both get a usable name.",
     "M160": "Open the file in Excel and save it, so formula values are stored.",
     "M202": "Write the number with digits (24.90, 24,90 or R$ 24,90), or a smaller amount for add().",
+    "M203": (
+        "Nothing to fix if it is right: documents without locale: use it from now on, even if the machine travels. "
+        "Another: bobina config locale TAG (bobina config locale shows it)."
+    ),
+    "M204": (
+        "Set this machine's locale: bobina config locale pt-BR (any BCP 47 tag), or write locale: in the document. "
+        "Without one, a typed 1.890 is not read as a price (M202)."
+    ),
     "M201": "Use CLDR date patterns (dd/MM/yyyy HH:mm), not Moment.js (DD/MM/YYYY).",
     "M310": "Templates cannot read files: put the content in the document.",
     "M311": 'A counter format takes exactly one {:spec} ("{:d}", "A-{:03}"); other unsafe operations are refused.',

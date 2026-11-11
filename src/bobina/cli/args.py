@@ -17,6 +17,7 @@ from .device import MODES, cmd_calibrate, cmd_mode, cmd_paper, cmd_printer, cmd_
 from .documents import cmd_check, cmd_edit, cmd_preview, cmd_print, cmd_view
 from .history import cmd_history
 from .library import cmd_fonts, cmd_library, cmd_profile, cmd_seq, cmd_template
+from .settings import cmd_config
 
 
 def cmd_mcp(args):
@@ -271,7 +272,7 @@ COMMAND_KIND = {
     "history": "prints",  # history clear --yes
     "check": "reads", "preview": "reads", "view": "reads", "status": "reads", "printer": "reads",
     "profile": "reads", "template": "reads", "seq": "reads", "fonts": "reads", "library": "reads",
-    "paper": "reads", "help": "reads",
+    "paper": "reads", "help": "reads", "config": "reads",
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
 }  # fmt: skip
 _PARENTS: dict = {}
@@ -662,6 +663,17 @@ def make_parser():
     p.add_argument("--path", help="append bytes to this file/device")
     p.add_argument("--default", action="store_true")
     p.add_argument("--seconds", type=int, default=8, help="scan duration")
+    p = _cmd(
+        sub,
+        "config",
+        "see and change settings",
+        "settings in ~/.config/bobina/config.toml. locale: the locale of documents without locale: (dates, numbers"
+        " and money); without one, the first print, check or preview infers it from the time zone and saves it",
+        ["bobina config locale", "bobina config locale pt-BR", "bobina config locale --json"],
+        cmd_config,
+    )
+    p.add_argument("key", choices=["locale"])
+    p.add_argument("value", nargs="?", metavar="TAG", help="a BCP 47 tag (pt-BR, en-US, fr-CA): saved; none: shown")
     p = _cmd(
         sub,
         "profile",

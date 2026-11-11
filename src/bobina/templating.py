@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import yaml
-from babel import Locale, UnknownLocaleError
+from babel import Locale
 from babel import dates as bdates
 from babel import numbers as bnumbers
 from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined
@@ -515,12 +515,12 @@ def ambiguity_message(raw, whole: str, frac: str) -> tuple[str, str]:
 def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: bool = True):
     decimal = bnumbers.get_decimal_symbol(loc)
 
-    def num(v, where: str, then: str = "printed as it is", money: Locale | None = None):
+    def num(v, where: str, then: str = "printed as it is"):
         """v as a number, or None (with M202) when it is not one. Empty and undefined are None, silently: M130
         and M131 already say a field is missing."""
         if isinstance(v, Undefined) or v is None or str(v).strip() == "":
             return None
-        n = parse_number(v, bnumbers.get_decimal_symbol(money) if money else decimal)  # read as it is written
+        n = parse_number(v, decimal)  # read in the locale it is written in
         if n is None:
             nudges.add("M202", f"'{v}' is not a number ({where}): {then}",
                        suggestion="write digits, like 24.90 or 24,90")  # fmt: skip
@@ -591,12 +591,12 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         return dt
 
     def two_ways(v, where: str, payment: bool) -> bool:
-        """An amount like 1.890 reads two ways. A payment never takes it; a price takes it when the document says
-        its locale (then 1.890 is what that language means), never when the locale was only guessed."""
+        """An amount like 1.890 reads two ways. A payment never takes it; a price takes it when the locale was set
+        (the document's or the machine's: then 1.890 is what that language means), never in the English fallback."""
         both = two_readings(v) if (payment or not explicit_locale) else None
         if both:
             msg, hint = ambiguity_message(v, *both)
-            hint += "" if payment else ", or set locale: (then 1.890 means what that language means)"
+            hint += "" if payment else ", or set a locale (then 1.890 means what that language means)"
             nudges.add("M202", f"{msg} ({where}): printed as it is", suggestion=hint)
         return bool(both)
 
@@ -605,10 +605,10 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 
         if two_ways(v, "currency", payment=False):
             return typed(v)
-        n = num(v, "currency", money=money_locale(code, loc, explicit_locale))
+        n = num(v, "currency")
         if n is None:
             return typed(v)
-        return money(None, n, {"currency": code}, loc, explicit_locale)  # as a payment caption: BTC, jpy, R$
+        return money(None, n, {"currency": code}, loc)  # as a payment caption: BTC, jpy, R$
 
     def f_number(v, decimals=None):
         n = num(v, "number")
@@ -638,10 +638,10 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         s = SCHEMES.get(str(scheme).strip().lower())
         if two_ways(v, "paymoney", payment=True):  # the same refusal as the pay block next to it
             return typed(v)
-        n = num(v, "paymoney", money=money_locale(s.currency if s else None, loc, explicit_locale))
+        n = num(v, "paymoney")
         if n is None:
             return typed(v)
-        return money(s, n, {}, loc, explicit_locale)
+        return money(s, n, {}, loc)
 
     def f_float(v, default=0.0):
         n = num(v, "float", f"counted as {default}")
@@ -715,60 +715,15 @@ def pick_labels(template_labels: dict | None, user_labels: dict | None, loc: Loc
     return out
 
 
-# The country whose way of writing a currency people expect on a price or a payment caption. A document that says
-# locale: (or lang:) keeps its own; without one, R$ is written as in Brazil (R$ 24,90), not as the system's LANG
-# would (R$24.90 on an en_US machine). EUR and BTC have no single home: they follow the document.
-CURRENCY_HOME = {
-    "BRL": "pt_BR", "INR": "en_IN", "THB": "th_TH", "SGD": "en_SG", "USD": "en_US", "GBP": "en_GB",
-}  # fmt: skip
-
-
-def has_locale(meta: dict) -> bool:
-    return bool(meta.get("locale") or meta.get("lang"))
-
-
-def money_locale(code: str | None, loc: Locale, explicit: bool) -> Locale:
-    """The locale an amount in currency CODE is written in: the document's when it declares one, else the
-    currency's home country (CURRENCY_HOME), else the document's."""
-    home = None if explicit else CURRENCY_HOME.get(str(code or "").upper())
-    return Locale.parse(home) if home else loc
-
-
-def resolve_locale(meta: dict) -> Locale:
-    import os
-
-    tag = (
-        meta.get("locale")
-        or meta.get("lang")
-        or os.environ.get("LC_ALL")
-        or os.environ.get("LC_TIME")
-        or os.environ.get("LANG")
-        or "en"
-    )
-    tag = str(tag).split(".")[0].replace("-", "_")
-    if tag in ("C", "POSIX", ""):
-        tag = "en"
-    try:
-        return Locale.parse(tag)
-    except (UnknownLocaleError, ValueError):
-        return Locale.parse("en")
-
-
 def resolve_tz(meta: dict) -> ZoneInfo:
-    import os
+    from .locales import system_zone
 
-    name = meta.get("timezone") or os.environ.get("TZ")
-    if name:
-        try:
-            return ZoneInfo(str(name).lstrip(":"))
-        except Exception:
-            pass
-    try:  # /etc/localtime -> .../zoneinfo/America/Sao_Paulo
-        link = os.path.realpath("/etc/localtime")
-        if "zoneinfo/" in link:
-            return ZoneInfo(link.split("zoneinfo/", 1)[1])
-    except Exception:
-        pass
+    for name in (meta.get("timezone"), system_zone()):
+        if name:
+            try:
+                return ZoneInfo(str(name).lstrip(":"))
+            except Exception:  # noqa: BLE001
+                pass
     return datetime.now().astimezone().tzinfo  # type: ignore[return-value]
 
 
@@ -805,8 +760,13 @@ def render(
     defaults: dict | None = None,
     labels: dict | None = None,
     quiet_names: frozenset = frozenset(),
+    locale=None,
 ) -> Rendered:
-    loc, tz = resolve_locale(meta), resolve_tz(meta)
+    """locale: the document's locales.Choice (engine.build makes it); None: the document's locale: or English."""
+    from .locales import choose
+
+    choice = locale or choose(meta)
+    loc, tz = choice.locale, resolve_tz(meta)
     values: list[Value] = []
     undefined_names: list[str] = []
     budget = Budget()
@@ -840,7 +800,7 @@ def render(
         comment_start_string="<#",
         comment_end_string="#>",  # `{#id}` stays a Pandoc attribute
     )
-    env.filters.update(make_filters(loc, tz, nudges, has_locale(meta)))
+    env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
         if name != "markdown":  # markdown already handles data (no images, no raw) and returns MdSafe
             env.filters[name] = keep_taint(f)
