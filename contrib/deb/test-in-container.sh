@@ -10,7 +10,7 @@ dir=$(cd "$(dirname "$deb")" && pwd)
 name=$(basename "$deb")
 docker run --rm --platform "linux/$arch" -v "$dir:/deb:ro" "$image" sh -euxc "
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
+    for i in 1 2 3 4 5; do apt-get update -qq --error-on=any && break; [ \$i = 5 ] && exit 1; sleep 15; done  # mirrors' DNS fails at times on CI
     apt-get install -y -qq --no-install-recommends /deb/$name >/dev/null
     python3 -c 'import socket, sys; print(sys.version, socket.AF_BLUETOOTH)'
     find /usr/lib/bobina/common/bobina -name '*.pyc' | grep -q .

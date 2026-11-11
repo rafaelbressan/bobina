@@ -167,4 +167,8 @@ jobs:
           [ -s notes.md ] || echo "bobina $v" > notes.md
           pre=""; [ "${{ needs.build.outputs.prerelease }}" = "true" ] && pre="--prerelease"
           [ "${{ needs.deb-test.result }}" = "success" ] || echo "::warning::no .deb in this release: deb-test did not pass"
-          gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md $pre
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then  # a re-run: add what is missing (the .debs)
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "bobina $v" --notes-file notes.md $pre
+          fi
