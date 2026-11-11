@@ -1,5 +1,7 @@
 import sys
 
+import pytest
+
 from bobina import cli
 
 
@@ -127,6 +129,44 @@ def test_roll_length_from_diameter():
     from bobina import paper
 
     assert 18_000 < paper.from_diameter(40, 12, 0.06) < 20_000  # ~19 m: typical 57x40 roll
+
+
+def test_roll_sizes_as_they_are_written_around_the_world():
+    from bobina import paper
+
+    assert paper.parse_length("50ft") == paper.parse_length("50'") == paper.parse_length("50 feet") == 15240
+    assert paper.parse_length("1,5m") == 1500 and paper.parse_length("15") == 15000  # bare: metres (terminal)
+    assert round(paper.parse_width('2 1/4"'), 2) == 57.15 and paper.parse_width("80") == 80
+    with pytest.raises(ValueError, match="use 15m"):
+        paper.parse_length("30", None)
+    for code in ("57x30", "80 x 40", "57 × 40 × 12"):  # never guessed: metres (Brazil) or diameter (Europe)?
+        with pytest.raises(ValueError, match="package code") as e:
+            paper.parse_length(code)
+        assert "--diameter" in str(e.value) and "m --width" in str(e.value)
+    assert "--core 12mm" in paper.code_advice("57x40x12", cli=True)
+    us = paper.code_advice("2 1/4 x 50")  # inches x feet: only the feet reading is asked
+    assert "feet?" in us and 'length "50ft"' in us and "diameter" not in us
+    assert paper.code_advice("57mm x 30m") == "'57mm x 30m' is a package code with its units: give its parts as" \
+                                              ' length "30m", width "57mm"'  # fmt: skip
+    assert paper.fits(57, 58) and paper.fits(79.4, 80) and not paper.fits(80, 58)
+
+
+def test_paper_new_warns_when_the_roll_is_not_the_printers_width(capsys):
+    from bobina import paper
+
+    run("printer", "add", "pipe", "--command", f'{sys.executable} -c "import sys; sys.stdin.buffer.read()"')
+    assert run("paper", "new", "30m", "--width", "57mm") == cli.OK
+    assert "P103" not in capsys.readouterr().err  # 57 mm rolls are the 58 mm printers' rolls
+    assert run("paper", "new", "40m", "--width", "80mm") == cli.OK  # a nudge: recorded anyway
+    out = capsys.readouterr()
+    assert "P103" in out.err and "takes 58 mm paper" in out.err and "80 mm wide" in out.out
+    assert paper.get("pipe")["roll_mm"] == 40000 and paper.get("pipe")["width_mm"] == 80
+    assert run("paper", "new", "40m", "--width", "80mm", "--allow", "P103") == cli.OK
+    assert "P103" not in capsys.readouterr().err
+    assert run("paper", "new", "20m", "--width", "80mm", "--strict") == 3  # --strict: not recorded
+    assert "P103" in capsys.readouterr().err and paper.get("pipe")["roll_mm"] == 40000
+    assert run("paper", "new", "57x30") == cli.USAGE
+    assert "package code" in capsys.readouterr().err and paper.get("pipe")["roll_mm"] == 40000
 
 
 def test_paper_default_roll(tmp_path):

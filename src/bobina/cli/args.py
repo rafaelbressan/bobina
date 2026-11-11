@@ -350,6 +350,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--realistic": ["--realista", "--ink"],
     "--default": ["--padrao", "--main", "--principal"],
     "--command": ["--cmd", "--comando", "--exec"],
+    "--width": ["--largura", "--paper-width", "--roll-width"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
@@ -774,6 +775,7 @@ def make_parser():
             "bobina paper",
             "bobina paper new 15m",
             "bobina paper new --diameter 40mm --core 12mm",
+            "bobina paper new 50ft --width 57mm",
             "bobina paper new 10m --remember",
             "bobina paper new",
             "bobina paper used 3m",
@@ -782,10 +784,11 @@ def make_parser():
         cmd_paper,
     )
     p.add_argument("action", nargs="?", default="status", choices=["status", "new", "used"])
-    p.add_argument("length", nargs="?", help="15m, 1500cm …")
+    p.add_argument("length", nargs="?", help="15m, 1500cm, 50ft … (a bare number is metres)")
     p.add_argument("--diameter", help="outer diameter of the roll (e.g. 40mm)")
     p.add_argument("--core", default="12mm", help="core diameter (default 12mm)")
     p.add_argument("--thickness", default="0.06", help="paper thickness in mm (default 0.06)")
+    p.add_argument("--width", help="the roll's paper width (57mm, 80mm, 2 1/4in): a warning if it is not the printer's")
     p.add_argument(
         "--remember", action="store_true", help="save LENGTH as the default roll (paper new without arguments)"
     )

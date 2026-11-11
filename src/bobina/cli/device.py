@@ -199,6 +199,7 @@ def cmd_paper(args):
         raise Fail(UNREACHABLE, "no printer configured: bobina printer add NAME ADDRESS", problem="E401")
     try:
         if args.action == "new":
+            width = paper.parse_width(args.width) if args.width else None  # a wrong width records nothing
             if args.diameter:
                 mm = paper.from_diameter(
                     paper.parse_length(args.diameter, "mm"), paper.parse_length(args.core, "mm"), float(args.thickness)
@@ -214,13 +215,23 @@ def cmd_paper(args):
                     "(--remember saves LENGTH as the default roll)",
                     problem="E101",
                 )
+            misfit = _roll_width(args, name, width) if width else []
+            if misfit and args.strict:  # the one way P103 stops; otherwise the roll is recorded anyway
+                for line in common.render_problems(misfit, "nothing changed (--strict)"):
+                    err(line)
+                return common.STRICT
             if args.remember and args.length:
                 cfg = config.load()
                 cfg["paper_roll"] = args.length
                 config.save(cfg)
-            paper.new_roll(name, mm, note)
+            paper.new_roll(name, mm, note, width)
             if not args.json:  # --json: the roll as it is now, below
-                print(f"{name}: new roll of {mm / 1000:.1f} m" + (f" ({note})" if note else ""))
+                wide = f", {width:.0f} mm wide" if width else ""
+                print(f"{name}: new roll of {mm / 1000:.1f} m{wide}" + (f" ({note})" if note else ""))
+            if misfit and not args.quiet:
+                for line in common.render_problems(misfit, "roll recorded"):
+                    err(line)
+            if not args.json:
                 return OK
         if args.action == "used":
             if not args.length:
@@ -256,6 +267,27 @@ def cmd_paper(args):
         "  correct with: bobina paper used +30cm (add) or bobina paper used 3m (total)"
     )
     return OK
+
+
+def _roll_width(args, name: str, width: float) -> list:
+    """[P103] when the roll is not as wide as the printer's paper (an 80 mm roll on a 58 mm printer). Recorded
+    anyway: the user may be about to move it, or the profile may be the wrong one."""
+    from .. import paper
+    from ..nudges import Nudges
+
+    cfg = config.load()
+    _, prof = _strip_profile(args, cfg, config.printer(cfg, name)[1] or {})
+    paper_mm = float(prof.get("paper_mm", 58))
+    if paper.fits(width, paper_mm) or "P103" in common.allow_set(args):
+        return []
+    n = Nudges()
+    n.add(
+        "P103",
+        f"this {width:.0f} mm roll does not fit {name}: its profile ({prof.id}) takes {paper_mm:g} mm paper",
+        None,
+        f"load a {paper_mm:g} mm roll, or record this one for the printer it fits (--printer)",
+    )
+    return n
 
 
 def tear_ruler(profile):

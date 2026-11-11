@@ -683,7 +683,7 @@ job may already be on paper: check the paper and `bobina history` before printin
     **⚠ not tested on paper.** `bobina calibrate tear` then measures the distance to the blade.
   - Native barcodes on imported profiles (`barcode.native` from the printer database). **⚠ not tested on paper.**
 - `calibrate compare` finds the paper in the photo, scales it to the printable width and reports length error, row-profile correlation and a 0–100 score, plus a side-by-side PNG (exact | realistic | photo).
-- `bobina paper` (2026-11-05): a paper odometer per printer. `paper new 15m` (or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded; every confirmed print adds its exact length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.
+- `bobina paper` (2026-11-05): a paper odometer per printer. `paper new 15m` (`1500cm`, `50ft`; or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded, `--width 57mm` to warn (`P103`, recorded anyway) when the roll is not the printer's width; a package code (`57x30`: 30 m or a 30 mm diameter?) is refused with that question; every confirmed print adds its exact length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.
 
 
 <!-- file: docs/FORMAT.md -->
@@ -1163,6 +1163,7 @@ Nudges:
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
+| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
