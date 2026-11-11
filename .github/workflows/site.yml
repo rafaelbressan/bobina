@@ -35,17 +35,17 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: npm ci --prefix site --registry=https://registry.npmjs.org/
+        run: cd site && npm ci --registry=https://registry.npmjs.org/
       - name: The site of the newest release, as Vercel builds it (captures of an older release only warn)
-        run: npm run build --prefix site
+        run: cd site && npm run build
       - name: Strict, for the release the committed captures were recorded with
         run: |
           version=$(node -p "require('./site/src/captures/captures.json').bobina")
-          BOBINA_SITE_REF="v$version" BOBINA_SITE_STRICT=1 npm run build --prefix site
+          cd site && BOBINA_SITE_REF="v$version" BOBINA_SITE_STRICT=1 npm run build
       - name: The docs on this branch build too (what the next release will publish)
         env:
           BOBINA_SITE_REF: WORKTREE
-        run: npm run build --prefix site
+        run: cd site && npm run build
 
   captures:
     # Records the casts and tickets again, for the release they are of and with the packages of capture/lock.txt, and

@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm ci --prefix site --registry=https://registry.npmjs.org/",
-  "buildCommand": "npm run build --prefix site",
+  "installCommand": "cd site && npm ci --registry=https://registry.npmjs.org/",
+  "buildCommand": "cd site && npm run build",
   "outputDirectory": "site/dist",
   "routes": [
     {
