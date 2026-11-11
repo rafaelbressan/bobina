@@ -8,6 +8,7 @@ Data values come from spreadsheets: they are cleaned so a cell can never become 
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -24,9 +25,16 @@ def is_pattern(name: str | None) -> bool:
     return bool(name and PLACEHOLDER.search(name))
 
 
+WINDOWS = os.name == "nt"
+DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{i}" for d in ("COM", "LPT") for i in range(1, 10))}  # Windows
+
+
 def clean(value: str) -> str:
     v = UNSAFE.sub("_", str(value)).strip().strip(".")
     v = re.sub(r"\.{2,}", "_", v)
+    v = re.sub(r"^~", "_", v)  # ~ or ~user would be a home folder to whatever expands the path later
+    if WINDOWS and v.split(".")[0].strip().upper() in DEVICES:  # NUL.png is the null device on Windows
+        v = "_" + v
     return (v or "_")[:80]
 
 
@@ -34,6 +42,7 @@ def names(pattern: str, metas: list[dict]) -> list[Path]:
     """metas: per label {n, i, part, file, fields}. -> one path per label; errors for unknown placeholders and
     for two labels that would get the same name (one would overwrite the other)."""
     out = []
+    base = os.path.expanduser(pattern)  # the ~ the user typed; never one that a value brings in
     for m in metas:
 
         def fill(match, m=m):
@@ -46,7 +55,7 @@ def names(pattern: str, metas: list[dict]) -> list[Path]:
                 raise ExportError(f"-o {pattern}: no value for {{{key}}} (available: {avail})")
             return clean(_case(str(val), case, pattern))
 
-        out.append(Path(PLACEHOLDER.sub(fill, pattern)).expanduser())
+        out.append(Path(PLACEHOLDER.sub(fill, base)))
     seen: dict[Path, int] = {}
     for k, p in enumerate(out, 1):
         if p in seen:

@@ -12,7 +12,7 @@ import time
 import openpyxl
 import pytest
 
-from bobina import cli, datasource, fileio, library, sources, templating
+from bobina import cli, datasource, export, fileio, library, sources, templating
 from bobina.engine import build
 from bobina.nudges import SecurityError
 from bobina.templating import Tainted
@@ -386,3 +386,42 @@ def test_a_document_cannot_turn_the_network_on(monkeypatch):
     for fm in ("allow_net: true", "allow: [I103, net]", "net: true"):
         res = build(f"---\n{fm}\n---\n![](https://example.com/logo.png)\n")
         assert not [r for r in res.rows if getattr(r, "kind", None) == "image"]
+
+
+# -- -o with {column}: a data value never places a file outside the folder chosen ------------------------
+
+HOSTILE_NAMES = ["../../x", "/abs/x", "~", "~root", "~/x", "a\\..\\b", "C:x", "..", "...", "a\x00b", " . ", ""]
+
+
+@pytest.mark.parametrize("pattern", ["{name}.bin", "{name}/label.bin", "labels-{name|slug}/{name}-{n}.bin"])
+def test_values_in_output_names_stay_in_the_folder(tmp_path, monkeypatch, pattern):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    monkeypatch.chdir(folder)  # a relative -o that starts with the value: '~' there was the home folder
+    for v in HOSTILE_NAMES:  # one label each: two of them cleaned alike would be refused as the same name
+        (p,) = export.names(pattern, [{"n": 1, "i": 1, "part": 1, "file": "doc", "fields": {"name": v}}])
+        assert not p.is_absolute(), p
+        p = folder / p
+        assert p.resolve().is_relative_to(folder.resolve()), p
+        assert all(part not in ("..", ".") and not part.startswith("~") for part in p.relative_to(folder).parts), p
+
+
+def test_output_names_from_a_spreadsheet_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "doc.bob.md").write_text("{{ name }}\n")
+    (tmp_path / "d.csv").write_text("name\n" + "".join(f'"{v}"\n' for v in HOSTILE_NAMES[:7]))
+    code = cli.main(["print", "doc.bob.md", "--data", "d.csv", "-o", "out/{name}-{n}.bin"])
+    assert code == cli.OK
+    written = [p for p in tmp_path.rglob("*.bin")]
+    assert len(written) == 7 and all(p.parent == tmp_path / "out" for p in written), written
+
+
+def test_windows_device_names_are_never_output_names(monkeypatch):
+    monkeypatch.setattr(export, "WINDOWS", True)
+    assert [export.clean(v) for v in ("NUL", "con", "Com1.txt", "lpt9", "console")] == [
+        "_NUL",
+        "_con",
+        "_Com1.txt",
+        "_lpt9",
+        "console",
+    ]
