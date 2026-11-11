@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PARTS = [
     "README.md",
+    "docs/agents.md",
     "docs/CLI.md",
     "docs/FORMAT.md",
     "docs/guides/batch-printing.md",

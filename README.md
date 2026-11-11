@@ -131,7 +131,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `calibrate tear` / `calibrate feed` | where the tear bar is; whether feeds after images need the safe mode |
 | `paper [new 15m \| used 3m]` | paper left on the roll (the printer only reports "out") |
 | `profile list \| show`, `fonts list`, `send FILE.bin` | profiles, tested fonts, raw bytes |
-| `mcp` | a server for AI agents (MCP; `uv tool install 'bobina[mcp]'`, then `claude mcp add bobina -- bobina mcp`): [docs/CLI.md](docs/CLI.md#agents-bobina-mcp) |
+| `mcp` | a server for AI agents (MCP; `uv tool install 'bobina[mcp]'`, then `claude mcp add bobina -- bobina mcp`): [docs/agents.md](docs/agents.md) |
 
 `bob` is the same binary. Short aliases exist for typing (`bobina help aliases`); docs always use
 full names. Exit codes: 0 ok · 1 usage · 2 document · 3 strict nudges · 4 unreachable · 5 printer

@@ -20,11 +20,12 @@ Facts an agent needs first:
 - Reprint: `print --last` (identical bytes) or `--again` (re-rendered); `-o FILE` saves bytes instead of printing.
 - Try without hardware: `bobina printer add test --path out.bin` (a file printer).
 - An MCP client (Claude Code, Cursor): `uv tool install 'bobina[mcp]'`, `claude mcp add bobina -- bobina mcp`;
-  tools check, preview, print (prints only with `confirm: true`), help, templates ([CLI](docs/CLI.md#agents-bobina-mcp)).
+  tools check, preview, print (prints only with `confirm: true`), help, templates ([agents](docs/agents.md)).
 
 ## Docs
 
 - [README](README.md): install, the document format in one screen, every command in one table
+- [Agents](docs/agents.md): the rules for agents, machine output, the MCP server (`bobina mcp`)
 - [CLI reference](docs/CLI.md): commands and options, problems and exit codes, strips (`--compact`, `--marks`), calibration
 - [Document format](docs/FORMAT.md): the `.bob.md` format and the catalog of problem codes
 - [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
