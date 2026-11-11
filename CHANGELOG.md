@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- One locale per job, never mixed: a document's `locale:`, else the machine's (`locale` in config.toml), else
+  English. A label without `locale:` on a machine in Brazil with `LANG=en_US` now prints "USE BY 09/11/2026" and
+  "R$ 24,90", not "11/9/26" next to "R$ 24,90"; a USD price there is "US$ 24,90".
+- The machine's locale is inferred on the first print, check, preview or `printer add` that needs it: the time
+  zone's country, with the `LANG` language when it is official there, else the country's first (`America/Sao_Paulo`
+  → pt-BR, `America/Toronto` + `fr_CA` → fr-CA, `Asia/Kolkata` + `en` → en-IN). It is saved in config.toml (the
+  rest of the file kept as it was) and said once (`M203`); it stays when the laptop travels.
+- `bobina config locale [TAG]` shows it (with a date, a number and an amount as they will print) or saves it;
+  `--json` (schema `bobina.config/1`).
+- No country in the time zone (`Etc/UTC`, containers): English, said once (`M204`); a typed `1.890` is still not
+  read as a price there. With a locale set, `| currency` reads it in that locale; payments always refuse it.
+- A locale whose script bobina cannot draw yet (Thai, Hindi, Japanese, right-to-left scripts) prints English words
+  with its country's formats (th-TH → en-TH, `F304`), until bobina has fonts per script.
+- Removed: money written as the currency's country does (R$ 24,90 in an otherwise English document).
+
 ## 0.1.1 — 2026-11-10
 
 - `bobina mcp`: a Model Context Protocol server (stdio) for agents, with the extra `bobina[mcp]`. Its tools
