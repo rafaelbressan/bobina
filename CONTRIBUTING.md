@@ -19,11 +19,11 @@
 - **Homebrew**: this repository is the tap `rafaelbressan/bobina` (`Formula/bobina.rb`: Pillow from Homebrew's
   bottle, every other dependency a `resource`); users run `brew tap rafaelbressan/bobina
   https://github.com/rafaelbressan/bobina`, then `brew install rafaelbressan/bobina/bobina` (the full name:
-  Homebrew 7 trusts a tap only then). On each release that is not a pre-release, the `homebrew` job of the release
-  workflow points `url` and `sha256` at the new sdist, regenerates the resources, builds from source, runs
-  `brew test` and `brew audit --strict` with read-only access; `homebrew-push` then commits the formula to `main`
-  with its own token (after the personal-data scan). When that fails, bump by hand on a Mac, in the tap (a clone
-  of this repository):
+  Homebrew 7 trusts a tap only then). On each release that is not a pre-release, `.github/workflows/homebrew.yml`
+  points `url` and `sha256` at the new sdist, regenerates the resources, builds from source, runs `brew test` and
+  `brew audit --strict` with read-only access; its `push` job then commits the formula to `main` with its own token
+  (after the personal-data scan). When that fails, fix it and run it again: `gh workflow run homebrew.yml -f
+  version=X.Y.Z`. Or bump by hand on a Mac, in the tap (a clone of this repository):
 
   ```bash
   cd "$(brew --repository rafaelbressan/bobina)" && git pull
