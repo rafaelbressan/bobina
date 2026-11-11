@@ -262,7 +262,7 @@ def _common(printing: bool = True):
 
 
 # Commands with nothing to write as JSON: --json is accepted (it is a global option) and a note says it does nothing.
-NO_JSON = {"view", "edit", "send", "mode", "mcp"}
+NO_JSON = {"view", "edit", "send", "mode", "mcp", "chat"}
 
 # Every command declares its kind; a new command must be added here (and to tests/test_option_hints.py CASES):
 # "prints" commands take --yes, --dry-run and --editor; "reads" commands never print, so those options are not
@@ -274,6 +274,7 @@ COMMAND_KIND = {
     "profile": "reads", "template": "reads", "seq": "reads", "fonts": "reads", "library": "reads",
     "paper": "reads", "help": "reads", "config": "reads",
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
+    "chat": "prints", "ai": "reads",  # cli/chat.py
 }  # fmt: skip
 _PARENTS: dict = {}
 
@@ -327,7 +328,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--compact": ["--compacto", "--glue", "--join-labels", "--strip", "--tira"],
     "--marks": ["--marcas", "--cut-marks", "--tear-marks", "--marcar", "--guides"],
     "--quiet": ["--silent", "--silencioso"],
-    "--profile": ["--perfil", "--model", "--modelo"],
+    "--profile": ["--perfil", "--modelo"],  # --model is the AI's model (bobina chat)
     "--on": ["--key", "--chave", "--match", "--by", "--por", "--join-on", "--join-key"],
     "--sheet": ["--aba", "--tab", "--planilha-aba", "--worksheet"],
     "--ask": ["--pergunta", "--perguntar", "--prompt", "--interactive", "--interativo"],
@@ -352,6 +353,11 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--default": ["--padrao", "--main", "--principal"],
     "--command": ["--cmd", "--comando", "--exec"],
     "--width": ["--largura", "--paper-width", "--roll-width"],
+    "--ai": ["--ia", "--llm", "--provider", "--backend"],  # bobina chat
+    "--model": ["--ai-model", "--llm-model"],
+    "--questions": ["--perguntas", "--print-questions", "--with-questions"],
+    "--layout": ["--layout-chat", "--tickets", "--ticket", "--strip-layout", "--leiaute"],
+    "--manual": ["--on-demand", "--no-auto-print", "--imprimir-manual"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
@@ -846,6 +852,9 @@ def make_parser():
         ["claude mcp add bobina -- bobina mcp", "bobina mcp --printer test"],
         cmd_mcp,
     )
+    from .chat import register
+
+    register(sub, _cmd)  # chat and ai
     PARSER = ap
     return ap
 

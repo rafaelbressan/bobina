@@ -88,6 +88,13 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("template", "--output", "belongs:print"),
     ("view", "--pages", "belongs:preview"),
     ("view", "--compat", "--compact"),
+    ("chat", "--perguntas", "--questions"),
+    ("chat", "--ia", "--ai"),
+    ("chat", "--tickets", "--layout"),
+    ("chat", "--modle", "--model"),
+    ("chat", "--limt", "--limit"),
+    ("ai", "--modelo-ia", "--model"),
+    ("ai", "--llm-model", "--model"),
 ]
 
 

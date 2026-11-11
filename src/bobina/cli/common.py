@@ -137,6 +137,7 @@ STOPPED_BY_COMMAND = {  # what an error means for each command: the last words o
     "print": "nothing printed", "send": "nothing printed", "edit": "nothing printed",
     "calibrate": "nothing printed", "mode": "nothing sent to the printer",
     "preview": "nothing saved", "check": "", "view": "", "status": "", "history": "", "help": "", "fonts": "",
+    "chat": "nothing printed",
 }  # fmt: skip
 
 

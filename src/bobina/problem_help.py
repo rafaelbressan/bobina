@@ -86,6 +86,8 @@ FIX = {
     "E404": "This printer's transport (a file or a command) cannot do that; printing works the same.",
     "E405": "Wait for the other job, or raise busy_timeout for the printer in config.toml.",
     "E501": "The message has the line and the template error; often a block not closed: {% if x %} needs {% endif %}.",
+    "E601": "Install or log in to one of the AIs the message lists (bobina ai list shows what this machine has),"
+    " or use a name from it.",
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
     "P102": "Load a new roll first (bobina paper new LENGTH), or print fewer labels.",

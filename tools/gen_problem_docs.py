@@ -17,6 +17,7 @@ STAGES = [
     ("Data for batches (errors)", ("E3",)),
     ("Printer (errors)", ("E4",)),
     ("Document (errors)", ("E5",)),
+    ("Chat with an AI (errors)", ("E6",)),
     ("Template and data (security: always stop)", ("M3",)),
     ("Template and data (content)", ("M1", "M2")),
     ("Text and fonts", ("F",)),
