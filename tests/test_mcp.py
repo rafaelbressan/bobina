@@ -66,7 +66,17 @@ def test_the_tools_and_print_is_not_read_only():
             return {t.name: t for t in (await c.list_tools()).tools}
 
     tools = anyio.run(go)
-    assert set(tools) == {"check", "preview", "print", "template_list", "template_show", "help", "status", "paper"}
+    assert set(tools) == {
+        "check",
+        "preview",
+        "print",
+        "template_list",
+        "template_show",
+        "help",
+        "status",
+        "paper",
+        "paper_new",
+    }
     assert tools["check"].annotations.read_only_hint is True
     assert tools["print"].annotations.read_only_hint is False
     assert tools["print"].input_schema["properties"]["confirm"]["default"] is False
@@ -202,6 +212,18 @@ def test_status_and_paper_say_what_the_cli_says():
 
 
 @needs_mcp
+def test_paper_new_needs_the_length_with_its_unit(file_printer):
+    """The roll the user said they loaded: never a default roll, never a bare number."""
+    for bad in ("", "30", "-30m", "30m --remember"):
+        r = call("paper_new", {"length": bad})
+        assert r.is_error and "with its unit" in texts(r)[0]
+    r = call("paper_new", {"length": "30m"})
+    assert not r.is_error and "exit 0" in texts(r)[0]
+    r = call("paper")
+    assert not r.is_error and "30" in "\n".join(texts(r))
+
+
+@needs_mcp
 def test_status_of_a_file_printer_is_e404(file_printer):
     r = call("status")
     assert r.is_error and "E404" in "\n".join(texts(r))
@@ -254,7 +276,7 @@ def test_a_print_that_does_not_finish_is_stopped_with_its_command_and_says_so(sl
     process group) is stopped too."""
     from bobina import mcp_server
 
-    monkeypatch.setattr(mcp_server, "PRINT_TIMEOUT", 4)
+    monkeypatch.setattr(mcp_server, "TIMEOUT", 4)
     monkeypatch.setattr(mcp_server, "GRACE", 1)
     r = call("print", {"text": "# Hello", "confirm": True})
     head = texts(r)[0]

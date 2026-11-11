@@ -13,6 +13,7 @@ print without confirm: true is a dry run (--dry-run): nothing is sent to the pri
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -29,8 +30,7 @@ from .datasource import NAME_OK
 from .library import NAME_RE, LibraryError, check_name
 
 INSTALL = "uv tool install 'bobina[mcp]'  (or: pip install 'bobina[mcp]')"
-TIMEOUT = 300  # seconds for a command; a print waits longer (a long strip over Bluetooth)
-PRINT_TIMEOUT = 1800
+TIMEOUT = 300  # seconds for any command, a print too: a stuck printer is reported, not waited on
 GRACE = 5  # seconds between Ctrl-C (bobina records an interrupted job in its history) and a kill
 IMAGE_MAX_DOTS = 8000  # taller images are refused by most agent clients: the path is given instead
 IMAGE_MAX_BYTES = 4_000_000  # one image
@@ -38,6 +38,7 @@ IMAGES_MAX = 10  # images attached to one preview result (every path is listed)
 IMAGES_MAX_BYTES = 8_000_000  # all of them
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
                ".webp": "image/webp"}  # fmt: skip
+ROLL_LENGTH = re.compile(r"\d+(?:[.,]\d+)?\s*(?:mm|cm|m)")  # the unit is required
 PAPER_WARNING = "part of the job may already be on paper: check the paper and bobina history before printing again"
 
 INSTRUCTIONS = """\
@@ -259,7 +260,7 @@ class Server:
         mode = ["--yes"] if confirm is True else ["--dry-run"]  # only a real true prints
         copies_ = [f"--copies={copies}"] if copies != 1 else []
         argv = ["print", target, *mode, "--json", *copies_, *self.options(**opts)]
-        r = await run(argv, stdin, PRINT_TIMEOUT if confirm is True else TIMEOUT)
+        r = await run(argv, stdin, TIMEOUT)
         if confirm is not True and r.code in (OK, LEFT_OUT):
             from mcp.types import TextContent
 
@@ -298,6 +299,15 @@ class Server:
     async def paper(self, printer=None):
         p = printer or self.printer
         return result(await run(["paper", "--json", *([f"--printer={p}"] if p else [])]))
+
+    async def paper_new(self, length, printer=None):
+        """A roll the user loaded, with the length they said: never a default (bobina paper new without LENGTH
+        would take the remembered roll), never a bare number (30: metres or centimetres?)."""
+        if not isinstance(length, str) or not ROLL_LENGTH.fullmatch(length.strip()):
+            raise _error(f"length {length!r}: the length the user gave, with its unit: 30m, 1500cm or 400mm (E101)")
+        p = printer or self.printer
+        argv = ["paper", "new", length.strip(), "--json", *([f"--printer={p}"] if p else [])]
+        return result(await run(argv))
 
 
 def _images(paths: list[str]) -> list:
@@ -447,6 +457,16 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
     async def paper(printer: PrinterArg = None):
         """Paper left on the roll (bobina paper --json): the roll length minus what bobina printed."""
         return await s.paper(printer)
+
+    @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True,
+                                          open_world_hint=False))  # fmt: skip
+    async def paper_new(
+        length: Annotated[str, Field(description="the roll length the user gave, with its unit: 30m, 1500cm")],
+        printer: PrinterArg = None,
+    ):
+        """Record a new roll (bobina paper new LENGTH --json): the paper count starts again from it. Only when the
+        user says they loaded a roll and says its length: never guess it or use a usual size; ask instead."""
+        return await s.paper_new(length, printer)
 
     return mcp
 

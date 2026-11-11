@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bobina"
-version = "0.1.0"
+version = "0.1.1"
 description = "Print Markdown on thermal roll printers, with calibrated defaults, previews you can trust and nudges instead of blocks."
 readme = "README.md"
 requires-python = ">=3.11"

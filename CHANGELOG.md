@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-10
 
+- `bobina mcp`: a Model Context Protocol server (stdio) for agents, with the extra `bobina[mcp]`. Its tools
+  (check, preview, print, template_list, template_show, help, status, paper, paper_new) run the CLI and return its
+  JSON, problem codes and exit code. print is a dry run unless the call says `confirm: true`, after the user agreed;
+  paper_new records a roll only with the length the user gave; a call stuck for 5 minutes is stopped and says so.
 - Install without a checkout: `curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh`
   (installs uv when missing; the Bluetooth boot service on request). A .deb for Debian and Ubuntu (amd64, arm64)
   on each GitHub release, on the system Python with its dependencies inside. A Homebrew formula in this repository
@@ -14,9 +18,6 @@
 
 First version, calibrated on a Goldensky MTP-II (58 mm).
 
-- `bobina mcp`: a Model Context Protocol server (stdio) for agents, with the extra `bobina[mcp]`. Its tools
-  (check, preview, print, template_list, template_show, help, status, paper) run the CLI and return its JSON,
-  problem codes and exit code; print is a dry run unless the call says `confirm: true`.
 - Printer profiles: 32 more, generated from escpos-printer-db (CC BY 4.0) by `tools/import_profiles.py`: model facts
   only, `measured = false`, conservative (ASCII native text, raster barcodes, safe mode) until `bobina calibrate tear`
   and `bobina calibrate feed`; `bobina profile list` says which are measured. Sources: `src/bobina/profiles/SOURCES.md`.
