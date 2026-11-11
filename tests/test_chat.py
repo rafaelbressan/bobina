@@ -3,7 +3,6 @@ printer and config/state in a temporary folder. Paper is measured with the estim
 
 import io
 import json
-import subprocess
 import sys
 
 import pytest
@@ -157,7 +156,7 @@ def test_strip_answers_follow_each_other_and_tickets_feed_to_the_tear_bar():
 def test_every_turn_tells_the_ai_the_paper_and_the_limit(monkeypatch):
     fake = Fake(["One.", "Two."])
     conv = chat.Conversation(fake, ticket(), paper_left=lambda: 12345.0)
-    conv.ask("first?")
+    conv.remember("first?", conv.ask("first?"))
     conv.count(conv.job(chat.Answer("One.", "One.", None), None))
     conv.ask("second?")
     s1, s2 = fake.calls[0][0], fake.calls[1][0]
@@ -200,8 +199,9 @@ def test_chat_prints_each_answer_on_a_file_printer(monkeypatch, capsys, printer)
     code, out = run_chat(monkeypatch, capsys, fake, ["why is the sky blue?", "and sunsets?", "/quit"])
     assert code == 0
     o = out.out
-    assert "each answer prints on test right away" in o and "layout: one strip" in o and "/tickets" in o
-    assert o.count("[printed on test") == 2 and "fed to the tear bar" in o
+    assert "printer test" in o and "layout: one strip" in o and "/tickets" in o and "prints every answer" in o
+    assert o.count("printed on test") == 2 and "fed to the tear bar" in o
+    assert "Fake · fake-1:\nThe sky is blue because" in o  # bold shown without the stars
     data = printer.read_bytes()
     assert b"Fake \xc2\xb7 fake-1" in data and b"blue" in data and b"why is the sky" not in data
     assert data.count(b"Fake \xc2\xb7") == 1  # the header once per conversation
@@ -222,7 +222,7 @@ def test_manual_mode_prints_only_on_p_and_in_chat_switches(monkeypatch, capsys, 
     code, out = run_chat(monkeypatch, capsys, fake, ["/manual", "a?", "p", "p", "/auto", "/tickets", "b?"])
     o = out.out
     assert "manual mode" in o and "p prints it" in o and "already on paper" in o
-    assert o.count("[printed on test") == 2 and "one ticket per answer from now on" in o
+    assert o.count("printed on test") == 2 and "one ticket per answer from now on" in o
 
 
 def test_an_unreachable_printer_keeps_the_chat_going(monkeypatch, capsys, tmp_path):
@@ -230,26 +230,26 @@ def test_an_unreachable_printer_keeps_the_chat_going(monkeypatch, capsys, tmp_pa
     config.update(lambda c: c.setdefault("printers", {}).update(gone={"transport": "command", "command": "false"}))
     fake = Fake(["One.", "Two."])
     code, out = run_chat(monkeypatch, capsys, fake, ["a?", "b?"])
-    assert code == 0 and out.out.count("[not printed:") == 2 and "p tries this answer again" in out.out
+    assert code == 0 and out.out.count("not printed:") == 2 and "p tries this answer again" in out.out
     assert "Two." in out.out
 
 
 def test_an_ai_error_is_said_and_the_chat_goes_on(monkeypatch, capsys, printer):
     fake = Fake([ai.AIError("Claude Code failed: not logged in", "run claude once and log in"), "Fine."])
     code, out = run_chat(monkeypatch, capsys, fake, ["a?", "b?"])
-    assert "[no answer: Claude Code failed: not logged in]" in out.out and "run claude once" in out.out
-    assert "Fine." in out.out and out.out.count("[printed") == 1
+    assert "no answer: Claude Code failed: not logged in" in out.out and "run claude once" in out.out
+    assert "Fine." in out.out and out.out.count("printed on") == 1
 
 
 def test_dry_run_prints_nothing_and_counts_the_paper(monkeypatch, capsys, printer):
     code, out = run_chat(monkeypatch, capsys, Fake(["One."]), ["a?"], "--dry-run")
-    assert "nothing prints (--dry-run)" in out.out and "[not printed (--dry-run): ~" in out.out
+    assert "nothing prints (--dry-run)" in out.out and "not printed (--dry-run) · " in out.out
     assert not printer.exists() or printer.read_bytes() == b""
 
 
 def test_the_first_chat_chooses_and_saves_the_ai(monkeypatch, capsys, printer):
     code, out = run_chat(monkeypatch, capsys, Fake(["One."]), ["a?"])
-    assert "using Claude Code, the first AI found" in out.out
+    assert "using Claude Code, the AI found on this machine" in out.out
     assert config.load()["ai"] == "claude"
 
 
@@ -264,7 +264,7 @@ def test_no_ai_found_says_what_to_install(monkeypatch, capsys):
 def test_limit_option(monkeypatch, capsys, printer):
     fake = Fake([LONG, LONG])
     code, out = run_chat(monkeypatch, capsys, fake, ["a?"], "--limit", "4cm")
-    assert "at most 4 cm each" in out.out and "cut with …" in out.out
+    assert "at most 4 cm of paper" in out.out and "on paper it ends with …" in out.out
     assert "about 4 cm of paper" in fake.calls[0][0]
 
 
@@ -289,7 +289,7 @@ def test_ai_list_and_use(monkeypatch, capsys):
 
 
 def test_detection_order_and_what_is_missing(monkeypatch):
-    monkeypatch.setattr(ai.shutil, "which", lambda n: "/usr/bin/codex" if n == "codex" else None)
+    monkeypatch.setattr(ai, "program", lambda n: "/usr/bin/codex" if n == "codex" else None)
     monkeypatch.setattr(ai, "ollama_models", lambda timeout=0.5: ["qwen2.5"])
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -304,48 +304,57 @@ def test_detection_order_and_what_is_missing(monkeypatch):
 # ------------------------------------------------------------------------------------------- the backends, mocked
 
 
-def test_claude_code_is_called_without_tools_and_its_model_is_read(monkeypatch):
-    seen = {}
+def fake_exec(monkeypatch, answer):
+    """Mocks the AI programs: answer(cmd, stdin, cwd) -> (exit code, stdout, stderr); records each call."""
+    seen = []
+    monkeypatch.setattr(ai, "program", lambda name: f"/opt/bin/{name}")
 
-    def fake_run(cmd, **kw):
-        seen["cmd"], seen["input"], seen["cwd"] = cmd, kw.get("input"), kw.get("cwd")
-        out = {
-            "type": "result",
-            "is_error": False,
-            "result": "Blue.",
-            "modelUsage": {"claude-haiku-4-5": {"outputTokens": 3}, "claude-opus-5-5": {"outputTokens": 40}},
-        }
-        return subprocess.CompletedProcess(cmd, 0, json.dumps(out), "")  # fmt: skip
+    def run(cmd, input_text, cwd):
+        seen.append({"cmd": cmd, "stdin": input_text, "cwd": cwd})
+        return answer(cmd, input_text, cwd)
 
-    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    monkeypatch.setattr(ai, "_exec", run)
+    return seen
+
+
+def test_claude_code_runs_alone_and_its_model_is_read(monkeypatch):
+    """No tools, no settings, hooks, plugins, CLAUDE.md or MCP servers of the user, no session saved."""
+    out = {"type": "result", "is_error": False, "result": "Blue.",
+           "modelUsage": {"claude-haiku-4-5": {"outputTokens": 3}, "claude-opus-5-5": {"outputTokens": 40}}}  # fmt: skip
+    seen = fake_exec(monkeypatch, lambda *a: (0, json.dumps(out), ""))
     r = ai.backend("claude").ask("SYSTEM", [{"role": "user", "content": "why?"}])
     assert r.text == "Blue." and r.model == "claude-opus-5-5"
-    cmd = seen["cmd"]
-    assert cmd[:2] == ["claude", "-p"] and cmd[cmd.index("--tools") + 1] == "" and "--system-prompt" in cmd
-    assert "why?" in seen["input"] and seen["cwd"]
+    cmd = seen[0]["cmd"]
+    assert cmd[0] == "/opt/bin/claude" and cmd[1] == "-p" and cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--setting-sources") + 1] == "" and "--safe-mode" in cmd and "--strict-mcp-config" in cmd
+    assert "--no-session-persistence" in cmd and "--disable-slash-commands" in cmd and "--system-prompt" in cmd
+    assert "why?" in seen[0]["stdin"] and seen[0]["cwd"]
     assert ai.header("Claude", r.model) == "Claude · Opus 5.5"
 
 
-def test_claude_code_not_logged_in(monkeypatch):
-    monkeypatch.setattr(ai.subprocess, "run",
-                        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "Error: please log in"))  # fmt: skip
+def test_claude_code_errors_say_its_reason(monkeypatch):
+    """A failed turn exits 1 with the JSON result: its reason is shown (not the JSON), and a login hint."""
+    out = {"type": "result", "subtype": "success", "is_error": True, "result": "Not logged in · Please run /login",
+           "terminal_reason": "api_error", "usage": {"input_tokens": 0}}  # fmt: skip
+    fake_exec(monkeypatch, lambda *a: (1, json.dumps(out), ""))
     with pytest.raises(ai.AIError) as e:
         ai.backend("claude").ask("S", [{"role": "user", "content": "x"}])
-    assert "log in" in e.value.hint
+    assert str(e.value) == "Claude Code failed: Not logged in · Please run /login" and "log in" in e.value.hint
+    fake_exec(monkeypatch, lambda *a: (1, "", "Error: something broke\n"))
+    with pytest.raises(ai.AIError) as e:
+        ai.backend("claude").ask("S", [{"role": "user", "content": "x"}])
+    assert str(e.value) == "Claude Code failed: Error: something broke" and not e.value.hint
 
 
-def test_codex_and_gemini_get_one_prompt(monkeypatch):
-    seen = []
-
-    def fake_run(cmd, **kw):
-        seen.append(cmd)
-        if cmd[0] == "codex":
+def test_codex_and_gemini_get_the_transcript_on_stdin_and_no_tools(monkeypatch):
+    def answer(cmd, stdin, cwd):
+        if cmd[0].endswith("codex"):
             from pathlib import Path
 
             Path(cmd[cmd.index("--output-last-message") + 1]).write_text("From codex.")
-        return subprocess.CompletedProcess(cmd, 0, "From gemini.\n", "")
+        return 0, "From gemini.\n", ""
 
-    monkeypatch.setattr(ai.subprocess, "run", fake_run)
+    seen = fake_exec(monkeypatch, answer)
     monkeypatch.setattr(ai, "_codex_model", lambda: "gpt-5")
     msgs = [
         {"role": "user", "content": "a?"},
@@ -353,10 +362,68 @@ def test_codex_and_gemini_get_one_prompt(monkeypatch):
         {"role": "user", "content": "b?"},
     ]
     r = ai.backend("codex").ask("RULES", msgs)
-    assert r.text == "From codex." and r.model == "gpt-5" and "--sandbox" in seen[0]
-    assert "RULES" in seen[0][-1] and "Person: a?" in seen[0][-1] and seen[0][-1].endswith("b?")
+    cmd = seen[0]["cmd"]
+    assert r.text == "From codex." and r.model == "gpt-5" and cmd[0] == "/opt/bin/codex"  # the path found (.cmd)
+    assert cmd[-1] == "-" and "RULES" in seen[0]["stdin"] and "Person: a?" in seen[0]["stdin"]
+    assert "features.shell_tool=false" in cmd and "tools.web_search=false" in cmd and "--ephemeral" in cmd
+    assert cmd[cmd.index("--sandbox") + 1] == "read-only" and "mcp_servers={}" in cmd
     r = ai.backend("gemini", "gemini-2.5-pro").ask("RULES", msgs)
+    cmd = seen[1]["cmd"]
     assert r.text == "From gemini." and ai.header("Gemini", r.model) == "Gemini · 2.5 Pro"
+    assert "RULES" in seen[1]["stdin"] and all("Person: a?" not in c for c in cmd)  # never one huge argument
+    assert cmd[cmd.index("--extensions") + 1] == "none" and "--admin-policy" in cmd
+
+
+def test_gemini_denies_every_tool():
+    assert 'toolName = "*"' in ai.GEMINI_POLICY and 'decision = "deny"' in ai.GEMINI_POLICY
+
+
+def test_a_missing_program_is_said(monkeypatch):
+    monkeypatch.setattr(ai, "program", lambda name: None)
+    with pytest.raises(ai.AIError) as e:
+        ai.backend("gemini").ask("S", [{"role": "user", "content": "x"}])
+    assert "not installed" in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "value,url",
+    [
+        ("", "http://127.0.0.1:11434"),
+        ("0.0.0.0", "http://127.0.0.1:11434"),
+        ("0.0.0.0:8080", "http://127.0.0.1:8080"),
+        ("10.0.0.5", "http://10.0.0.5:11434"),
+        ("my0.0.0.0host:9", "http://my0.0.0.0host:9"),  # 0.0.0.0 only as the whole host
+        ("localhost", "http://localhost:11434"),
+        ("https://box.example", "https://box.example"),
+        ("http://box:1234/", "http://box:1234"),
+        ("[::1]:11434", "http://[::1]:11434"),
+        ("::", "http://[::1]:11434"),
+        ("[::]", "http://[::1]:11434"),
+    ],
+)
+def test_ollama_host(value, url):
+    assert ai.ollama_host(value) == url
+
+
+def test_ollama_skips_embedding_models_and_a_refusal_is_said(monkeypatch):
+    import urllib.error
+
+    calls = []
+
+    def fake_http(method, url, body=None, timeout=0):
+        calls.append((method, url, body))
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": "nomic-embed-text:latest"}, {"name": "embeddinggemma"},
+                               {"name": "gemma3:1b"}]}  # fmt: skip
+        if url.endswith("/api/show"):
+            return {"capabilities": ["completion"]}
+        raise urllib.error.HTTPError(url, 400, "Bad Request", {}, io.BytesIO(b'{"error":"bad thing"}'))
+
+    monkeypatch.setattr(ai, "_http", fake_http)
+    with pytest.raises(ai.AIError) as e:
+        ai.backend("ollama").ask("S", [{"role": "user", "content": "hi"}])
+    assert calls[-1][2]["model"] == "gemma3:1b"
+    assert "bad thing" in str(e.value) and "pulled" not in str(e.value) + e.value.hint
 
 
 def test_ollama_over_http(monkeypatch):
@@ -420,3 +487,187 @@ def test_model_labels():
     assert ai.model_label("claude-opus-5") == "Opus 5"
     assert ai.model_label("gpt-5") == "GPT-5"
     assert ai.header("Ollama", None) == "Ollama"
+
+
+# ------------------------------------------------------------------------------------ review fixes and the UI layer
+
+
+def test_a_damaged_roll_record_never_stops_the_chat(monkeypatch):
+    from bobina import fileio, paper
+    from bobina.cli import chat as cli_chat
+
+    pr = {"transport": "command", "command": "true"}
+    for record in ({"used_mm": 10}, {"roll_mm": 100, "used_mm": 500}, {"roll_mm": "x"}, None):
+        monkeypatch.setattr(paper, "get", lambda name, r=record: r)
+        left = cli_chat.paper_left_of("cmd", pr)()
+        assert left is None or left == 0.0
+
+    def broken(name):
+        raise fileio.StateError("broken")
+
+    monkeypatch.setattr(paper, "get", broken)
+    assert cli_chat.paper_left_of("cmd", pr)() is None
+    assert cli_chat.paper_left_of("file", {"transport": "file", "path": "x.bin"})() is None
+
+
+def test_the_saved_ai_keeps_its_model_with_ai(monkeypatch):
+    from bobina.cli import chat as cli_chat
+
+    config.set_value("ai", "ollama")
+    config.set_value("ai_model", "gemma3:1b")
+    args = type("A", (), {"ai": "ollama", "model": None})()
+    assert cli_chat._choose(args, None) == ("ollama", "gemma3:1b")
+    args.ai = "claude"
+    assert cli_chat._choose(args, None) == ("claude", None)  # another AI: its own default model
+
+
+def test_nudges_and_the_roll_are_checked_before_printing(monkeypatch, capsys, tmp_path):
+    from bobina import paper
+
+    out = tmp_path / "cmd.bin"
+    printers = {"cmd": {"transport": "command", "command": f"tee -a {out}"}}
+    config.update(lambda c: c.setdefault("printers", {}).update(printers))
+    config.set_value("default_printer", "cmd")
+    paper.new_roll("cmd", 20.0)  # 2 cm left
+    fake = Fake(["Go → there, then ← back. " * 3])
+    code, o = run_chat(monkeypatch, capsys, fake, ["a?"])
+    assert "P102" in o.out and "F301" in o.out  # said, and printed anyway
+    assert "printed on cmd" in o.out and out.exists()
+
+
+def test_printed_questions_have_a_limit_and_are_never_cut(monkeypatch, capsys, printer):
+    fake = Fake(["Short."])
+    long_q = "why " * 60
+    code, o = run_chat(monkeypatch, capsys, fake, [long_q, "/questions off", long_q], "--questions")
+    assert "too long to print: 239/" in o.out and "/questions off" in o.out
+    assert len(fake.calls) == 1  # the long question went only after /questions off
+    assert "only the answers print" in o.out
+
+
+class Screen:
+    """A UI that records what the session shows (the thin layer the terminal screen also implements)."""
+
+    def __init__(self, lines):
+        self.lines, self.shown = list(lines), []
+
+    def welcome(self, lines):
+        self.shown.append(("welcome", lines))
+
+    def read(self, session):
+        self.shown.append(("status", session.status()))
+        return self.lines.pop(0) if self.lines else None
+
+    def answer(self, who, text):
+        self.shown.append(("answer", who, text))
+
+    def note(self, text):
+        self.shown.append(("note", text))
+
+    def dim(self, text):
+        self.shown.append(("dim", text))
+
+    def wait(self, label, fn):
+        self.shown.append(("wait", label))
+        return fn()
+
+
+def _session(lines, answers, **kw):
+    from bobina.cli import chat as cli_chat
+
+    args = type("A", (), {"manual": False, "questions": False, "dry_run": True, "argv": ["chat"], **kw})()
+    conv = chat.Conversation(Fake(answers), ticket(), paper_left=lambda: 2500.0)
+    ui = Screen(lines)
+    return cli_chat.Session(args, conv, "test", {"transport": "file", "path": "x"}, ui, 80), ui
+
+
+def test_the_session_drives_any_screen():
+    s, ui = _session(["hi", "/tickets", "/manual", "again", "p", "/questions on"], ["Hello.", "Again."])
+    assert s.run() == 0
+    kinds = [x[0] for x in ui.shown]
+    assert kinds[0] == "welcome" and "wait" in kinds
+    welcome = " ".join(ui.shown[0][1])
+    assert "Fake AI" in welcome and "one strip" in welcome and "/tickets" in welcome and "10 cm" in welcome
+    status = [x[1] for x in ui.shown if x[0] == "status"]
+    assert "Fake · fake-1" in status[1] and "strip" in status[0] and "roll 2.5 m" in status[0]
+    assert "tickets" in status[-1] and "manual" in status[-1] and "questions printed" in status[-1]
+    dims = [x[1] for x in ui.shown if x[0] == "dim"]
+    assert any(d.startswith("not printed (--dry-run)") for d in dims) and "not printed yet: p prints it" in dims
+
+
+def test_a_stopped_answer_leaves_no_trace():
+    from bobina.cli import chat as cli_chat
+
+    s, ui = _session(["hi"], ["One."])
+
+    def stop(label, fn):
+        raise cli_chat.Cancelled
+
+    ui.wait = stop
+    s.run()
+    assert s.conv.messages == [] and ("note", "stopped: no answer (ask again, or another question)") in ui.shown
+
+
+def test_the_terminal_screen_helpers():
+    pytest.importorskip("prompt_toolkit")
+    from prompt_toolkit.document import Document
+    from prompt_toolkit.validation import ValidationError
+
+    from bobina.cli import chat_tui
+
+    lines = chat_tui.right_aligned("why is the sky blue and not green, if green is in the middle?", 40)
+    assert all(len(x) == 39 for x in lines) and len(lines) >= 2
+    got = [c.text for c in chat_tui.Commands().get_completions(Document("/q"), None)]
+    assert got == ["/questions on", "/questions off", "/quit"]
+    assert not list(chat_tui.Commands().get_completions(Document("hello"), None))
+    s, _ = _session([], [], questions=True)
+    chat_tui.Limit(s).validate(Document("short"))
+    with pytest.raises(ValidationError):
+        chat_tui.Limit(s).validate(Document("x" * 81))
+    assert chat_tui.rich_text("a **b** c") == [("", "a "), ("bold", "b"), ("", " c")]
+
+
+# --------------------------------------------------------------------------------------------- styles and icons
+
+
+def test_icons_are_bundled_as_one_bit_bitmaps():
+    from pathlib import Path
+
+    from bobina import icons
+
+    assert {"user-round", "sparkles", "bot"} <= set(icons.names())
+    im = icons.load("sparkles", 24)
+    assert im.mode == "1" and im.size == (24, 24) and 20 < im.convert("L").histogram()[0] < 400
+    with pytest.raises(KeyError):
+        icons.load("sparkles", 13)
+    assert "ISC" in (Path(icons.__file__).parent / "licenses" / "Lucide-LICENSE.txt").read_text()
+
+
+def _ink_x(im):
+    return [x for y in range(im.height) for x in range(im.width) if im.getpixel((x, y)) == 0]
+
+
+@pytest.mark.parametrize("style", chat.STYLES)
+def test_each_style_keeps_the_person_right_and_the_ai_left(style):
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style=style)
+    res = t.ticket("Air scatters blue light the most.", question="why is the sky blue?", who="Claude")
+    images = [r.image for r in res.rows if isinstance(r, BitmapRow)]
+    if style == "plain":
+        assert not images
+        return
+    person, speaker = images[0], images[-1]
+    xs = _ink_x(person)  # the bubble or the "you" line, on the right
+    assert min(xs) > person.width // 6 and max(xs) >= person.width - 8
+    xs = _ink_x(speaker)  # the AI: its icon and name on the left
+    assert min(xs) <= 2 and max(xs) < speaker.width * 2 // 3
+
+
+def test_bubbles_are_white_on_black():
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style="bubbles")
+    res = t.ticket("Ok.", question="hello there", who="Claude")
+    bubble = next(r for r in res.rows if isinstance(r, BitmapRow)).image
+    ink = bubble.convert("L").histogram()[0] / (bubble.width * bubble.height)
+    assert 0.15 < ink < 0.7  # a black bubble with white letters, not a thin frame

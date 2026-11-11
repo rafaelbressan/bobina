@@ -328,7 +328,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--compact": ["--compacto", "--glue", "--join-labels", "--strip", "--tira"],
     "--marks": ["--marcas", "--cut-marks", "--tear-marks", "--marcar", "--guides"],
     "--quiet": ["--silent", "--silencioso"],
-    "--profile": ["--perfil", "--modelo"],  # --model is the AI's model (bobina chat)
+    "--profile": ["--perfil", "--model", "--modelo"],  # --model: a real option of chat and ai (the AI model)
     "--on": ["--key", "--chave", "--match", "--by", "--por", "--join-on", "--join-key"],
     "--sheet": ["--aba", "--tab", "--planilha-aba", "--worksheet"],
     "--ask": ["--pergunta", "--perguntar", "--prompt", "--interactive", "--interativo"],
@@ -358,6 +358,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--questions": ["--perguntas", "--print-questions", "--with-questions"],
     "--layout": ["--layout-chat", "--tickets", "--ticket", "--strip-layout", "--leiaute"],
     "--manual": ["--on-demand", "--no-auto-print", "--imprimir-manual"],
+    "--style": ["--estilo", "--look", "--theme", "--tema", "--bubbles"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.

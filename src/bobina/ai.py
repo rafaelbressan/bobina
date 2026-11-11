@@ -118,49 +118,92 @@ class Backend:
         raise NotImplementedError
 
 
-def _run(cmd: list[str], *, input_text: str | None = None, what: str, login_hint: str) -> subprocess.CompletedProcess:
-    """Runs an AI program in an empty folder (no project files or instructions of the current folder reach it)."""
-    with tempfile.TemporaryDirectory(prefix="bobina-chat-") as cwd:
+_PROCS: set = set()  # AI programs running now: cancel() stops them (Esc or Ctrl-C in the chat)
+
+
+def cancel() -> None:
+    """Stops the AI programs this process started and that are still answering."""
+    for p in list(_PROCS):
         try:
-            r = subprocess.run(cmd, input=input_text, capture_output=True, text=True, timeout=TIMEOUT_S, cwd=cwd,
-                               encoding="utf-8", errors="replace")  # fmt: skip
-        except FileNotFoundError:
-            raise AIError(
-                f"{what} is not installed here ({cmd[0]} not found)", "bobina ai list shows what is"
-            ) from None
-        except subprocess.TimeoutExpired:
-            raise AIError(f"{what} did not answer in {TIMEOUT_S} s", "ask again, or a shorter question") from None
-        except OSError as e:
-            raise AIError(f"cannot run {cmd[0]}: {e.strerror or e}") from None
-    if r.returncode:
-        said = (r.stderr or r.stdout or "").strip().splitlines()
-        why = said[-1][:300] if said else f"exit {r.returncode}"
-        hint = login_hint if re.search(r"log ?in|auth|credential|api key|unauthori", why, re.I) else ""
-        raise AIError(f"{what} failed: {why}", hint)
-    return r
+            p.kill()
+        except OSError:
+            pass
+
+
+def _exec(cmd: list[str], input_text: str, cwd: str) -> tuple[int, str, str]:
+    """Runs a program with input on stdin; (exit code, stdout, stderr). Killed by cancel() or after TIMEOUT_S."""
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd,
+                         text=True, encoding="utf-8", errors="replace")  # fmt: skip
+    _PROCS.add(p)
+    try:
+        out, errs = p.communicate(input_text, timeout=TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        raise
+    finally:
+        _PROCS.discard(p)
+    return p.returncode, out or "", errs or ""
+
+
+def program(name: str) -> str | None:
+    """The path of an AI program; on Windows the .cmd shim npm installs (subprocess does not try PATHEXT)."""
+    return shutil.which(name)
+
+
+def _run(cmd: list[str], *, input_text: str, what: str, cwd: str) -> tuple[int, str, str]:
+    """Runs an AI program in an empty folder (no project files or instructions of the current folder reach it)."""
+    path = program(cmd[0])
+    if not path:
+        raise AIError(f"{what} is not installed here ({cmd[0]} not found)", "bobina ai list shows what is")
+    try:
+        return _exec([path, *cmd[1:]], input_text, cwd)
+    except FileNotFoundError:
+        raise AIError(f"{what} is not installed here ({cmd[0]} not found)", "bobina ai list shows what is") from None
+    except subprocess.TimeoutExpired:
+        raise AIError(f"{what} did not answer in {TIMEOUT_S} s", "ask again, or a shorter question") from None
+    except OSError as e:
+        raise AIError(f"cannot run {cmd[0]}: {e.strerror or e}") from None
+
+
+LOGIN = re.compile(r"log ?in|/login|auth|credential|api key|unauthori", re.I)
+
+
+def _failed(what: str, code: int, why: str, login_hint: str) -> AIError:
+    lines = [x for x in why.strip().splitlines() if x.strip()]
+    why = lines[-1][:300] if lines else f"exit {code}"
+    return AIError(f"{what} failed: {why}", login_hint if LOGIN.search(why) else "")
+
+
+# Claude Code with nothing of the user's setup: no settings, hooks, plugins, CLAUDE.md, MCP servers, slash commands
+# or tools, and no session saved. A chat turn only answers; it changes nothing.
+CLAUDE_FLAGS = ["-p", "--output-format", "json", "--tools", "", "--safe-mode", "--setting-sources", "",
+                "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"]  # fmt: skip
 
 
 class ClaudeCode(Backend):
     name, label, vendor = "claude", "Claude Code", "Claude"
+    login = "run claude once in a terminal and log in (/login)"
 
     def ask(self, system: str, messages: list[dict]) -> Reply:
-        cmd = ["claude", "-p", "--output-format", "json", "--tools", "", "--no-session-persistence",
-               "--strict-mcp-config", "--disable-slash-commands", "--system-prompt", system]  # fmt: skip
-        if self.model:
-            cmd += ["--model", self.model]
-        r = _run(cmd, input_text=transcript(None, messages), what="Claude Code",
-                 login_hint="run claude once in a terminal and log in")  # fmt: skip
+        cmd = ["claude", *CLAUDE_FLAGS, "--system-prompt", system] + (["--model", self.model] if self.model else [])
+        with tempfile.TemporaryDirectory(prefix="bobina-chat-") as cwd:
+            code, out, errs = _run(cmd, input_text=transcript(None, messages), what="Claude Code", cwd=cwd)
         try:
-            out = json.loads(r.stdout)
+            data = json.loads(out)
         except json.JSONDecodeError:
-            return Reply(r.stdout.strip(), self.model)
-        if out.get("is_error"):
-            why = str(out.get("result") or out.get("subtype") or "error")
-            hint = "run claude once in a terminal and log in" if re.search(r"log ?in|auth", why, re.I) else ""
-            raise AIError(f"Claude Code failed: {why[:300]}", hint)
-        usage = out.get("modelUsage") or {}
+            data = None
+        if not isinstance(data, dict):  # not the JSON result: its words, or the error it wrote
+            if code:
+                raise _failed("Claude Code", code, errs or out, self.login)
+            return Reply(out.strip(), self.model)
+        if code or data.get("is_error"):  # the reason is in the result, also when it exits with an error
+            why = str(data.get("result") or "").strip() or (errs.strip().splitlines() or [""])[-1]
+            why = why or str(data.get("terminal_reason") or data.get("subtype") or f"exit {code}")
+            raise AIError(f"Claude Code failed: {why[:300]}", self.login if LOGIN.search(why) else "")
+        usage = data.get("modelUsage") or {}
         model = max(usage, key=lambda k: (usage[k] or {}).get("outputTokens", 0)) if usage else self.model
-        return Reply(str(out.get("result") or ""), model)
+        return Reply(str(data.get("result") or ""), model)
 
 
 def _codex_model() -> str | None:
@@ -173,28 +216,47 @@ def _codex_model() -> str | None:
     return cfg.get("model") if isinstance(cfg.get("model"), str) else None
 
 
+# Codex with no tool that reaches the machine: no shell, no image viewer, no web search, no sub-agents, no MCP
+# servers, a read-only sandbox, nothing saved (keys from its config reference).
+CODEX_FLAGS = ["exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never",
+               "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
+               "-c", "features.view_image=false", "-c", "tools.web_search=false", "-c", "features.multi_agent=false",
+               "-c", "mcp_servers={}"]  # fmt: skip
+
+
 class Codex(Backend):
     name, label, vendor = "codex", "Codex CLI", "Codex"
 
     def ask(self, system: str, messages: list[dict]) -> Reply:
-        with tempfile.TemporaryDirectory(prefix="bobina-codex-") as d:
-            last = Path(d) / "answer.txt"
-            cmd = ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never",
-                   "--output-last-message", str(last)]  # fmt: skip
-            if self.model:
-                cmd += ["--model", self.model]
-            r = _run([*cmd, transcript(system, messages)], what="Codex", login_hint="run: codex login")
-            text = last.read_text(encoding="utf-8").strip() if last.exists() else r.stdout.strip()
+        with tempfile.TemporaryDirectory(prefix="bobina-chat-") as cwd:
+            last = Path(cwd) / ".answer.txt"
+            cmd = ["codex", *CODEX_FLAGS, "--output-last-message", str(last)]
+            cmd += (["--model", self.model] if self.model else []) + ["-"]  # -: the whole prompt from stdin
+            code, out, errs = _run(cmd, input_text=transcript(system, messages), what="Codex", cwd=cwd)
+            if code:
+                raise _failed("Codex", code, errs or out, "run: codex login")
+            text = last.read_text(encoding="utf-8").strip() if last.exists() else out.strip()
         return Reply(text, self.model or _codex_model())
+
+
+# Gemini CLI with every tool denied (built-in and MCP: a deny-all policy given with --admin-policy, so the model
+# does not even see them) and no extensions.
+GEMINI_POLICY = '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 999\n'
 
 
 class Gemini(Backend):
     name, label, vendor = "gemini", "Gemini CLI", "Gemini"
 
     def ask(self, system: str, messages: list[dict]) -> Reply:
-        cmd = ["gemini"] + (["--model", self.model] if self.model else []) + ["--prompt", transcript(system, messages)]
-        r = _run(cmd, what="Gemini CLI", login_hint="run gemini once in a terminal and log in")
-        return Reply(r.stdout.strip(), self.model)
+        with tempfile.TemporaryDirectory(prefix="bobina-chat-") as cwd:
+            policy = Path(cwd) / ".no-tools.toml"
+            policy.write_text(GEMINI_POLICY, encoding="utf-8")
+            cmd = ["gemini", "--admin-policy", str(policy), "--extensions", "none", "--approval-mode", "default"]
+            cmd += (["--model", self.model] if self.model else []) + ["--prompt", "Answer the last message above."]
+            code, out, errs = _run(cmd, input_text=transcript(system, messages), what="Gemini CLI", cwd=cwd)
+        if code:
+            raise _failed("Gemini CLI", code, errs or out, "run gemini once in a terminal and log in")
+        return Reply(out.strip(), self.model)
 
 
 def _http(method: str, url: str, body: dict | None = None, timeout: float = TIMEOUT_S) -> dict:
@@ -204,19 +266,51 @@ def _http(method: str, url: str, body: dict | None = None, timeout: float = TIME
         return json.loads(resp.read().decode("utf-8"))
 
 
-def ollama_host() -> str:
-    host = os.environ.get("OLLAMA_HOST", "").strip() or "127.0.0.1:11434"
-    host = host.replace("0.0.0.0", "127.0.0.1")  # where it listens; it is reached on loopback
-    return host if "://" in host else f"http://{host}"
+OLLAMA_PORT = 11434
+
+
+def ollama_host(value: str | None = None) -> str:
+    """OLLAMA_HOST as a URL: a scheme and the port 11434 added when missing; 0.0.0.0 (or ::), where a server
+    listens on every address, is reached on loopback. 'localhost', '[::1]:11434', 'https://box' all work."""
+    raw = (os.environ.get("OLLAMA_HOST", "") if value is None else value).strip() or "127.0.0.1"
+    scheme, sep, rest = raw.partition("://")
+    if not sep:
+        scheme, rest = "http", raw
+    hostport, _, path = rest.partition("/")
+    if hostport.startswith("["):  # [IPv6]:port
+        host, _, port = hostport[1:].partition("]")
+        port = port.lstrip(":")
+    elif hostport.count(":") > 1:  # a bare IPv6 address
+        host, port = hostport, ""
+    else:
+        host, _, port = hostport.partition(":")
+    host = {"0.0.0.0": "127.0.0.1", "::": "::1", "": "127.0.0.1"}.get(host, host)
+    if not port:
+        port = str(OLLAMA_PORT) if scheme == "http" else ""
+    shown = f"[{host}]" if ":" in host else host
+    return f"{scheme}://{shown}" + (f":{port}" if port else "") + (f"/{path.rstrip('/')}" if path.strip("/") else "")
+
+
+EMBEDDING = re.compile(r"embed|bge-|e5-|minilm|nomic-embed|mxbai|snowflake-arctic-embed|granite-embedding", re.I)
 
 
 def ollama_models(timeout: float = 0.5) -> list[str] | None:
-    """The models of a local Ollama, or None when none answers (half a second at most)."""
+    """The chat models of a local Ollama (embedding-only models left out), or None when none answers."""
     try:
         tags = _http("GET", ollama_host() + "/api/tags", timeout=timeout)
     except (OSError, ValueError, urllib.error.URLError):
         return None
-    return [str(m.get("name")) for m in tags.get("models") or [] if m.get("name")]
+    names = [str(m.get("name")) for m in tags.get("models") or [] if m.get("name")]
+    return [n for n in names if not EMBEDDING.search(n)]
+
+
+def _can_chat(model: str) -> bool:
+    """/api/show capabilities ("completion" for a model that writes text); True when Ollama does not say."""
+    try:
+        caps = _http("POST", ollama_host() + "/api/show", {"model": model}, timeout=5).get("capabilities")
+    except (OSError, ValueError, urllib.error.URLError):
+        return True
+    return not isinstance(caps, list) or "completion" in caps
 
 
 class Ollama(Backend):
@@ -228,14 +322,21 @@ class Ollama(Backend):
             models = ollama_models()
             if models is None:
                 raise AIError(f"Ollama is not answering at {ollama_host()}", "start it: ollama serve")
-            if not models:
-                raise AIError("Ollama has no model yet", "ollama pull llama3.2, then ask again")
-            model = models[0]
+            model = next((m for m in models if _can_chat(m)), None)
+            if not model:
+                raise AIError("Ollama has no chat model yet", "ollama pull llama3.2, then ask again")
+            self.model = model
         body = {"model": model, "stream": False, "messages": [{"role": "system", "content": system}, *messages]}
         try:
             out = _http("POST", ollama_host() + "/api/chat", body)
         except urllib.error.HTTPError as e:
-            raise AIError(f"Ollama refused: {e.code} {e.reason}", f"is {model} pulled? ollama pull {model}") from None
+            said = ""
+            try:
+                said = json.loads(e.read().decode("utf-8", "replace")).get("error", "")
+            except (OSError, ValueError, AttributeError):
+                pass
+            hint = f"ollama pull {model}" if e.code == 404 else "bobina ai use ollama --model NAME (ollama list)"
+            raise AIError(f"Ollama refused {model}: {said or f'{e.code} {e.reason}'}", hint) from None
         except (OSError, ValueError, urllib.error.URLError) as e:
             raise AIError(f"Ollama is not answering at {ollama_host()}: {e}", "start it: ollama serve") from None
         return Reply(str((out.get("message") or {}).get("content") or ""), out.get("model") or model)
@@ -340,7 +441,7 @@ def detect() -> list[Found]:
     """Every AI bobina knows, in the order of preference, with what this machine has of each."""
     out = []
     for name, cls in (("claude", ClaudeCode), ("codex", Codex), ("gemini", Gemini)):
-        path = shutil.which(name)
+        path = program(name)
         out.append(Found(name, cls.label, bool(path), f"{path} (its own login)" if path else "", INSTALL[name]))
     models = ollama_models()
     detail = f"{ollama_host()}: " + (", ".join(models[:4]) or "no model pulled yet") if models is not None else ""

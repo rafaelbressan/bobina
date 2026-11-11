@@ -1,12 +1,16 @@
-"""bobina chat (talk to an AI in the terminal, its answers print on the roll) and bobina ai (which AI)."""
+"""bobina chat (talk to an AI in the terminal, its answers print on the roll) and bobina ai (which AI).
+
+The conversation logic (Session) talks to the person through a small UI object: PlainUI (lines on stdin and stdout:
+pipes, tests, agents, or no prompt_toolkit) or the full terminal screen of cli/chat_tui.py (prompt_toolkit, the
+extra bobina[ai]). Everything the chat decides is in Session, so it is tested without a terminal."""
 
 from __future__ import annotations
 
 import sys
 
-from .. import ai, config, engine, view
+from .. import ai, config, engine
 from .. import profile as profiles
-from ..chat import DEFAULT_LIMIT_MM, LAYOUTS, Conversation, Ticket
+from ..chat import DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
 from .common import (
     OK,
     USAGE,
@@ -18,16 +22,22 @@ from .common import (
     plural,
     print_json,
     printer_overrides,
-    where,
 )
 
-HELP = """\
-  type a message and Enter: the AI answers here and on paper
-  p          print the last answer (manual mode, or after a print failed)
-  /manual    print only when you type p      /auto     print every answer (the default)
-  /strip     one strip, a dashed line between answers, no paper between them (the default)
-  /tickets   one ticket per answer: the AI and the time on top, fed to the tear bar to tear off
-  /help      this list                       /quit     end (also Ctrl-D)"""
+COMMANDS = {  # slash command -> what it does (completion and /help)
+    "/tickets": "one ticket per answer, fed to the tear bar to tear off",
+    "/strip": "one strip, a dashed line between answers (the default)",
+    "/manual": "print only when you type p",
+    "/auto": "print every answer right away (the default)",
+    "/questions on": "print your messages too, on the right",
+    "/questions off": "print only the answers",
+    "/help": "this list",
+    "/quit": "end the chat (also Ctrl-D)",
+}
+
+
+class Cancelled(Exception):
+    """The person stopped the AI's answer (Esc or Ctrl-C while it thinks)."""
 
 
 def register(sub, cmd) -> None:
@@ -42,7 +52,7 @@ def register(sub, cmd) -> None:
             "bobina chat",
             "bobina chat --manual",
             "bobina chat --questions --limit 6cm",
-            "bobina chat --layout tickets",
+            "bobina chat --layout tickets --style bubbles",
             "bobina chat --ai ollama --model llama3.2",
             "bobina chat --dry-run",
         ],
@@ -61,6 +71,12 @@ def register(sub, cmd) -> None:
         choices=LAYOUTS,
         help="strip: one strip, the AI on top once, a dashed line between answers (default); tickets: one ticket per"
         " answer with the AI and time on top, fed to the tear bar (chat_layout in config.toml)",
+    )
+    p.add_argument(
+        "--style",
+        choices=STYLES,
+        help="how the two speakers look on paper: plain (default), bubbles, boxes or labels (icons and names;"
+        " chat_style in config.toml)",
     )
     p.add_argument("--manual", action="store_true", help="print an answer only when you type p")
     p = cmd(
@@ -127,33 +143,19 @@ def cmd_ai(args):
     return OK
 
 
-# --------------------------------------------------------------------------------------------------- bobina chat
+# ------------------------------------------------------------------------------------------------ choosing the AI
 
 
-def _readline(prompt: str) -> str | None:
-    """A line from the person (None at the end). A pipe works too: its lines are echoed, the transcript reads."""
-    if sys.stdin.isatty():
-        try:
-            return input(prompt)
-        except EOFError:
-            return None
-    line = sys.stdin.readline()
-    if not line:
-        return None
-    print(prompt + line.rstrip("\n"))
-    return line.rstrip("\n")
-
-
-def _choose(args) -> tuple[str, str | None]:
+def _choose(args, ui) -> tuple[str, str | None]:
     """The AI of this chat: --ai, else config.toml, else asked now (and saved). Never a dead end: a saved AI that is
     gone falls back to the best one found, and says so."""
     cfg = config.load()
-    model = args.model or (cfg.get("ai_model") or None)
+    saved, saved_model = cfg.get("ai"), (cfg.get("ai_model") or None)
     if args.ai:
         if args.ai not in ai.BACKENDS:
             raise Fail(USAGE, f"unknown AI '{args.ai}': " + ", ".join(ai.ORDER), problem="E601")
-        return args.ai, args.model
-    saved = cfg.get("ai")
+        return args.ai, args.model or (saved_model if args.ai == saved else None)  # the saved AI keeps its model
+    model = args.model or saved_model
     found = ai.detect()
     ready = [f for f in found if f.ready]
     if saved in ai.BACKENDS:
@@ -167,23 +169,9 @@ def _choose(args) -> tuple[str, str | None]:
         extra = "".join(f"\n  {f.name}: found, but needs: {f.needs}" for f in avail)
         raise Fail(USAGE, f"no AI found on this machine{extra}\n→ " + ai.none_found_hint().replace("\n", "\n  "),
                    problem="E601")  # fmt: skip
-    pick = ready[0]
-    if len(ready) > 1 and sys.stdin.isatty():
-        print("Which AI should answer? (saved for next time; bobina ai use NAME changes it)")
-        for i, f in enumerate(ready, 1):
-            print(f"  {i}. {f.name:9s} {f.label}: {f.detail}")
-        while True:
-            a = (_readline(f"number or name [1 {ready[0].name}]: ") or "").strip().lower()
-            if not a:
-                break
-            hit = [f for i, f in enumerate(ready, 1) if a in (str(i), f.name)]
-            if hit:
-                pick = hit[0]
-                break
-            print(f"  1 to {len(ready)}, or a name above")
-    else:
-        others = f" (also here: {', '.join(f.name for f in ready[1:])})" if len(ready) > 1 else ""
-        print(f"using {pick.label}, the first AI found{others}; bobina ai use NAME changes it")
+    pick = ui.choose_ai(ready) if len(ready) > 1 else ready[0]
+    if len(ready) == 1:
+        print(f"using {pick.label}, the AI found on this machine (saved; bobina ai use NAME changes it)")
     try:
         config.set_value("ai", pick.name)
     except OSError as e:
@@ -207,153 +195,282 @@ def _limit(args, cfg) -> float:
     return mm
 
 
-def _terminal(text: str, color: bool) -> str:
-    """The answer as the terminal shows it: **bold** in bold (or without the stars when there are no colors)."""
-    from ..chat import BOLD
+def _setting(args, cfg, key: str, option: str, choices: tuple, default: str) -> str:
+    value = getattr(args, option) or cfg.get(key) or default
+    if value not in choices:
+        raise Fail(USAGE, f"{key} = {value!r} in config.toml: use {', '.join(choices)}", problem="E304")
+    return value
 
-    return BOLD.sub(lambda m: f"\x1b[1m{m.group(1)}\x1b[0m" if color else m.group(1), text)
+
+# ---------------------------------------------------------------------------------------------------- plain lines
 
 
-class Chat:
-    """The terminal loop: ask, show, print (or not), and say what happened to the paper."""
+class PlainUI:
+    """Lines on stdin and stdout: a pipe works too (its lines are echoed, so the transcript reads)."""
 
-    def __init__(self, args, conv: Conversation, printer: str | None, pr: dict | None):
-        self.args, self.conv, self.printer, self.pr = args, conv, printer, pr
-        self.manual = args.manual
-        self.color = view.use_color() and not args.no_color
+    def __init__(self):
+        self.interactive = sys.stdin.isatty()
+
+    def welcome(self, lines: list[str]) -> None:
+        print("\n".join(lines) + "\n", flush=True)
+
+    def read(self, session) -> str | None:
+        if self.interactive:
+            try:
+                return input("you> ")
+            except EOFError:
+                return None
+        line = sys.stdin.readline()
+        if not line:
+            return None
+        print("you> " + line.rstrip("\n"), flush=True)
+        return line.rstrip("\n")
+
+    def answer(self, who: str, text: str) -> None:
+        from ..chat import BOLD
+
+        print(f"{who}:\n{BOLD.sub(lambda m: m.group(1), text)}\n", flush=True)
+
+    def note(self, text: str) -> None:
+        print(f"  {text}", flush=True)
+
+    dim = note
+
+    def wait(self, label: str, fn):
+        """fn() with a line saying the AI is thinking (on a terminal); Ctrl-C stops it (Cancelled)."""
+        if sys.stderr.isatty():
+            sys.stderr.write(f"  ({label}…)\r")
+            sys.stderr.flush()
+        try:
+            return fn()
+        except KeyboardInterrupt:
+            ai.cancel()
+            raise Cancelled from None
+        finally:
+            if sys.stderr.isatty():
+                sys.stderr.write(" " * (len(label) + 8) + "\r")
+
+    def choose_ai(self, ready: list):
+        if not self.interactive:
+            others = ", ".join(f.name for f in ready[1:])
+            print(f"using {ready[0].label}, the first AI found (also here: {others}); bobina ai use NAME changes it")
+            return ready[0]
+        print("Which AI should answer? (saved for next time; bobina ai use NAME changes it)")
+        for i, f in enumerate(ready, 1):
+            print(f"  {i}. {f.name:9s} {f.label}: {f.detail}")
+        while True:
+            try:
+                a = input(f"number or name [1 {ready[0].name}]: ").strip().lower()
+            except EOFError:
+                a = ""
+            if not a:
+                return ready[0]
+            hit = [f for i, f in enumerate(ready, 1) if a in (str(i), f.name)]
+            if hit:
+                return hit[0]
+            print(f"  1 to {len(ready)}, or a name above")
+
+    def status(self, session) -> None:
+        pass
+
+
+# -------------------------------------------------------------------------------------------------- the session
+
+
+class Session:
+    """The chat: what each line does, what prints, and what the person is told. UI-free."""
+
+    def __init__(self, args, conv: Conversation, printer: str | None, pr: dict | None, ui, question_limit: int):
+        self.args, self.conv, self.printer, self.pr, self.ui = args, conv, printer, pr, ui
+        self.manual = bool(args.manual)
+        self.questions = bool(args.questions)
+        self.question_limit = question_limit
         self.last = None  # (answer, question)
+        self.model = conv.ai.model
 
-    def say(self, text: str) -> None:
-        print(text, flush=True)
+    # what the screen shows
 
-    def start(self) -> None:
+    def who(self) -> str:
+        return ai.header(self.conv.ai.vendor, self.model)
+
+    def destination(self) -> str:
+        if self.args.dry_run:
+            return "nothing prints (--dry-run): the paper each answer would take is shown"
+        if not self.pr:
+            return "no printer configured: answers show here only (bobina printer add NAME ADDRESS)"
+        return f"printer {self.printer}"
+
+    def layout_text(self) -> str:
+        return "one strip" if self.conv.layout == "strip" else "one ticket per answer"
+
+    def mode_text(self) -> str:
+        return "prints on p" if self.manual else "prints every answer"
+
+    def welcome(self) -> list[str]:
+        """The block the chat opens with: the AI, where answers go, the layout and mode, the limits, the commands."""
         a, conv = self.args, self.conv
-        model = f" ({conv.ai.model})" if conv.ai.model else ""
-        cm = f"{conv.limit_mm / 10:g} cm"
-        if a.dry_run:
-            dest = "nothing prints (--dry-run): the answers show here, with the paper they would take"
-        elif not self.pr:
-            dest = "no printer configured: the answers show here only (bobina printer add NAME ADDRESS)"
-        elif self.manual:
-            dest = f"manual mode: p prints the last answer on {self.printer} (at most {cm} each)"
-        else:
-            dest = f"each answer prints on {self.printer} right away (at most {cm} each); /manual: only when you type p"
-        if conv.layout == "tickets":
-            layout = "layout: one ticket per answer, fed to the tear bar to tear off (/strip: one strip instead)"
-        else:
-            layout = "layout: one strip, a dashed line between answers (/tickets: one ticket per answer instead)"
-        self.say(f"bobina chat · {conv.ai.label}{model}\n{dest}\n{layout}\n/help for commands · /quit or Ctrl-D"
-                 " to end\n")  # fmt: skip
+        model = ai.model_label(self.model) if self.model else "its default model"
+        limit = f"at most {conv.limit_mm / 10:g} cm of paper per answer"
+        if self.questions:
+            limit += f" · your messages print too ({self.question_limit} characters at most)"
+        return [
+            f"bobina chat · {conv.ai.label} · {model}",
+            f"{self.destination()} · layout: {self.layout_text()} · {self.mode_text()}",
+            limit,
+            " ".join(dict.fromkeys(c.split()[0] for c in COMMANDS)) + " · p prints the last answer"
+            + ("" if a.dry_run else " · Ctrl-D ends"),
+        ]  # fmt: skip
+
+    def status(self) -> str:
+        conv = self.conv
+        left = conv.paper_left() if conv.paper_left else None
+        parts = [self.who(), self.printer or "no printer", conv.layout, "manual" if self.manual else "auto"]
+        if self.questions:
+            parts.append("questions printed")
+        paper = f"chat {conv.used_mm / 10:.1f} cm" + (f" · roll {left / 1000:.1f} m" if left is not None else "")
+        return " │ ".join([*parts, paper])
+
+    def too_long(self, text: str) -> str:
+        """Why a message cannot be sent as it is ("" when it can): printed questions have a limit too."""
+        t = text.strip()
+        if not self.questions or t.startswith("/") or t == "p" or len(t) <= self.question_limit:
+            return ""
+        return (f"too long to print: {len(t)}/{self.question_limit} characters (about 3 lines); shorten it,"
+                " or /questions off")  # fmt: skip
+
+    # the loop
 
     def run(self) -> int:
-        self.start()
-        try:
-            while True:
-                line = _readline("you> ")
-                if line is None:
-                    break
-                line = line.strip()
-                if not line:
-                    continue
-                if line in ("/quit", "/exit", "/q"):
-                    break
-                if self.command(line):
-                    continue
-                self.turn(line)
-        except KeyboardInterrupt:
-            print()
+        self.ui.welcome(self.welcome())
+        while True:
+            try:
+                line = self.ui.read(self)
+            except KeyboardInterrupt:
+                line = None
+            if line is None or not self.handle(line):
+                break
         self.end()
         return OK
 
+    def handle(self, line: str) -> bool:
+        """One line from the person; False ends the chat."""
+        line = line.strip()
+        if not line:
+            return True
+        if line in ("/quit", "/exit", "/q"):
+            return False
+        if self.command(line):
+            return True
+        why = self.too_long(line)
+        if why:
+            self.ui.note(why)
+            return True
+        self.turn(line)
+        return True
+
     def command(self, line: str) -> bool:
+        ui = self.ui
         if line in ("p", "/p", "/print"):
             if not self.last:
-                self.say("  nothing to print yet")
+                ui.note("nothing to print yet")
             elif self.last[0].printed:
-                self.say("  the last answer is already on paper")
+                ui.note("the last answer is already on paper")
             else:
                 self.print_answer(*self.last)
             return True
-        if line == "/manual":
-            self.manual = True
-            self.say("  manual mode: p prints the last answer")
-            return True
-        if line == "/auto":
-            self.manual = False
-            self.say("  every answer prints right away")
+        if line in ("/manual", "/auto"):
+            self.manual = line == "/manual"
+            ui.note("manual mode: p prints the last answer" if self.manual else "every answer prints right away")
             return True
         if line in ("/strip", "/tickets"):
             want = line[1:]
             if self.conv.layout == want:
-                self.say(f"  already: {'one strip' if want == 'strip' else 'one ticket per answer'}")
+                ui.note(f"already: {self.layout_text()}")
                 return True
             if want == "tickets":
                 self.close_strip()  # the strip so far goes to the tear bar before the first ticket
             self.conv.layout = want
-            self.say("  one ticket per answer from now on" if want == "tickets" else "  one strip from now on")
+            ui.note("one ticket per answer from now on" if want == "tickets" else "one strip from now on")
+            return True
+        if line.split()[0] == "/questions":
+            arg = (line.split() + [""])[1]
+            if arg not in ("on", "off", ""):
+                ui.note("/questions on or /questions off")
+                return True
+            self.questions = (not self.questions) if not arg else arg == "on"
+            ui.note(f"your messages print too, at most {self.question_limit} characters" if self.questions
+                    else "only the answers print")  # fmt: skip
             return True
         if line in ("/help", "/?"):
-            self.say(HELP)
+            ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()) + "\n  p               print the last"
+                    " answer (manual mode, or after a print failed)")  # fmt: skip
             return True
         if line.startswith("/"):
-            self.say(f"  unknown command {line}; /help lists them (a message never starts with /)")
+            ui.note(f"unknown command {line}; /help lists them (a message never starts with /)")
             return True
         return False
 
     def turn(self, question: str) -> None:
-        conv = self.conv
-        if sys.stderr.isatty():
-            sys.stderr.write(f"  ({conv.ai.label} is thinking…)\r")
-            sys.stderr.flush()
+        conv, ui = self.conv, self.ui
         try:
-            ans = conv.ask(question)
-        except ai.AIError as e:
-            if sys.stderr.isatty():
-                sys.stderr.write(" " * 60 + "\r")
-            hint = f"\n  → {e.hint}" if e.hint else ""
-            self.say(f"  [no answer: {e}]{hint}")
+            ans = ui.wait(f"{conv.ai.vendor or conv.ai.label} is thinking", lambda: conv.ask(question))
+        except Cancelled:
+            ui.note("stopped: no answer (ask again, or another question)")
             return
-        if sys.stderr.isatty():
-            sys.stderr.write(" " * 60 + "\r")
-        who = ai.header(conv.ai.vendor, ans.model)
-        self.say(f"{who}:\n{_terminal(ans.text, self.color)}\n")
+        except ai.AIError as e:
+            ui.note(f"no answer: {e}" + (f"\n  → {e.hint}" if e.hint else ""))
+            return
+        conv.remember(question, ans)
+        self.model = ans.model or self.model
+        ui.answer(self.who(), ans.text)
         if ans.rewritten and not ans.cut:
-            self.say(f"  (the first answer took ~{ans.first_mm / 10:.0f} cm; the AI rewrote it within the limit)")
+            ui.dim(f"rewritten to fit: the first answer took ~{ans.first_mm / 10:.0f} cm")
         if ans.cut:
-            self.say(f"  (too long for {conv.limit_mm / 10:g} cm even after a rewrite: on paper it is cut with …;"
-                     " the whole answer is above)")  # fmt: skip
+            ui.dim(f"too long for {conv.limit_mm / 10:g} cm even after a rewrite: on paper it ends with …")
         self.last = (ans, question)
         if self.manual:
-            self.say("  p prints it")
+            ui.dim("not printed yet: p prints it")
             return
         self.print_answer(ans, question)
 
+    def _problems(self, res) -> None:
+        """The job's nudges (fonts, glyphs, paper), as print shows them; they never stop the chat."""
+        for n in res.visible_nudges():
+            hint = f" → {n.suggestion}" if n.suggestion else ""
+            self.ui.note(f"{n.severity} {n.code}: {n.message}{hint}")
+
     def print_answer(self, ans, question: str) -> None:
-        a, conv = self.args, self.conv
-        res = conv.job(ans, question if a.questions else None)
+        a, conv, ui = self.args, self.conv, self.ui
+        res = conv.job(ans, question if self.questions else None)
         cm = res.length_mm / 10
         if a.dry_run:
+            self._problems(res)
             passed = conv.count(res)
             ans.printed = True
-            self.say(f"  [not printed (--dry-run): ~{cm:.1f} cm · this chat ~{conv.used_mm / 10:.1f} cm]")
+            ui.dim(f"not printed (--dry-run) · {cm:.1f} cm · chat {conv.used_mm / 10:.1f} cm")
         elif not self.pr:
-            self.say("  [not printed: no printer configured (bobina printer add NAME ADDRESS)]")
+            ui.dim("not printed: no printer configured (bobina printer add NAME ADDRESS)")
             return
         else:
+            if counts_paper(self.pr):
+                from .. import paper
+
+                paper.check(self.printer, res.length_mm, res.nudges)  # P101/P102: said, never in the way
+            self._problems(res)
             try:
                 name = do_send(a, res.data, res.profile, length_mm=res.length_mm)
             except Fail as e:
                 head, _, hint = str(e).partition("\n")
-                self.say(f"  [not printed: {head}]" + (f"\n  {hint.strip()}" if hint.strip() else "")
-                         + "\n  the chat goes on; p tries this answer again")  # fmt: skip
+                ui.note(f"not printed: {head}" + (f"\n  {hint.strip()}" if hint.strip() else "")
+                        + "\n  the chat goes on; p tries this answer again")  # fmt: skip
                 self._history(res, "failed", e.code, e.problems())
                 return
             passed = conv.count(res)
             ans.printed = True
             self._history(res, "printed", OK, None, name)
-            self.say(f"  [printed on {where(name)}: ~{cm:.1f} cm · this chat ~{conv.used_mm / 10:.1f} cm]")
+            ui.dim(f"printed on {name} · {cm:.1f} cm · chat {conv.used_mm / 10:.1f} cm")
         if passed is not None:
-            self.say(f"  note: this conversation has used ~{passed / 1000:.1f} m of paper")
+            ui.note(f"this conversation has used ~{passed / 1000:.1f} m of paper")
 
     def close_strip(self) -> None:
         """A strip ends with the feed to the tear bar (and the tear mark, when marks are on): counted as paper."""
@@ -367,12 +484,12 @@ class Chat:
         try:
             do_send(a, res.data, res.profile, check_status=False, length_mm=res.length_mm)
         except Fail as e:
-            self.say(f"  [the strip was not fed to the tear bar: {str(e).splitlines()[0]}]")
+            self.ui.note(f"the strip was not fed to the tear bar: {str(e).splitlines()[0]}")
             return
         passed = conv.count(res, answer=False)
-        self.say(f"  [fed to the tear bar: ~{res.length_mm / 10:.1f} cm]")
+        self.ui.dim(f"fed to the tear bar · {res.length_mm / 10:.1f} cm")
         if passed is not None:
-            self.say(f"  note: this conversation has used ~{passed / 1000:.1f} m of paper")
+            self.ui.note(f"this conversation has used ~{passed / 1000:.1f} m of paper")
 
     def _history(self, res, outcome: str, code: int, problems, name: str = "") -> None:
         from .. import history
@@ -389,14 +506,47 @@ class Chat:
             pass
         if conv.printed:
             what = "would have taken" if self.args.dry_run else "printed"
-            self.say(f"bye: {plural(conv.printed, 'answer')} {what} ~{conv.used_mm / 10:.1f} cm of paper")
+            self.ui.note(f"bye: {plural(conv.printed, 'answer')} {what} ~{conv.used_mm / 10:.1f} cm of paper")
         else:
-            self.say("bye")
+            self.ui.note("bye")
+
+
+def _ui(args):
+    """The full screen when this is a terminal and prompt_toolkit is installed; plain lines otherwise."""
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from .chat_tui import TerminalUI
+        except ImportError:
+            err("note: pip install 'bobina[ai]' for the chat screen (input box, status line, completion)")
+            return PlainUI()
+        return TerminalUI(color=not args.no_color)
+    return PlainUI()
+
+
+def paper_left_of(printer: str | None, pr: dict | None):
+    """mm left on the roll of this printer, or None when unknown; never an error (a damaged or hand-edited
+    paper.json, a roll without its length): the chat goes on without the number."""
+
+    def left():
+        from .. import paper
+
+        if not (pr and printer and counts_paper(pr)):
+            return None
+        try:
+            r = paper.get(printer)
+            roll = float((r or {}).get("roll_mm") or 0)
+            used = float((r or {}).get("used_mm") or 0)
+        except Exception:  # noqa: BLE001 - only a number for the AI and the status line; see the docstring
+            return None
+        return max(0.0, roll - used) if roll > 0 else None
+
+    return left
 
 
 def cmd_chat(args):
     cfg = config.load()
-    name, model = _choose(args)
+    ui = _ui(args)
+    name, model = _choose(args, ui)
     backend = ai.backend(name, model)
     printer, pr = config.printer(cfg, args.printer)
     try:
@@ -405,19 +555,13 @@ def cmd_chat(args):
         raise Fail(USAGE, str(e).strip("'\""), problem="E207") from None
     # the printer's measured tear bar and the marks setting, as print uses them
     prof = engine.apply_overrides(prof, {**printer_overrides(pr), "marks": marks_setting(args, cfg)})
-    layout = args.layout or cfg.get("chat_layout") or "strip"
-    if layout not in LAYOUTS:
-        raise Fail(USAGE, f"chat_layout = {layout!r} in config.toml: use {' or '.join(LAYOUTS)}", problem="E304")
-
-    def paper_left():
-        from .. import fileio, paper
-
-        if not (pr and counts_paper(pr)):
-            return None
-        try:
-            return paper.remaining(printer)
-        except (fileio.StateError, OSError):
-            return None
-
-    conv = Conversation(backend, Ticket(prof), limit_mm=_limit(args, cfg), paper_left=paper_left, layout=layout)
-    return Chat(args, conv, printer if pr else None, pr).run()
+    layout = _setting(args, cfg, "chat_layout", "layout", LAYOUTS, "strip")
+    style = _setting(args, cfg, "chat_style", "style", STYLES, "plain")
+    ticket = Ticket(prof, style=style)
+    try:
+        qlimit = int(cfg.get("chat_question_limit") or ticket.question_chars())
+    except (TypeError, ValueError):
+        raise Fail(USAGE, "chat_question_limit in config.toml: a number of characters", problem="E304") from None
+    conv = Conversation(backend, ticket, limit_mm=_limit(args, cfg), paper_left=paper_left_of(printer, pr),
+                        layout=layout)  # fmt: skip
+    return Session(args, conv, printer if pr else None, pr, ui, qlimit).run()
