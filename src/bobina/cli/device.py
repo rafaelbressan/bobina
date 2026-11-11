@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path  # noqa: F401
+from types import SimpleNamespace
 
 from .. import config, engine, transport
 from .. import profile as profiles
@@ -197,8 +198,12 @@ def cmd_paper(args):
     name = printer_name(args)
     if not name:
         raise Fail(UNREACHABLE, "no printer configured: bobina printer add NAME ADDRESS", problem="E401")
+    code, shown = OK, []  # P103, when the roll is not the printer's width
     try:
         if args.action == "new":
+            for given in (args.length, args.diameter):  # a package code: the question it raises, never a guess
+                if given and (advice := paper.code_advice(given, cli=True)):
+                    raise Fail(USAGE, advice, problem="E304")
             width = paper.parse_width(args.width) if args.width else None  # a wrong width records nothing
             if args.diameter:
                 mm = paper.from_diameter(
@@ -215,24 +220,20 @@ def cmd_paper(args):
                     "(--remember saves LENGTH as the default roll)",
                     problem="E101",
                 )
-            misfit = _roll_width(args, name, width) if width else []
-            if misfit and args.strict:  # the one way P103 stops; otherwise the roll is recorded anyway
-                for line in common.render_problems(misfit, "nothing changed (--strict)"):
-                    err(line)
-                return common.STRICT
-            if args.remember and args.length:
-                cfg = config.load()
-                cfg["paper_roll"] = args.length
-                config.save(cfg)
-            paper.new_roll(name, mm, note, width)
-            if not args.json:  # --json: the roll as it is now, below
-                wide = f", {width:.0f} mm wide" if width else ""
-                print(f"{name}: new roll of {mm / 1000:.1f} m{wide}" + (f" ({note})" if note else ""))
-            if misfit and not args.quiet:
-                for line in common.render_problems(misfit, "roll recorded"):
-                    err(line)
+            shown = _roll_width(args, name, width).filtered(common.allow_set(args)) if width else []
+            if not common.strict_hits(shown, args):  # --strict: P103 stops it; otherwise recorded anyway
+                if args.remember and args.length:
+                    cfg = config.load()
+                    cfg["paper_roll"] = args.length
+                    config.save(cfg)
+                paper.new_roll(name, mm, note, width)
+                if not args.json:  # --json: the roll as it is now, below
+                    wide = f", {width:.0f} mm wide" if width else ""
+                    print(f"{name}: new roll of {mm / 1000:.1f} m{wide}" + (f" ({note})" if note else ""))
+            if shown:
+                code = common.report_nudges(SimpleNamespace(visible_nudges=lambda: shown), args)
             if not args.json:
-                return OK
+                return code
         if args.action == "used":
             if not args.length:
                 raise Fail(
@@ -241,21 +242,22 @@ def cmd_paper(args):
             if args.length.startswith("+"):
                 paper.add(name, paper.parse_length(args.length[1:]), count=False)
             else:
-                paper.add(name, paper.parse_length(args.length), set_to=True)
+                paper.add(name, paper.parse_length(args.length, zero=True), set_to=True)
     except ValueError as e:
         raise Fail(USAGE, str(e), problem="E304") from None
     r = paper.get(name)
-    if not r:
+    problems = {"problems": [n.as_dict() for n in shown]} if shown else {}
+    if not r or not r.get("roll_mm"):  # 0: a damaged or hand-edited roll
         if args.json:
-            print_json({"printer": name, "roll_mm": None, "left_mm": None}, indent=2)
+            print_json({"printer": name, "roll_mm": None, "left_mm": None, **problems}, indent=2)
         else:
             print(f"{name}: roll length unknown. When you load a roll: bobina paper new 15m  (or --diameter 40mm)")
-        return OK
-    left = r["roll_mm"] - r["used_mm"]
+        return code
+    left = r["roll_mm"] - r.get("used_mm", 0.0)
     avg = r["printed_mm"] / r["prints"] if r.get("prints") and r.get("printed_mm") else None
     if args.json:
-        print_json({"printer": name, **r, "left_mm": round(left, 1)}, indent=2)
-        return OK
+        print_json({"printer": name, **r, "left_mm": round(left, 1), **problems}, indent=2)
+        return code
     print(
         f"{name}: ~{max(left, 0) / 1000:.2f} m left of {r['roll_mm'] / 1000:.1f} m "
         f"({max(left, 0) / r['roll_mm'] * 100:.0f}%) · {r.get('prints', 0)} prints since {r['loaded']}"
@@ -269,8 +271,8 @@ def cmd_paper(args):
     return OK
 
 
-def _roll_width(args, name: str, width: float) -> list:
-    """[P103] when the roll is not as wide as the printer's paper (an 80 mm roll on a 58 mm printer). Recorded
+def _roll_width(args, name: str, width: float):
+    """Nudges: P103 when the roll is not as wide as the printer's paper (an 80 mm roll on a 58 mm printer). Recorded
     anyway: the user may be about to move it, or the profile may be the wrong one."""
     from .. import paper
     from ..nudges import Nudges
@@ -278,9 +280,9 @@ def _roll_width(args, name: str, width: float) -> list:
     cfg = config.load()
     _, prof = _strip_profile(args, cfg, config.printer(cfg, name)[1] or {})
     paper_mm = float(prof.get("paper_mm", 58))
-    if paper.fits(width, paper_mm) or "P103" in common.allow_set(args):
-        return []
     n = Nudges()
+    if paper.fits(width, paper_mm):
+        return n
     n.add(
         "P103",
         f"this {width:.0f} mm roll does not fit {name}: its profile ({prof.id}) takes {paper_mm:g} mm paper",

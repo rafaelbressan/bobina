@@ -135,23 +135,77 @@ def test_roll_sizes_as_they_are_written_around_the_world():
     from bobina import paper
 
     assert paper.parse_length("50ft") == paper.parse_length("50'") == paper.parse_length("50 feet") == 15240
+    assert paper.parse_length("50′") == 15240 and round(paper.parse_width("2 1/4″"), 2) == 57.15  # prime marks
     assert paper.parse_length("1,5m") == 1500 and paper.parse_length("15") == 15000  # bare: metres (terminal)
     assert round(paper.parse_width('2 1/4"'), 2) == 57.15 and paper.parse_width("80") == 80
     with pytest.raises(ValueError, match="use 15m"):
         paper.parse_length("30", None)
+    for zero in ("0m", "0", "0,0cm"):
+        with pytest.raises(ValueError, match="more than 0"):
+            paper.parse_length(zero)
+    assert paper.parse_length("0m", zero=True) == 0  # paper used 0m: nothing used yet
     for code in ("57x30", "80 x 40", "57 × 40 × 12"):  # never guessed: metres (Brazil) or diameter (Europe)?
-        with pytest.raises(ValueError, match="package code") as e:
+        advice = paper.code_advice(code, cli=True)
+        assert "--diameter" in advice and "m --width" in advice
+        with pytest.raises(ValueError, match="package code") as e:  # other commands: only refused
             paper.parse_length(code)
-        assert "--diameter" in str(e.value) and "m --width" in str(e.value)
+        assert "paper new" not in str(e.value)
     assert "--core 12mm" in paper.code_advice("57x40x12", cli=True)
     us = paper.code_advice("2 1/4 x 50")  # inches x feet: only the feet reading is asked
     assert "feet?" in us and 'length "50ft"' in us and "diameter" not in us
-    assert paper.code_advice("57mm x 30m") == "'57mm x 30m' is a package code with its units: give its parts as" \
-                                              ' length "30m", width "57mm"'  # fmt: skip
-    assert paper.fits(57, 58) and paper.fits(79.4, 80) and not paper.fits(80, 58)
+
+
+@pytest.mark.parametrize(
+    "code, split",
+    [
+        ("57mm x 30m", 'length "30m", width "57mm"'),
+        ("3 1/8 x 70m", 'length "70m", width "3 1/8in"'),  # a unit the user wrote is kept: never 70ft
+        ("2 1/4 x 40mm", 'diameter "40mm", width "2 1/4in"'),  # … nor 40ft
+        ("57 x 30m", 'length "30m", width "57mm"'),  # the second number says it: nothing to ask
+        ("57mm x 40mm x 12", 'diameter "40mm", core "12mm", width "57mm"'),
+        ("57 x 30m x 12", 'length "30m", width "57mm"'),  # a core means nothing with a length
+    ],
+)
+def test_a_package_code_with_a_unit_on_the_second_number_is_split_as_written(code, split):
+    from bobina import paper
+
+    advice = paper.code_advice(code)
+    assert advice == f"'{code}' is a package code: give its parts as {split}"
+    assert "Ask" not in advice and "?" not in advice
+
+
+def test_the_suggested_commands_quote_every_value():
+    import shlex
+
+    from bobina import paper
+
+    cmd = paper.code_advice("2 1/4 x 1 1/2in x 1/2in", cli=True).split("run ", 1)[1]
+    assert shlex.split(cmd) == ["bobina", "paper", "new", "--diameter", "1 1/2in", "--core", "1/2in", "--width",
+                                "2 1/4in"]  # fmt: skip
+
+
+def test_paper_used_and_calibrate_tear_never_suggest_paper_new(capsys):
+    run("printer", "add", "pipe", "--command", f'{sys.executable} -c "import sys; sys.stdin.buffer.read()"')
+    for argv in (("paper", "used", "57x30"), ("paper", "used", "+57x30"), ("calibrate", "tear", "57x30")):
+        assert run(*argv) == cli.USAGE
+        assert "paper new" not in capsys.readouterr().err  # it would reset the roll
+
+
+def test_a_roll_of_zero_in_the_state_file_is_unknown_not_a_crash(capsys):
+    from bobina import fileio, paper
+
+    run("printer", "add", "pipe", "--command", f'{sys.executable} -c "import sys; sys.stdin.buffer.read()"')
+    assert run("paper", "new", "0m") == cli.USAGE
+    fileio.locked_update(paper._path(), lambda d: d.update(pipe={"roll_mm": 0, "used_mm": 0.0, "loaded": "x"}))
+    capsys.readouterr()
+    assert run("paper") == cli.OK and "roll length unknown" in capsys.readouterr().out
+    assert "unknown" in paper.check("pipe", 100, [])
+    assert run("print", "hello", "--yes", "--quiet") == cli.OK
 
 
 def test_paper_new_warns_when_the_roll_is_not_the_printers_width(capsys):
+    import json
+
     from bobina import paper
 
     run("printer", "add", "pipe", "--command", f'{sys.executable} -c "import sys; sys.stdin.buffer.read()"')
@@ -165,8 +219,13 @@ def test_paper_new_warns_when_the_roll_is_not_the_printers_width(capsys):
     assert "P103" not in capsys.readouterr().err
     assert run("paper", "new", "20m", "--width", "80mm", "--strict") == 3  # --strict: not recorded
     assert "P103" in capsys.readouterr().err and paper.get("pipe")["roll_mm"] == 40000
+    assert run("paper", "new", "20m", "--width", "80mm", "--strict", "--json") == 3  # … and the JSON still comes
+    got = json.loads(capsys.readouterr().out)
+    assert got["roll_mm"] == 40000 and [p["code"] for p in got["problems"]] == ["P103"]
+    assert run("paper", "new", "20m", "--width", "80mm", "--profile", "epson-tm-t70-sa") == cli.OK  # an 80 mm one
+    assert "P103" not in capsys.readouterr().err
     assert run("paper", "new", "57x30") == cli.USAGE
-    assert "package code" in capsys.readouterr().err and paper.get("pipe")["roll_mm"] == 40000
+    assert "package code" in capsys.readouterr().err and paper.get("pipe")["roll_mm"] == 20000
 
 
 def test_paper_default_roll(tmp_path):

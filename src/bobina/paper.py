@@ -14,10 +14,10 @@ import time
 from . import fileio, paths
 
 MM = {"mm": 1, "cm": 10, "m": 1000, "metre": 1000, "metres": 1000, "meter": 1000, "meters": 1000,
-      "ft": 304.8, "feet": 304.8, "foot": 304.8, "'": 304.8, "’": 304.8,
-      "in": 25.4, "inch": 25.4, "inches": 25.4, '"': 25.4, "”": 25.4}  # fmt: skip
-CANON = {"'": "ft", "’": "ft", "feet": "ft", "foot": "ft", '"': "in", "”": "in", "inch": "in", "inches": "in",
-         "metre": "m", "metres": "m", "meter": "m", "meters": "m"}  # fmt: skip
+      "ft": 304.8, "feet": 304.8, "foot": 304.8, "'": 304.8, "’": 304.8, "′": 304.8,
+      "in": 25.4, "inch": 25.4, "inches": 25.4, '"': 25.4, "”": 25.4, "″": 25.4}  # fmt: skip
+CANON = {"'": "ft", "’": "ft", "′": "ft", "feet": "ft", "foot": "ft", '"': "in", "”": "in", "″": "in", "inch": "in",
+         "inches": "in", "metre": "m", "metres": "m", "meter": "m", "meters": "m"}  # fmt: skip
 NUMBER = r"\d+[\s-]+\d+/\d+|\d+/\d+|\d+(?:[.,]\d+)?"  # 15, 1,5, 2 1/4, 2-1/4, 1/2
 _UNIT = "|".join(re.escape(u) for u in sorted(MM, key=len, reverse=True))
 UNIT = re.compile(rf"^\s*({NUMBER})\s*({_UNIT})?\s*$", re.I)
@@ -37,15 +37,20 @@ def _number(s: str) -> float:
     return float(whole or 0) + int(num) / int(den)
 
 
-def parse_length(s: str, default_unit: str | None = "m") -> float:
+def parse_length(s: str, default_unit: str | None = "m", zero: bool = False) -> float:
     """'15m', '1500cm', '40mm', '50ft', "50'", '2 1/4in', '15' (default_unit; None: a unit is required) -> mm.
-    A package code (57x30) is refused with the question it raises: see code_advice."""
+    More than 0 (zero=True: 0 too, a total used). A package code (57x30) is not one length: paper new explains it
+    (code_advice); every other command only refuses it."""
     m = UNIT.match(str(s))
     unit = (m.group(2) or default_unit or "").lower() if m else ""
     if not unit:
-        advice = code_advice(str(s), cli=True)
-        raise ValueError(advice or f"length '{s}': use 15m, 1500cm, 40mm or 50ft")
-    return _number(m.group(1)) * MM[unit]
+        if CODE.match(str(s)):
+            raise ValueError(f"'{s}' is several numbers (a package code?): give one length with its unit (30m, 40mm)")
+        raise ValueError(f"length '{s}': use 15m, 1500cm, 40mm or 50ft")
+    mm = _number(m.group(1)) * MM[unit]
+    if mm < 0 or (mm == 0 and not zero):
+        raise ValueError(f"length '{s}': more than 0")
+    return mm
 
 
 def parse_width(s: str) -> float:
@@ -61,30 +66,31 @@ def fits(width_mm: float, paper_mm: float) -> bool:
 
 
 def code_advice(s: str, cli: bool = False) -> str | None:
-    """What to do with a package code given as a length, or None. "57x30" is never guessed: in Brazil 30 is the
-    length in metres, in European catalogues the roll's diameter in mm (57 x 40 x 12: diameter and core). With a
-    unit on every number ("57mm x 30m", '2 1/4" x 50\''), the code is split as it says. cli: the commands to run;
-    otherwise the arguments of the MCP tool paper_new."""
+    """What to do with a package code given as one length, or None. A number with its unit is decided (m, cm, ft:
+    the length; mm, in: the diameter, then the core); only a second number without a unit is asked about, never
+    guessed: in Brazil "57x30" is 30 metres, in European catalogues a 30 mm diameter (57 x 40 x 12: and a 12 mm
+    core); in the US "2 1/4 x 50" is 50 feet. cli: the bobina paper new command; otherwise the arguments of the MCP
+    tool paper_new."""
     m = CODE.match(str(s))
     if not m:
         return None
-    nums = [n.strip() if n else "" for n in m.groups()[0::2]]
-    units = [CANON.get(u.lower(), u.lower()) if u else "" for u in m.groups()[1::2]]
-    w, d, core = nums
-    inch = units[0] == "in" or "/" in w or _number(w) < 10
+    w, d, core = (n.strip() if n else "" for n in m.groups()[0::2])
+    wu, du, cu = (CANON.get(u.lower(), u.lower()) if u else "" for u in m.groups()[1::2])
+    inch = wu == "in" or (not wu and ("/" in w or _number(w) < 10))
+    width = w + (wu or ("in" if inch else "mm"))
 
     def call(length="", diameter=""):
-        core_ = f"{core}{units[2] or 'mm'}" if core and diameter else ""
-        width = w + (units[0] or ("in" if inch else "mm"))
+        core_ = f"{core}{cu or ('in' if du == 'in' else 'mm')}" if core and diameter else ""
         if cli:
-            what = length or f"--diameter {diameter}" + (f" --core {core_}" if core_ else "")
-            return f"bobina paper new {shlex.quote(what) if length else what} --width {shlex.quote(width)}"
+            q = shlex.quote
+            what = q(length) if length else f"--diameter {q(diameter)}" + (f" --core {q(core_)}" if core_ else "")
+            return f"bobina paper new {what} --width {q(width)}"
         given = [("length", length), ("diameter", diameter), ("core", core_), ("width", width)]
         return ", ".join(f'{k} "{v}"' for k, v in given if v)
 
-    if all(u for n, u in zip(nums, units, strict=True) if n):  # every number has its unit: nothing to ask
-        split = call(length=d + units[1]) if units[1] in ("cm", "m", "ft") else call(diameter=d + units[1])
-        return f"'{s}' is a package code with its units: {'run' if cli else 'give its parts as'} {split}"
+    if du:  # the second number says what it is: nothing to ask
+        split = call(length=d + du) if du in ("cm", "m", "ft") else call(diameter=d + du)
+        return f"'{s}' is a package code: {'run' if cli else 'give its parts as'} {split}"
     if inch:  # the US: inches x feet (a diameter is not given that way)
         ask = "Is" if cli else "never guess it. Ask the user: is"
         return f"'{s}' is a package code: {ask} {d} the roll's length in feet? (then {call(length=d + 'ft')})"
@@ -156,7 +162,7 @@ def check(printer: str, job_mm: float, nudges) -> str:
         r = get(printer)
     except fileio.StateError as e:
         return f" paper: not counted ({e})"
-    if not r:
+    if not r or not r.get("roll_mm"):  # 0: a damaged or hand-edited roll, not a division by zero
         return " paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)"
     left = r["roll_mm"] - r.get("used_mm", 0.0)
     after = left - job_mm

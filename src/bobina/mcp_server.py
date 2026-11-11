@@ -314,17 +314,17 @@ class Server:
             try:
                 paper.parse_length(v, None)  # the unit is required
             except (TypeError, ValueError):
-                raise _error(f"{what} {v!r}: as the user gave it, with its unit: {ROLL_UNITS[what]} (E101)") from None
+                why = f"as the user gave it, with its unit, more than 0: {ROLL_UNITS[what]}"
+                raise _error(f"{what} {v!r}: {why} (E101)") from None
         if (length is None) == (diameter is None):
             raise _error("give the roll's length (30m, 50ft) or its outer diameter (40mm), one of them, as the user"
                          " said it; without them, ask the user: never a usual size (E101)")  # fmt: skip
         if core is not None and diameter is None:
             raise _error("core goes with diameter: the length is computed from both (E101)")
-        p = printer or self.printer
         size = [length.strip()] if length is not None else [f"--diameter={diameter.strip()}"]
         size += [f"--{k}={v.strip()}" for k, v in (("core", core), ("width", width)) if v is not None]
-        argv = ["paper", "new", *size, "--json", *([f"--printer={p}"] if p else [])]
-        return result(await run(argv))
+        # the server's --printer, --profile, --allow and --strict: P103 judged as prints are
+        return result(await run(["paper", "new", *size, "--json", *self.options(printer=printer)]))
 
 
 def _images(paths: list[str]) -> list:

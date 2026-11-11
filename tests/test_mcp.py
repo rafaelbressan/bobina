@@ -241,9 +241,22 @@ def test_paper_new_from_the_diameter_and_a_width_that_does_not_fit(file_printer)
     assert not r.is_error and "--diameter=40mm --core=12mm --width=57mm" in texts(r)[0]
     assert 18_000 < output(r)["roll_mm"] < 20_000 and "P103" not in "\n".join(texts(r))
     r = call("paper_new", {"length": "40m", "width": "80mm"})  # recorded, with a warning
-    assert not r.is_error and output(r)["roll_mm"] == 40000 and "P103" in texts(r)[2]
-    for bad in ({"length": "30m", "diameter": "40mm"}, {"length": "30m", "core": "12mm"}, {"diameter": "40"}):
+    assert not r.is_error and output(r)["roll_mm"] == 40000
+    assert [p["code"] for p in output(r)["problems"]] == ["P103"]
+    for bad in ({"length": "30m", "diameter": "40mm"}, {"length": "30m", "core": "12mm"}, {"diameter": "40"},
+                {"length": "0m"}):  # fmt: skip
         assert call("paper_new", bad).is_error
+
+
+@needs_mcp
+def test_paper_new_uses_the_servers_profile_allow_and_strict(file_printer):
+    """P103 judged as prints are: bobina mcp --profile, --allow and --strict."""
+    r = call("paper_new", {"length": "40m", "width": "80mm"}, profile="epson-tm-t70-sa")  # an 80 mm printer
+    assert "--profile=epson-tm-t70-sa" in texts(r)[0] and "problems" not in output(r)
+    r = call("paper_new", {"length": "40m", "width": "80mm"}, allow=["P103"])
+    assert not r.is_error and "problems" not in output(r)
+    r = call("paper_new", {"length": "20m", "width": "80mm"}, strict=True)  # stopped: the roll is not recorded
+    assert r.is_error and "exit 3" in texts(r)[0] and output(r)["roll_mm"] == 40000
 
 
 @needs_mcp
