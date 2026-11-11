@@ -7,12 +7,14 @@ import dataclasses
 import hashlib
 import json
 import re
+import time
 import unicodedata
 
 import pytest
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.unicodedata import Scripts
+from PIL import Image
 
 from bobina import cli, rasterfont, scriptfonts
 from bobina.engine import build
@@ -186,7 +188,7 @@ def test_the_letters_are_drawn_with_the_downloaded_font(fake_pack):
     def ink(res):
         return sum(r.image.convert("L").histogram()[0] for r in res.rows if isinstance(r, BitmapRow))
 
-    scriptfonts._FAILED["thai"] = "offline"  # first: as without network (DejaVu Sans boxes)
+    scriptfonts._FAILED["thai"] = ("offline", time.monotonic())  # first: as without network (boxes)
     boxes = ink(build(THAI))
     scriptfonts._FAILED.clear()
     drawn = ink(build(THAI))
@@ -269,3 +271,84 @@ def test_text_without_spaces_wraps_between_letters():
     assert len(lines) > 1 and all(sum(t.width() for t in ln) <= 384 for ln in lines)
     assert "".join(t.text for ln in lines for t in ln) == tok.text
     assert not any(unicodedata.category(ln[0].text[0]).startswith("M") for ln in lines[1:])  # never a mark first
+
+
+# -- review fixes ----------------------------------------------------------------------------------------
+
+
+def test_a_word_split_across_fonts_still_wraps():
+    dv = rasterfont.resolve("DejaVu Sans").path
+    at = rasterfont.resolve("Atkinson Hyperlegible").path
+    toks = [
+        rasterfont.Tok("ສະບາຍດີ" * 6, dv, 24),
+        rasterfont.Tok("(123)", at, 24, glue=True),  # a digit run in another font, inside the same word
+        rasterfont.Tok("ສະບາຍດີ" * 6, dv, 24, glue=True),
+    ]
+    lines = rasterfont.layout_lines(toks, 384, 0)
+    assert len(lines) > 2 and all(sum(t.width() for t in ln) <= 384 for ln in lines)
+    assert "".join(t.text for ln in lines for t in ln) == "".join(t.text for t in toks)
+
+
+def test_an_installed_font_without_a_letter_still_draws_the_others(fake_pack, tmp_path):
+    scriptfonts.download(scriptfonts.PACKS["thai"])  # the tiny font: ก and ส, no ข
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "config.toml").write_text("font_downloads = false\n")
+    res = build(THAI + "ข")
+    assert "F305" not in codes(res), "the font is here: never say it is not downloaded"
+    f302 = next(n for n in res.nudges if n.code == "F302")
+    assert "ข" in f302.message and "ก" not in f302.message and "Noto Sans Thai" in f302.suggestion
+
+
+def test_tracking_never_spaces_out_joined_letters():
+    plain = build("مرحبا")
+    spaced = build("مرحبا {tracking=4}")
+    img = lambda r: [x for x in r.rows if isinstance(x, BitmapRow)][0].image.tobytes()  # noqa: E731
+    assert img(spaced) == img(plain)
+    assert any(n.code == "M103" and "tracking" in n.message for n in spaced.nudges)
+
+
+def test_right_to_left_list_items_have_their_bullet_on_the_right():
+    res = build("- שלום")
+    im = [r for r in res.rows if isinstance(r, BitmapRow)][0].image.convert("L")
+    box = Image.eval(im, lambda v: 255 - v).getbbox()
+    assert box[0] > im.width // 2, "bullet and word both sit at the right edge"
+
+
+def test_a_failed_download_is_tried_again_after_a_while(fake_pack):
+    scriptfonts._FAILED["thai"] = ("no network", time.monotonic() - scriptfonts.FAILED_TTL_S - 1)
+    assert "F304" in codes(build(THAI))
+    scriptfonts._FAILED["devanagari"] = ("no network", time.monotonic())
+    assert "no network" in next(n.message for n in build("नमस्ते").nudges if n.code == "F305")
+
+
+def test_fonts_get_document_follows_its_lang(tmp_path, capsys):
+    doc = tmp_path / "tw.bob.md"
+    doc.write_text("---\nlang: zh-TW\n---\n中文\n", encoding="utf-8")
+    assert cli.main(["fonts", "get", str(doc), "--json"]) == cli.UNREACHABLE  # no network in tests
+    assert [r["name"] for r in json.loads(capsys.readouterr().out)] == ["chinese-traditional"]
+
+
+def test_language_names_are_understood():
+    found, unknown = scriptfonts.resolve_names(["Hindi", "JAPANESE", "mandarin", "Cantonese", "tamil", "Korean"])
+    assert [p.id for p in found] == ["devanagari", "japanese", "chinese", "chinese-traditional", "tamil", "korean"]
+    assert unknown == [] and scriptfonts.support("Hindi") == "download"
+    assert scriptfonts.resolve_names(["Portuguese"]) == ([], [])  # the bundled fonts draw it: nothing to get
+
+
+@pytest.mark.parametrize("argv", [["list", "x"], ["scripts", "x"], ["test", "Terminus", "x"], ["mark", "A", "20", "x"]])
+def test_fonts_subcommands_refuse_extra_words(argv, capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["fonts", *argv])
+    assert e.value.code == cli.USAGE and "unrecognized arguments: x" in capsys.readouterr().err
+
+
+def test_downloads_off_is_read_once_per_document(monkeypatch):
+    calls = []
+    monkeypatch.setattr(scriptfonts, "downloads_off", lambda: calls.append(1) or "off for the test")
+    build("ภาษาไทย\n\nनमस्ते\n\nภาษา नमस्ते")
+    assert len(calls) == 1
+
+
+def test_packs_needed_by_script():
+    assert [p.id for p in scriptfonts.packs_needed("日本語のテキスト and สวัสดี")] == ["japanese", "thai"]
+    assert [p.id for p in scriptfonts.packs_needed("中文", "ko")] == ["korean"]

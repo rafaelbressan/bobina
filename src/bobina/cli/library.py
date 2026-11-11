@@ -195,6 +195,11 @@ def cmd_fonts(args):
     from .. import rasterfont
 
     names = list(getattr(args, "names", None) or [])
+    most = {"list": 0, "scripts": 0, "test": 1, "mark": 2}.get(args.action)  # only `get` takes many names
+    if most is not None and len(names) > most:
+        from .args import COMMANDS
+
+        COMMANDS["fonts"].error(f"unrecognized arguments: {' '.join(names[most:])}")  # exits with E101, as argparse
     args.family = names[0] if names else None
     args.px = names[1] if len(names) > 1 else None
     if args.action == "scripts":
@@ -290,7 +295,13 @@ def fonts_get(args, names: list[str]):
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError as e:
                 raise Fail(USAGE, f"{n}: {e.strerror or e}", problem="E201") from None
-            wanted += sf.packs_needed(text)
+            try:  # lang:/locale: picks the Chinese, Japanese or Korean font, as when printing
+                from ..templating import split_front_matter
+
+                meta = split_front_matter(text)[0]
+            except ValueError:
+                meta = {}
+            wanted += sf.packs_needed(text, str(meta.get("locale") or meta.get("lang") or ""))
             continue
         found, bad = sf.resolve_names([n])
         wanted += found

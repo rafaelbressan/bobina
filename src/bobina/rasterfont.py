@@ -7,6 +7,7 @@ by measuring the stem."""
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -288,8 +289,6 @@ def _breaks(text: str) -> list[int]:
 
 def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     """The longest head of `t` that fits in `room` dots (at a break), and the rest."""
-    import dataclasses
-
     best = None
     for i in _breaks(t.text):
         head = dataclasses.replace(t, text=t.text[:i])
@@ -323,16 +322,22 @@ def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
                 cur.append(t)
                 cw += tw
             continue
-        if cw + tw > avail and len(u) == 1 and _unspaced(t.text):  # Chinese, Thai: fill the line, then go on
-            head, rest = _split(t, avail - cw)
-            if head is not None or cur:
+        if cw + tw > avail and any(_unspaced(x.text) for x in u):  # Chinese, Thai: fill the line, then go on
+            room, k, taken = avail - cw, 0, []
+            while u[k].width() <= room:  # whole parts first (a digit, a bracket, a Latin word glued in)
+                room -= u[k].width()
+                taken.append(u[k])
+                k += 1
+            head, rest = _split(u[k], room) if _unspaced(u[k].text) else (None, u[k])
+            if taken or head is not None or cur:
+                cur.extend(taken)
                 if head is not None:
                     cur.append(head)
                 while cur and cur[-1].space:
                     cur.pop()
                 lines.append(cur)
                 cur, cw, avail = [], 0, width - hang
-                units.append([rest])
+                units.append([dataclasses.replace(rest, glue=False), *u[k + 1 :]])
                 continue
         if cur and cw + tw > avail:
             while cur and cur[-1].space:
@@ -396,8 +401,8 @@ def render_block(
         descent = max([t.font.getmetrics()[1] for t in ln] or [4])
         h = ascent + descent + leading
         row = Image.new("L", (width, h), 255)
-        x0 = indent + pw
-        avail = width - x0
+        x0 = 0 if rtl else indent + pw  # right to left: indent and bullet on the right
+        avail = width - indent - pw
         parts = [draw_tok(t, ascent, ascent + descent) for t in ln]
         used = sum(p.width for p in parts)
         gaps = [k for k, t in enumerate(ln) if t.space]
@@ -407,7 +412,8 @@ def render_block(
             extra = {g: slack // len(gaps) + (1 if n < slack % len(gaps) else 0) for n, g in enumerate(gaps)}
         x = {"center": x0 + (avail - used) // 2, "right": x0 + avail - used}.get(align, x0)
         if i == 0 and prefix is not None:
-            row.paste(prefix, (indent, max(0, (ascent + descent - prefix.height) // 2 + 1)))
+            px = width - indent - pw if rtl else indent
+            row.paste(prefix, (px, max(0, (ascent + descent - prefix.height) // 2 + 1)))
         for k, p in enumerate(parts):
             row.paste(p, (int(x), 0))
             x += p.width + extra.get(k, 0)

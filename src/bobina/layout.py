@@ -217,13 +217,16 @@ class Layout:
         """The first letter that makes a native block go raster as a whole ('' for none): one the printer lacks
         and that cannot be drawn cell by cell (a script that shapes or runs right to left), or that only a
         script font has (Chinese on a printer without it)."""
+        decided: dict[str, tuple[bool, bool]] = {}  # script -> (shapes, a script font draws it): once per script
         for r in runs:
             for ch in self.text(r.text):
                 if ch.isspace() or self.p.native_glyph(ch) or ch in CHECKBOX:
                     continue
-                if scriptfonts.needs_shaping(ch):
-                    return ch
-                if not self.em.has_glyph(ch) and scriptfonts.packs_for(scriptfonts.script_of(ch)):
+                s = scriptfonts.script_of(ch)
+                if s not in decided:
+                    decided[s] = (s not in scriptfonts.SIMPLE, bool(scriptfonts.packs_for(s)))
+                shapes, has_font = decided[s]
+                if shapes or (has_font and not self.em.has_glyph(ch)):
                     return ch
         return ""
 
@@ -307,7 +310,12 @@ class Layout:
                     miss.append(ch)
                 add(ch, f)
             if miss and not told:
-                self.n.add("F302", f"glyph(s) {''.join(dict.fromkeys(miss))} missing in every font", line)
+                self.n.add(
+                    "F302",
+                    f"glyph(s) {''.join(dict.fromkeys(miss))} missing in every font",
+                    line,
+                    self.scripts.hints.get(script, ""),
+                )
         return parts
 
     def raster_block(
@@ -365,24 +373,37 @@ class Layout:
                             glue=k > 0,  # the parts of one word stay on one line
                         )
                     )
+        rtl = scriptfonts.base_rtl(self.text(context))
         pimg = None
         if prefix:
             ptxt = "".join(c.ch for c in prefix)
+            if rtl:  # the bullet goes on the right: its space between it and the first letter
+                ptxt = " " * (len(ptxt) - len(ptxt.rstrip())) + ptxt.rstrip()
             if prefix[0].ch in CHECKBOX:
                 pimg = rasterfont.checkbox(px, prefix[0].ch != "☐")
+                if rtl:  # its gap on the inner side, next to the first letter
+                    box = pimg.crop((0, 0, pimg.width - 6, pimg.height))
+                    pimg = Image.new("L", pimg.size, 255)
+                    pimg.paste(box, (6, 0))
             else:
                 t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
                 asc, desc = t.font.getmetrics()
                 pimg = rasterfont.draw_tok(t, asc, asc + desc)
-        rtl = scriptfonts.base_rtl(self.text(context))
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)),
             "right" if rtl and "align" not in self.doc.meta else self.align,  # Arabic, Hebrew: from the right
         )
         if leading is None:
             leading = max(2, round(px * 0.25))
-        for t in toks:
-            t.tracking = tracking
+        for t in toks:  # letters that join or stack are never spaced apart: tracking stays off for them
+            t.tracking = 0 if tracking and scriptfonts.shaped(t.text) else tracking
+        if tracking and any(scriptfonts.shaped(t.text) for t in toks):
+            self.n.add(
+                "M103",
+                "tracking= is ignored for letters that join, stack or run right to left (Thai, Arabic, Devanagari…)",
+                line,
+                "nothing to fix; the other words keep their spacing",
+            )
         if not toks:
             return []
         im, texts = rasterfont.render_block(

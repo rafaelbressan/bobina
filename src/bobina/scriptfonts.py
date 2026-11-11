@@ -221,6 +221,11 @@ def needs_shaping(ch: str) -> bool:
     return script_of(ch) not in SIMPLE
 
 
+def shaped(text: str) -> bool:
+    """Any letter that joins, stacks or runs right to left: such text is never drawn letter by letter."""
+    return any(s not in SIMPLE for s in scripts_in(text))
+
+
 # -- packs ------------------------------------------------------------------------------------------------
 
 
@@ -256,6 +261,12 @@ def installed(pack: Pack) -> Path | None:
         return None
 
 
+@lru_cache(maxsize=256)
+def scripts_in(text: str) -> frozenset[str]:
+    """The scripts of a text (once per text: a block asks for every word it splits)."""
+    return frozenset(script_of(c) for c in set(text))
+
+
 def packs_for(script: str, context: str = "", lang: str = "") -> list[Pack]:
     """Packs that draw `script`, best first. For Han: the document's language (lang: ja, ko, zh_TW), else the kana
     or hangul in `context`, else a subset already downloaded, else HAN_ORDER (Simplified Chinese first)."""
@@ -263,7 +274,7 @@ def packs_for(script: str, context: str = "", lang: str = "") -> list[Pack]:
         return [p for p in PACKS.values() if script in p.scripts]
     ids = list(HAN_ORDER)
     lang = lang.replace("-", "_").lower()
-    scripts = {script_of(c) for c in context}
+    scripts = scripts_in(context)
     first = None
     if lang.startswith("ja") or scripts & {"Hira", "Kana"}:
         first = "japanese"
@@ -395,6 +406,7 @@ def scripts_of(tag: str) -> tuple[str, ...]:
     code = unicodedata.script_code(t.replace("_", " "), default=None) if len(t) > 4 else None
     if code:
         return (code,)
+    t = language_names().get(t.replace("_", " ").lower(), t)  # hindi -> hi, cantonese -> zh_Hant
     from babel.core import get_global
 
     likely = get_global("likely_subtags")
@@ -404,6 +416,25 @@ def scripts_of(tag: str) -> tuple[str, ...]:
         (x for x in full.split("_")[1:] if len(x) == 4), None
     )
     return LANGUAGE_SCRIPTS.get(script, (script,)) if script else ()
+
+
+# Names people use that CLDR does not list as such. Cantonese is written in Traditional characters (Hong Kong).
+LANGUAGE_ALIASES = {"mandarin": "zh", "cantonese": "zh_Hant", "chinese traditional": "zh_Hant", "farsi": "fa"}
+
+
+@lru_cache(maxsize=1)
+def language_names() -> dict[str, str]:
+    """English language names (CLDR), lower case -> code: hindi -> hi, japanese -> ja, tamil -> ta."""
+    from babel import Locale
+
+    names = {name.lower(): code for code, name in Locale("en").languages.items()}
+    return {**names, **LANGUAGE_ALIASES}
+
+
+def language_tag(tag: str) -> str:
+    """A language name or tag as a tag: Cantonese -> zh_Hant, Hindi -> hi, ja-JP -> ja_JP (for the Han choice)."""
+    t = tag.strip().replace("-", "_")
+    return language_names().get(t.replace("_", " ").lower(), t)
 
 
 def _bundled_draws(script: str) -> bool:
@@ -435,7 +466,7 @@ def support(tag: str) -> str:
     for s in scripts:
         if _bundled_draws(s):
             continue
-        packs = packs_for(s, "".join(SAMPLES.get(x, "") for x in scripts))
+        packs = packs_for(s, "".join(SAMPLES.get(x, "") for x in scripts), language_tag(tag))
         if not packs:
             return "none"
         if installed(packs[0]) is None:
@@ -448,11 +479,11 @@ def packs_needed(text: str, lang: str = "") -> list[Pack]:
     from . import rasterfont
 
     bundled = rasterfont.cmap(rasterfont.resolve("DejaVu Sans").path)
+    near = "".join(SAMPLES.get(s, "") for s in scripts_in(text))  # kana or hangul in the text: Japanese, Korean
+    needed = {script_of(ch) for ch in set(text) if not ch.isspace() and ord(ch) not in bundled}
     out: list[Pack] = []
-    for ch in dict.fromkeys(text):
-        if ord(ch) in bundled or ch.isspace():
-            continue
-        packs = packs_for(script_of(ch), text, lang)
+    for script in sorted(needed):
+        packs = packs_for(script, near, lang)
         if packs and packs[0] not in out:
             out.append(packs[0])
     return out
@@ -471,7 +502,8 @@ def resolve_names(names: list[str]) -> tuple[list[Pack], list[str]]:
             found.append(PACKS[key])
             continue
         scripts = scripts_of(n)
-        packs = [packs_for(s, "".join(SAMPLES.get(x, "") for x in scripts)) for s in scripts if not _bundled_draws(s)]
+        near, lang = "".join(SAMPLES.get(x, "") for x in scripts), language_tag(n)
+        packs = [packs_for(s, near, lang) for s in scripts if not _bundled_draws(s)]
         if scripts and all(packs) and packs:
             found += [p[0] for p in packs]
         elif scripts and not packs and all(_bundled_draws(s) for s in scripts):
@@ -483,38 +515,56 @@ def resolve_names(names: list[str]) -> tuple[list[Pack], list[str]]:
 
 # -- per document -----------------------------------------------------------------------------------------
 
-_FAILED: dict[str, str] = {}  # pack id -> why, for this process: a batch of 1000 labels tries once
+_FAILED: dict[str, tuple[str, float]] = {}  # pack id -> (why, when): a batch of 1000 labels tries once
+FAILED_TTL_S = 120  # then again: a long-running process (bobina mcp) notices the network coming back
+
+
+def _failed(pack_id: str) -> str | None:
+    hit = _FAILED.get(pack_id)
+    if hit and time.monotonic() - hit[1] < FAILED_TTL_S:
+        return hit[0]
+    _FAILED.pop(pack_id, None)
+    return None
 
 
 class Resolver:
     """Which downloaded font draws a run, for one document: downloads once (F304, after the notice) or says why
-    not (F305); both once per pack and document."""
+    not (F305); both once per pack and document. hints[script]: what to say about a letter still missing."""
 
     def __init__(self, nudges, lang: str = ""):
         self.n = nudges
         self.lang = lang  # the document's locale/lang: which Chinese, Japanese or Korean font draws Han
+        self.hints: dict[str, str] = {}
         self._told: set[str] = set()
+        self._off: str | None = None  # downloads_off(), read once per document
+
+    def off(self) -> str:
+        if self._off is None:
+            self._off = downloads_off()
+        return self._off
 
     def path(self, script: str, text: str, line: int | None, context: str = "") -> str | None:
         packs = packs_for(script, context, self.lang)
         if not packs:
             return None
         letters = "".join(c for c in text if script_of(c) == script)
-        for p in packs:  # a subset already here that has every letter (Han in the Japanese subset, say)
-            if (f := installed(p)) is not None and covers(str(f), letters):
+        here = [(p, f) for p in packs if (f := installed(p)) is not None]
+        for _p, f in here:  # a subset already here that has every letter (Han in the Japanese subset, say)
+            if covers(str(f), letters):
                 return str(f)
         pack = packs[0]
-        why = _FAILED.get(pack.id)
+        if here and here[0][0] == pack:  # the best font is here and lacks a letter: the others are drawn
+            self.hints[script] = f"{pack.family} has no such letter: replace it, or pick a font that has it"
+            return str(here[0][1])
+        why = _failed(pack.id) or self.off() or None
         if why is None:
-            why = downloads_off() or None
-        if why is None:
-            had = installed(pack) is not None  # here, without some rare letter: nothing to download
             try:
                 f = download(pack)
             except FontDownloadError as e:
-                _FAILED[pack.id] = why = str(e)
+                why = str(e)
+                _FAILED[pack.id] = (why, time.monotonic())
             else:
-                if not had and pack.id not in self._told:
+                if pack.id not in self._told:
                     self._told.add(pack.id)
                     self.n.add(
                         "F304",
@@ -524,6 +574,9 @@ class Resolver:
                         "to never download fonts: font_downloads = false in config.toml",
                     )
                 return str(f)
+        if here:  # another subset is here (Japanese for a Chinese letter): it draws what it has
+            self.hints[script] = f"{pack.family} may have it, not downloaded ({why}): bobina fonts get {pack.id}"
+            return str(here[0][1])
         if pack.id not in self._told:
             self._told.add(pack.id)
             self.n.add(
