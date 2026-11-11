@@ -108,10 +108,22 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
 # -- network -----------------------------------------------------------------------------------------
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")  # DNS64 answers for IPv4 hosts on IPv6-only networks
+
+
 def _public(addr: str) -> bool:
+    """A public internet address. IPv6 forms that carry an IPv4 address are judged by that address (mapped,
+    NAT64, 6to4); IPv4-compatible (::a.b.c.d), site-local and Teredo addresses are never public."""
     ip = ipaddress.ip_address(addr)
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64:  # 64:ff9b::192.168.1.1 reaches the LAN behind the translator
+            return _public(str(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)))
+        else:
+            six_to_four = ip.sixtofour is not None and not _public(str(ip.sixtofour))
+            if six_to_four or int(ip) >> 32 == 0 or ip.is_site_local or ip.teredo is not None:
+                return False
     return ip.is_global and not ip.is_multicast
 
 

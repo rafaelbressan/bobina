@@ -2,8 +2,11 @@
 
 Nothing here reaches the network (fake DNS, fake openers) or a printer (-o, check, preview, a file printer)."""
 
+import ipaddress
 import json
 import os
+import socket
+import threading
 import time
 
 import openpyxl
@@ -260,3 +263,126 @@ def test_a_tall_pdf_page_is_refused_before_it_is_rendered(tmp_path):
     Image.new("L", (10, 10_000), 0).save(tmp_path / "tall.pdf")  # 10 x 10 000 pt: 384 000 dots at 384 wide
     with pytest.raises(sources.ImageError, match="taller than"):
         sources.render_pdf((tmp_path / "tall.pdf").read_bytes(), 384)
+
+
+# -- images by URL: --allow-net, https, public addresses only, the checked address, no redirects, 10 MB / time
+
+
+MAPPED_CGNAT = "::ffff:" + str(ipaddress.IPv4Address((100 << 24) | (64 << 16) | 1))  # the shared space of tailnets
+
+
+def fake_dns(monkeypatch, *addrs):
+    calls = []
+
+    def getaddrinfo(host, port, *a, **k):
+        calls.append(host)
+        return [(socket.AF_INET6 if ":" in x else socket.AF_INET, socket.SOCK_STREAM, 6, "", (x, port)) for x in addrs]
+
+    monkeypatch.setattr(sources.socket, "getaddrinfo", getaddrinfo)
+    sources._CACHE.clear()
+    return calls
+
+
+@pytest.mark.parametrize(
+    "addr",
+    [
+        "0.0.0.0", "224.0.0.1", "255.255.255.255", "198.18.0.1", "192.0.0.8", "240.0.0.1", "::",
+        "::127.0.0.1", "::7f00:1",  # IPv4-compatible IPv6: deprecated, never public
+        "64:ff9b::7f00:1", "64:ff9b::c0a8:101",  # NAT64 of loopback and of a LAN address
+        "2002:c0a8:101::1",  # 6to4 of a LAN address
+        "2001:0:4136:e378:8000:63bf:3fff:fdd2",  # Teredo
+        "fec0::1", "fe80::1", "ff02::1", MAPPED_CGNAT,
+    ],
+)  # fmt: skip
+def test_addresses_that_reach_this_machine_or_its_network_are_refused(monkeypatch, addr):
+    fake_dns(monkeypatch, addr)
+    with pytest.raises(sources.ImageError) as e:
+        sources.fetch("https://looks-public.example/logo.png")
+    assert e.value.code == "I106"
+
+
+def test_nat64_of_a_public_address_is_public():
+    assert sources._public("64:ff9b::808:808") and sources._public("8.8.8.8")
+
+
+class FakeResponse:
+    def __init__(self, status=200, headers=None, body=b"", wait=None):
+        self.status, self.headers, self.body, self.wait = status, headers or {}, body, wait
+
+    def getheader(self, name):
+        return self.headers.get(name)
+
+    def read(self, n):
+        if self.wait is not None:
+            self.wait.wait(5)  # until the deadline shuts the socket down
+        return self.body[:n]
+
+
+def fake_https(monkeypatch, response):
+    seen = {}
+
+    class Conn:
+        def __init__(self, host, ip, port, timeout):
+            seen.update(host=host, ip=ip, port=port)
+            self.raw_sock = self
+
+        def request(self, method, path, headers):
+            seen.update(method=method, path=path)
+
+        def getresponse(self):
+            return response
+
+        def shutdown(self, how):
+            if response.wait is not None:
+                response.wait.set()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sources, "_PinnedHTTPS", Conn)
+    return seen
+
+
+def test_the_connection_goes_to_the_address_that_was_checked(monkeypatch):
+    calls = fake_dns(monkeypatch, "93.184.215.14")
+    seen = fake_https(monkeypatch, FakeResponse(headers={"Content-Type": "image/png"}, body=b"\x89PNG"))
+    assert sources.fetch("https://example.com/a.png?x=1") == (b"\x89PNG", "example.com")
+    assert seen == {"host": "example.com", "ip": "93.184.215.14", "port": 443, "method": "GET", "path": "/a.png?x=1"}
+    assert calls == ["example.com"]  # one lookup: no second answer (rebinding) between the check and the connection
+
+
+@pytest.mark.parametrize(
+    "response,why",
+    [
+        (FakeResponse(302, {"Location": "https://127.0.0.1/"}), "redirects are not followed"),
+        (FakeResponse(200, {"Content-Type": "text/html"}, b"<html>"), "not an image"),
+        (FakeResponse(200, {"Content-Type": "image/png", "Content-Length": "999999999"}), "larger than"),
+        (FakeResponse(200, {"Content-Type": "image/png"}, b"x" * 2000), "larger than"),  # no length, too long
+    ],
+)
+def test_redirects_other_types_and_large_downloads_are_refused(monkeypatch, response, why):
+    monkeypatch.setattr(sources, "MAX_BYTES", 1000)
+    fake_dns(monkeypatch, "93.184.215.14")
+    fake_https(monkeypatch, response)
+    with pytest.raises(sources.ImageError, match=why):
+        sources.fetch("https://example.com/a.png")
+
+
+def test_a_download_that_drips_is_cut_at_the_deadline(monkeypatch):
+    monkeypatch.setattr(sources, "DEADLINE_S", 0.2)
+    fake_dns(monkeypatch, "93.184.215.14")
+    fake_https(monkeypatch, FakeResponse(headers={"Content-Type": "image/png"}, body=b"part", wait=threading.Event()))
+    start = time.monotonic()
+    with pytest.raises(sources.ImageError, match="did not finish"):
+        sources.fetch("https://example.com/a.png")
+    assert time.monotonic() - start < 3
+
+
+def test_a_document_cannot_turn_the_network_on(monkeypatch):
+    def never(url):
+        raise AssertionError(f"fetched {url}")
+
+    monkeypatch.setattr(sources, "fetch", never)
+    for fm in ("allow_net: true", "allow: [I103, net]", "net: true"):
+        res = build(f"---\n{fm}\n---\n![](https://example.com/logo.png)\n")
+        assert not [r for r in res.rows if getattr(r, "kind", None) == "image"]
