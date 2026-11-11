@@ -138,22 +138,22 @@ def can_draw(text: str) -> bool:
     return all(ord(c) in have for c in text if not c.isspace())
 
 
-@lru_cache(maxsize=64)
-def drawable(loc: Locale) -> bool:
-    """bobina can write this locale's words: left to right, and every letter of its month and day names in the
-    bundled fonts."""
-    if loc.text_direction != "ltr":  # bobina lays text out left to right
-        return False
-    names = [*loc.months["format"]["wide"].values(), *loc.months["format"]["abbreviated"].values(),
-             *loc.days["format"]["wide"].values(), *loc.days["format"]["abbreviated"].values()]  # fmt: skip
-    return can_draw("".join(names))
+def script_support(loc: Locale) -> str:
+    """Can bobina print this locale's words? "ready" (a bundled or downloaded font), "download" (bobina downloads
+    the font when a document needs it; scriptfonts.downloads_on()), "off" (a font exists but downloads are off) or
+    "none" (no font bobina knows)."""
+    from . import scriptfonts
+
+    state = scriptfonts.support(str(loc))
+    if state == "download" and not scriptfonts.downloads_on():
+        return "off"
+    return state
 
 
 def printable(loc: Locale) -> Locale:
-    """The locale bobina prints with: loc, or English words with loc's country formats (th-TH -> en-TH) while
-    bobina has no font for loc's script. The one place to change when fonts per script exist (downloaded on first
-    use): then this returns loc, with that font."""
-    if drawable(loc):
+    """The locale bobina prints with: loc when its script has a font (bundled, downloaded, or downloaded on first
+    use: the fonts code says so with its own F304), else English words with loc's country formats (th-TH -> en-TH)."""
+    if script_support(loc) in ("ready", "download"):
         return loc
     country = country_of_locale(loc)
     return (parse(f"en-{country}") if country else None) or Locale.parse(FALLBACK)
@@ -163,8 +163,14 @@ def script_note(loc: Locale, shown: Locale, where: str) -> tuple[str, str, str]:
     lang = loc.get_language_name("en") or loc.language
     country = Locale("en").territories.get(shown.territory or "", "")
     formats = f"the formats of {country}" if country else "English formats"
-    return (SCRIPT, f"bobina cannot draw {lang} yet ({tag(loc)}, {where}): dates and numbers print as {tag(shown)}, "
-            f"English words with {formats}", f"or choose another locale: {CHANGE}")  # fmt: skip
+    if script_support(loc) == "off":
+        why = f"automatic font downloads are off, and the {lang} font is not here"
+        hint = f"get it once: bobina fonts get {loc.language} (or font_downloads = true in config.toml); or {CHANGE}"
+    else:
+        why = f"bobina has no font for {lang}"
+        hint = f"choose another locale: {CHANGE}"
+    return (SCRIPT, f"{why} ({tag(loc)}, {where}): dates and numbers print as {tag(shown)}, English words with "
+            f"{formats}", hint)  # fmt: skip
 
 
 CHANGE = "bobina config locale TAG"
@@ -354,14 +360,7 @@ def _example(chosen: str | None = None, near: str = "") -> str:
 @lru_cache(maxsize=1)
 def _known() -> dict[str, str]:
     """Every CLDR locale as a tag, by its lower-case form: pt-br -> pt-BR."""
-    out = {}
-    for ident in localedata.locale_identifiers():
-        try:
-            t = tag(Locale.parse(ident))
-        except (UnknownLocaleError, ValueError):
-            continue
-        out[t.lower()] = t
-    return out
+    return {i.replace("_", "-").lower(): i.replace("_", "-") for i in localedata.locale_identifiers() if i != "root"}
 
 
 def _distance(a: str, b: str) -> int:

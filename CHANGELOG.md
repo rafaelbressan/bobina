@@ -17,9 +17,22 @@
   with the machine's locale it is printed as typed with `M202`, and payments refuse it in any locale. An unknown
   `locale:` in a document is `M205`, with the closest tag bobina knows.
 - `printer add`, `use`, `remove` and `calibrate` change config.toml under its lock, on the file as it is then.
-- A locale whose script bobina cannot draw yet (Thai, Hindi, Japanese, right-to-left scripts) prints English words
-  with its country's formats (th-TH → en-TH, `F306`), until bobina has fonts per script.
+- A locale whose script needs a font prints in its language with that font (downloaded on first use, `F304`);
+  with downloads off and the font not here, or no font known, it prints English words with its country's formats
+  (th-TH → en-TH, `F306`, which says `bobina fonts get th`). config.toml keeps the person's locale (th-TH).
 - Removed: money written as the currency's country does (R$ 24,90 in an otherwise English document).
+- Rolls as they are described around the world. `bobina paper new` takes feet (`50ft`, `50'`) and `--width` (`57mm`,
+  `2 1/4in`): a roll that is not as wide as the printer's paper (80 mm on a 58 mm printer) is recorded with the
+  warning `P103`. A package code (`57x30`) is refused with its question: 30 metres (as sold in Brazil) or a 30 mm
+  diameter (European catalogues)? The MCP tool paper_new takes the same length, or the roll's `diameter` (and
+  `core`), and `width`; with a package code it tells the agent to ask the user that question.
+- Thai, Devanagari and the other Indic scripts, Khmer, Myanmar, Ethiopic, Chinese, Japanese and Korean print as
+  letters, not boxes: the first time a document needs one, bobina downloads its Noto font (38 KB for Thai, 4.5
+  to 8.3 MB for CJK), says so before it starts (font, license, size, source; `F304` in the problems) and keeps it
+  for offline use. Every file is pinned (URL, size, sha256). Without network, or with `font_downloads = false`,
+  the line prints with boxes and `F305` says how to get the font: `bobina fonts get thai` (or `hi`, or a
+  document); `bobina fonts scripts` lists them. Lines in these scripts and in Arabic or Hebrew are drawn whole
+  (joined, stacked, right to left; Chinese and Thai wrap between letters), no longer letter by letter.
 
 ## 0.1.1 — 2026-11-10
 

@@ -120,6 +120,13 @@ Quality nudges, from the printed tests of the profile:
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
 
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
+downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
+OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
+`font_downloads = false` in config.toml: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
+follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
+Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
+
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
 | Size at 203 dpi | Height | What works (tests F1, F2, R5) |
@@ -300,13 +307,11 @@ cannot become an image path (`M312`), and neither can a value joined into a path
 
 ### 7.1 Dates and languages
 
-One locale writes a job's dates, numbers and money, never mixed (`US$ 24,90` and `09/11/2026` in `pt-BR`): the
-document's `locale:`, else the machine's, `locale` in config.toml (`bobina config locale [TAG]`). The first print,
-check or preview without one infers it from the time zone (country, then the `LANG` language if official there,
-else the country's first: `America/Sao_Paulo` gives `pt-BR`), saves it and says so once (`M203`). No country
-(`Etc/UTC`): the `LC_ALL`, `LC_TIME` or `LANG` locale if it is not English, else English (`en`: 11/5/26, R$24.90,
-`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); an unknown one is `M205`. A
-script bobina cannot draw yet (Thai) prints English words with its country's formats (`en-TH`, `F306`).
+One locale for dates, numbers and money (`US$ 24,90`, `09/11/2026` in `pt-BR`): the document's `locale:`, else
+`locale` in config.toml (`bobina config locale [TAG]`), saved on first use from the time zone (`America/Sao_Paulo`:
+`pt-BR`; `LANG`'s language if official there) or else a non-English `LANG`, said once (`M203`); else English
+(`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); unknown: `M205`. No font
+for the script (downloads off): English words, its country's formats (`en-TH`, `F306`).
 
 Styles `short`, `medium`, `long`, `full` follow the document `locale` (the same line prints "Thursday, November 5,
 2026" in `en-US`). Patterns use CLDR syntax (`dd/MM/yyyy HH:mm`); a pattern containing `%` is strftime, with month
@@ -455,7 +460,9 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
-| `F306` | note | no font for the locale's script yet: English words with its country's formats |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |
+| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
+| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -481,6 +488,7 @@ Nudges:
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
+| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |

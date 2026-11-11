@@ -42,6 +42,7 @@ with vendor commands), paper and battery, counters, and the history of the last 
 | Malformed codes | barcode 1–250 printable ASCII; QR overflow; Pix key ≤ 77 chars, numeric amount, TLV ≤ 99 → nudge `Q109`, no crash | `test_oversized_or_invalid_codes_*` |
 | Counter format strings | only one `{:spec}` allowed (`FMT_RE`), no attribute access | — |
 | Font lookups | `fc-match` without a shell; the result must match the requested family | — |
+| Fonts for other scripts (Thai, CJK…) | a document can make bobina download one, once: only the files pinned in `scriptfonts.py` (https at a fixed notofonts / Google Fonts commit, exact size and sha256, no redirects, 12 MB), written atomically; a file that does not match is thrown away. Reveals to GitHub that some text needs that script; `font_downloads = false` turns it off (`F305`, boxes) | `test_scriptfonts.py` |
 
 Raw blocks written by the **author** are allowed by design (escape hatch): they always raise `P201`
 in the confirmation screen and are never previewed. A shared document with a `raw` block can switch

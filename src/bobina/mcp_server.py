@@ -13,7 +13,6 @@ print without confirm: true is a dry run (--dry-run): nothing is sent to the pri
 
 import json
 import os
-import re
 import shutil
 import signal
 import subprocess
@@ -25,6 +24,7 @@ from itertools import count
 from pathlib import Path
 from typing import Annotated
 
+from . import paper
 from .cli.common import LEFT_OUT, OK, USAGE, Fail
 from .datasource import NAME_OK
 from .library import NAME_RE, LibraryError, check_name
@@ -38,7 +38,7 @@ IMAGES_MAX = 10  # images attached to one preview result (every path is listed)
 IMAGES_MAX_BYTES = 8_000_000  # all of them
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
                ".webp": "image/webp"}  # fmt: skip
-ROLL_LENGTH = re.compile(r"\d+(?:[.,]\d+)?\s*(?:mm|cm|m)")  # the unit is required
+ROLL_UNITS = {"length": "30m, 1500cm or 50ft", "diameter": "40mm", "core": "12mm", "width": "57mm, 80mm or 2 1/4in"}
 PAPER_WARNING = "part of the job may already be on paper: check the paper and bobina history before printing again"
 
 INSTRUCTIONS = """\
@@ -300,14 +300,31 @@ class Server:
         p = printer or self.printer
         return result(await run(["paper", "--json", *([f"--printer={p}"] if p else [])]))
 
-    async def paper_new(self, length, printer=None):
-        """A roll the user loaded, with the length they said: never a default (bobina paper new without LENGTH
-        would take the remembered roll), never a bare number (30: metres or centimetres?)."""
-        if not isinstance(length, str) or not ROLL_LENGTH.fullmatch(length.strip()):
-            raise _error(f"length {length!r}: the length the user gave, with its unit: 30m, 1500cm or 400mm (E101)")
-        p = printer or self.printer
-        argv = ["paper", "new", length.strip(), "--json", *([f"--printer={p}"] if p else [])]
-        return result(await run(argv))
+    async def paper_new(self, length=None, printer=None, diameter=None, core=None, width=None):
+        """A roll the user loaded, with the size they said: never a default (bobina paper new without LENGTH
+        would take the remembered roll), never a bare number (30: metres or centimetres?), never a guess at a
+        package code (57x30: 30 metres or a 30 mm diameter?)."""
+        given = {"length": length, "diameter": diameter, "core": core, "width": width}
+        for what, v in given.items():
+            if v is None:
+                continue
+            advice = paper.code_advice(v) if isinstance(v, str) else None
+            if advice:
+                raise _error(f"{advice} (E101)")
+            try:
+                paper.parse_length(v, None)  # the unit is required
+            except (TypeError, ValueError):
+                why = f"as the user gave it, with its unit, more than 0: {ROLL_UNITS[what]}"
+                raise _error(f"{what} {v!r}: {why} (E101)") from None
+        if (length is None) == (diameter is None):
+            raise _error("give the roll's length (30m, 50ft) or its outer diameter (40mm), one of them, as the user"
+                         " said it; without them, ask the user: never a usual size (E101)")  # fmt: skip
+        if core is not None and diameter is None:
+            raise _error("core goes with diameter: the length is computed from both (E101)")
+        size = [length.strip()] if length is not None else [f"--diameter={diameter.strip()}"]
+        size += [f"--{k}={v.strip()}" for k, v in (("core", core), ("width", width)) if v is not None]
+        # the server's --printer, --profile, --allow and --strict: P103 judged as prints are
+        return result(await run(["paper", "new", *size, "--json", *self.options(printer=printer)]))
 
 
 def _images(paths: list[str]) -> list:
@@ -461,12 +478,24 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
     @mcp.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True,
                                           open_world_hint=False))  # fmt: skip
     async def paper_new(
-        length: Annotated[str, Field(description="the roll length the user gave, with its unit: 30m, 1500cm")],
+        length: Annotated[
+            str | None, Field(description="the roll length the user gave, with its unit: 30m, 1500cm, 50ft")
+        ] = None,
+        diameter: Annotated[
+            str | None, Field(description="or the roll's outer diameter the user gave (40mm): the length is computed")
+        ] = None,
+        core: Annotated[str | None, Field(description="with diameter: the core's diameter, if given (12mm)")] = None,
+        width: Annotated[
+            str | None, Field(description="the paper width the user gave (57mm, 80mm, 2 1/4in): P103 if the printer's"
+                                          " paper is not that wide (the roll is recorded anyway)"),
+        ] = None,
         printer: PrinterArg = None,
-    ):
-        """Record a new roll (bobina paper new LENGTH --json): the paper count starts again from it. Only when the
-        user says they loaded a roll and says its length: never guess it or use a usual size; ask instead."""
-        return await s.paper_new(length, printer)
+    ):  # fmt: skip
+        """Record a new roll (bobina paper new --json): the paper count starts again from it. Only when the user
+        says they loaded a roll and gives its size: never guess it or use a usual size; ask instead. A package code
+        (57x30, 80x40) is not a length: ask the user whether the second number is metres (as in Brazil) or the
+        roll's diameter in mm (European catalogues); the first is the width."""
+        return await s.paper_new(length, printer, diameter, core, width)
 
     return mcp
 

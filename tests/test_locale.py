@@ -22,6 +22,17 @@ def fresh(isolated):
     return isolated
 
 
+def no_font(monkeypatch, state="none", downloads=True):
+    """scriptfonts as on a machine where non-Latin scripts are STATE (ready | download | none); never the network."""
+    from bobina import scriptfonts
+
+    monkeypatch.setattr(scriptfonts, "support", lambda t: "ready" if locales.parse(t).language in LATIN else state)
+    monkeypatch.setattr(scriptfonts, "downloads_on", lambda: downloads)
+
+
+LATIN = {"en", "pt", "fr", "de", "es"}
+
+
 def _check(capsys, doc=LABEL) -> list:
     assert cli.main(["check", doc, "--json"]) == cli.OK
     return [(p["code"], p["message"], p["suggestion"]) for p in json.loads(capsys.readouterr().out)["problems"]]
@@ -127,6 +138,7 @@ def test_no_time_zone_at_all(fresh, capsys, monkeypatch, tmp_path):
 
 
 def test_a_script_bobina_cannot_draw_prints_english_words_with_the_countrys_formats(fresh, capsys, monkeypatch):
+    no_font(monkeypatch, "none")
     monkeypatch.setenv("TZ", "Asia/Bangkok")
     codes = [c for c, *_ in _check(capsys)]
     assert codes == ["M203", "F306"] and config.load()["locale"] == "th-TH"  # the hook keeps what was inferred
@@ -136,7 +148,49 @@ def test_a_script_bobina_cannot_draw_prints_english_words_with_the_countrys_form
     assert "5/11/26" in capsys.readouterr().out  # Thai order (d/M/yy), English words
     res = build("---\nlocale: th\n---\n{{ today | date('medium') }}\n")  # a document's: said on each check
     assert "5 Nov 2026" in _text(res) and [n.code for n in res.nudges] == ["F306"]
-    assert locales.printable(locales.parse("he-IL")) == locales.parse("en-IL")  # right to left: not yet either
+
+
+@pytest.mark.parametrize(
+    "state,downloads,prints,hint",
+    [
+        ("ready", True, "th-TH", None),  # a font here: the language itself
+        ("ready", False, "th-TH", None),
+        ("download", True, "th-TH", None),  # fetched on first use, with the fonts code's own notice (F304)
+        ("download", False, "en-TH", "bobina fonts get th (or font_downloads = true in config.toml)"),
+        ("none", True, "en-TH", "choose another locale: bobina config locale TAG"),
+    ],
+)
+def test_the_printed_form_follows_the_fonts_bobina_has(monkeypatch, state, downloads, prints, hint):
+    no_font(monkeypatch, state, downloads)
+    loc = locales.parse("th-TH")
+    assert locales.tag(locales.printable(loc)) == prints
+    res = build("---\nlocale: th-TH\n---\n{{ today | date('medium') }}\n")
+    notes = [n for n in res.nudges if n.code == "F306"]
+    assert [hint in n.suggestion for n in notes] == ([True] if hint else [])
+
+
+def test_the_saved_locale_stays_the_persons_when_it_falls_back(fresh, capsys, monkeypatch):
+    no_font(monkeypatch, "download", downloads=False)
+    monkeypatch.setenv("TZ", "Asia/Bangkok")
+    notes = _check(capsys)
+    assert [c for c, *_ in notes] == ["M203", "F306"] and "bobina fonts get th" in notes[1][2]
+    assert config.load()["locale"] == "th-TH"  # only the printed form is en-TH
+    no_font(monkeypatch, "ready")  # after bobina fonts get th
+    assert cli.main(["view", '{{ today | date("long") }}', "--no-color"]) == cli.OK
+    assert "พฤศจิกายน" in capsys.readouterr().out  # Thai, now that the font is here
+
+
+def test_right_to_left_scripts_print_in_their_language_now():
+    assert locales.printable(locales.parse("he-IL")) == locales.parse("he-IL")  # Hebrew: a bundled font
+
+
+def test_font_downloads_in_config_is_kept(isolated, capsys):
+    p = isolated / "config" / "config.toml"
+    p.write_text("font_downloads = false\n")
+    assert cli.main(["printer", "add", "t", "--path", "o.bin"]) == cli.OK
+    assert cli.main(["config", "locale", "fr-CA"]) == cli.OK
+    cfg = config.load()
+    assert cfg["font_downloads"] is False and cfg["locale"] == "fr-CA" and "t" in cfg["printers"]
 
 
 def test_a_language_with_another_country():
@@ -171,7 +225,8 @@ def test_config_locale_refuses_an_unknown_tag(capsys):
     assert config.load()["locale"] == "en-US"
 
 
-def test_config_locale_of_a_script_not_drawable_says_what_prints(capsys):
+def test_config_locale_of_a_script_not_drawable_says_what_prints(capsys, monkeypatch):
+    no_font(monkeypatch, "none")
     assert cli.main(["config", "locale", "ja-JP"]) == cli.OK
     io = capsys.readouterr()
     assert "locale ja-JP saved" in io.out and "F306" in io.err and "en-JP" in io.err
@@ -218,6 +273,7 @@ def test_lc_all_wins_over_lang(monkeypatch):
 
 
 def test_config_locale_names_where_an_undrawable_locale_comes_from(fresh, capsys, monkeypatch):
+    no_font(monkeypatch, "none")
     monkeypatch.setenv("TZ", "Asia/Bangkok")
     assert cli.main(["config", "locale"]) == cli.OK
     err = capsys.readouterr().err

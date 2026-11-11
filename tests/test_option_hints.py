@@ -77,6 +77,7 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("mode", "--confirm", "--yes"),
     ("paper", "--diametro", "--diameter"),
     ("paper", "--thicknes", "--thickness"),
+    ("paper", "--largura", "--width"),
     ("printer", "--chanel", "--channel"),
     ("printer", "--cmd", "--command"),
     ("printer", "--padrao", "--default"),

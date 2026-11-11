@@ -210,7 +210,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `status` | paper / cover / error / language mode; `--list` explains every state | `s` |
 | `mode [esc \| tspl \| cpcl]` | show or switch the printer command language | `m` |
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
-| `fonts list \| test \| mark` | recommended fonts and the font test registry | — |
+| `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
 | `config locale [TAG]` | show or save the locale of documents without `locale:` ([FORMAT.md §7.1](docs/FORMAT.md#71-dates-and-languages)) | — |
@@ -580,7 +580,8 @@ Two terminals, a script and the tower over ssh may run bobina at once. Its own f
   a `command` printer have `timeout` (printer entry, default 120 s), `bluetoothctl` calls are bounded. stdin takes
   up to 10 MB (a document), `bobina send -` up to 64 MB.
 - **Servers, bots, cron: `BOBINA_NONINTERACTIVE=1`.** bobina never asks on the terminal: `--ask` and the
-  confirmation stop at once with `E107` (pass `--yes` and `--set`). Also give the target explicitly and start
+  confirmation stop at once with `E107` (pass `--yes` and `--set`); the notice before a font download is the
+  note `F304` in the problems, never a terminal line. Also give the target explicitly and start
   bobina with stdin closed (`stdin=DEVNULL`): with no target, bobina reads a document from stdin.
 - **One process per job.** bobina keeps some settings per process (problem format, Pillow's image size limit,
   caches), so call it as a command, not as a library from several threads. A server runs one `bobina`
@@ -610,7 +611,7 @@ Claude Desktop, Cursor: `{"mcpServers": {"bobina": {"command": "bobina", "args":
 | `template_list`, `template_show` | `template list --json`; `template show NAME --json` and the document to fill |
 | `help` | `help TOPIC [NAME] --json`: a topic, a problem code (`Q111`), a pay scheme (`pay pix`) |
 | `status`, `paper` | `status --json`, `paper --json` |
-| `paper_new` | `paper new LENGTH --json`: a roll the user loaded, with the length they gave (`30m`; a unit is required) |
+| `paper_new` | `paper new --json`: a roll the user loaded, with the length (`30m`, `50ft`) or diameter (`40mm`) and width they gave; a package code (`57x30`) is refused: ask the user |
 
 The document is `text` (given on stdin) or `path` (absolute, or `@NAME`); the other arguments are the options of
 the command: `set`, `data`, `profile`, `printer` (check and preview take it too: look with the printer print
@@ -630,7 +631,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 | 1 | usage error |
 | 2 | document error (parse) |
 | 3 | nudges with `--strict` |
-| 4 | printer unreachable / Bluetooth |
+| 4 | printer unreachable / Bluetooth; `fonts get` could not download |
 | 5 | printer error state (no paper, cover open) |
 | 6 | printer language mismatch (e.g. printer in TSPL, document needs ESC/POS) |
 | 7 | confirmation required (no terminal and no `--yes`) or declined |
@@ -644,6 +645,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 - Config: `~/.config/bobina/config.toml` (default profile, printers, editor, locale, preferences).
 - Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
+- Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `font_downloads = false` in config.toml (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 
 ## Decided
 
@@ -685,7 +687,7 @@ job may already be on paper: check the paper and `bobina history` before printin
     **⚠ not tested on paper.** `bobina calibrate tear` then measures the distance to the blade.
   - Native barcodes on imported profiles (`barcode.native` from the printer database). **⚠ not tested on paper.**
 - `calibrate compare` finds the paper in the photo, scales it to the printable width and reports length error, row-profile correlation and a 0–100 score, plus a side-by-side PNG (exact | realistic | photo).
-- `bobina paper` (2026-11-05): a paper odometer per printer. `paper new 15m` (or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded; every confirmed print adds its exact length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.
+- `bobina paper` (2026-11-05): a paper odometer per printer. `paper new 15m` (`1500cm`, `50ft`; or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded, `--width 57mm` to warn (`P103`, recorded anyway) when the roll is not the printer's width; a package code (`57x30`: 30 m or a 30 mm diameter?) is refused with that question; every confirmed print adds its exact length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.
 
 
 <!-- file: docs/FORMAT.md -->
@@ -811,6 +813,13 @@ Quality nudges, from the printed tests of the profile:
 - inverted raster text thinner than bold 20 px → `F204`;
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
+
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
+downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
+OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
+`font_downloads = false` in config.toml: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
+follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
+Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
@@ -992,13 +1001,11 @@ cannot become an image path (`M312`), and neither can a value joined into a path
 
 ### 7.1 Dates and languages
 
-One locale writes a job's dates, numbers and money, never mixed (`US$ 24,90` and `09/11/2026` in `pt-BR`): the
-document's `locale:`, else the machine's, `locale` in config.toml (`bobina config locale [TAG]`). The first print,
-check or preview without one infers it from the time zone (country, then the `LANG` language if official there,
-else the country's first: `America/Sao_Paulo` gives `pt-BR`), saves it and says so once (`M203`). No country
-(`Etc/UTC`): the `LC_ALL`, `LC_TIME` or `LANG` locale if it is not English, else English (`en`: 11/5/26, R$24.90,
-`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); an unknown one is `M205`. A
-script bobina cannot draw yet (Thai) prints English words with its country's formats (`en-TH`, `F306`).
+One locale for dates, numbers and money (`US$ 24,90`, `09/11/2026` in `pt-BR`): the document's `locale:`, else
+`locale` in config.toml (`bobina config locale [TAG]`), saved on first use from the time zone (`America/Sao_Paulo`:
+`pt-BR`; `LANG`'s language if official there) or else a non-English `LANG`, said once (`M203`); else English
+(`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); unknown: `M205`. No font
+for the script (downloads off): English words, its country's formats (`en-TH`, `F306`).
 
 Styles `short`, `medium`, `long`, `full` follow the document `locale` (the same line prints "Thursday, November 5,
 2026" in `en-US`). Patterns use CLDR syntax (`dd/MM/yyyy HH:mm`); a pattern containing `%` is strftime, with month
@@ -1147,7 +1154,9 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
-| `F306` | note | no font for the locale's script yet: English words with its country's formats |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |
+| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
+| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -1173,6 +1182,7 @@ Nudges:
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
+| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
@@ -1578,6 +1588,7 @@ with vendor commands), paper and battery, counters, and the history of the last 
 | Malformed codes | barcode 1–250 printable ASCII; QR overflow; Pix key ≤ 77 chars, numeric amount, TLV ≤ 99 → nudge `Q109`, no crash | `test_oversized_or_invalid_codes_*` |
 | Counter format strings | only one `{:spec}` allowed (`FMT_RE`), no attribute access | — |
 | Font lookups | `fc-match` without a shell; the result must match the requested family | — |
+| Fonts for other scripts (Thai, CJK…) | a document can make bobina download one, once: only the files pinned in `scriptfonts.py` (https at a fixed notofonts / Google Fonts commit, exact size and sha256, no redirects, 12 MB), written atomically; a file that does not match is thrown away. Reveals to GitHub that some text needs that script; `font_downloads = false` turns it off (`F305`, boxes) | `test_scriptfonts.py` |
 
 Raw blocks written by the **author** are allowed by design (escape hatch): they always raise `P201`
 in the confirmation screen and are never previewed. A shared document with a `raw` block can switch

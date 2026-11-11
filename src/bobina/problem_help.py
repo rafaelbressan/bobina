@@ -11,9 +11,18 @@ FIX = {
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
     "F303": "Use a size the printer has natively (small, normal, large, title, huge), or a font size in px (raster).",
+    "F304": (
+        "Nothing to fix: the font is kept and used offline from now on (bobina fonts scripts). To never download: "
+        "font_downloads = false in config.toml."
+    ),
+    "F305": (
+        "Get the font once, with the network: bobina fonts get NAME (the message names it; a document works too: "
+        "bobina fonts get menu.bob.md). Then it prints offline."
+    ),
     "F306": (
-        "Nothing to fix: the dates and numbers are readable, in English with the country's formats (th-TH prints as "
-        "en-TH). Another locale: bobina config locale TAG, or locale: in the document."
+        "The dates and numbers are readable, in English with the country's formats (th-TH prints as en-TH). For the "
+        "language itself: bobina fonts get LANG (or font_downloads = true in config.toml). Another locale: bobina "
+        "config locale TAG, or locale: in the document."
     ),
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
@@ -80,6 +89,8 @@ FIX = {
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
     "P102": "Load a new roll first (bobina paper new LENGTH), or print fewer labels.",
+    "P103": "This roll is for another printer: load one as wide as the profile's paper (57 and 58 mm are the same"
+    " rolls), or record it for the printer it fits (--printer).",
     "P301": "The bytes follow the ESC/POS spec but nobody has seen them on paper: look at the result (docs/TESTED.md).",
     "P302": "Scan a printed code with the real app before customers use it, and tell us (docs/TESTED.md).",
     "P201": "Raw bytes are sent as they are: make sure they are meant for this printer.",

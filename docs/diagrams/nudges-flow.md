@@ -180,7 +180,9 @@ from this list.
 | `F301` | note | glyph not in the printer font: line printed as an image | N5 |
 | `F302` | warning | glyph missing in every available font |  |
 | `F303` | note | size not supported natively, nearest native size used | N1 |
-| `F306` | note | no font for the locale's script yet: English words with its country's formats |  |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |  |
+| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |  |
+| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |  |
 | `F201` | warning | font below its tested minimum size | F1, F2 |
 | `F202` | warning | untested font with strokes thinner than 2 dots | R4-01 |
 | `F203` | warning | font not found, a bundled font was used |  |
@@ -238,6 +240,7 @@ from this list.
 |---|---|---|---|
 | `P101` | warning | the paper roll is almost over (estimate) |  |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |  |
+| `P103` | warning | the roll is not as wide as this printer's paper (recorded anyway) |  |
 | `P301` | note | this job uses a feature not tested on paper yet |  |
 | `P302` | note | a payment code nobody has scanned with its app yet |  |
 | `P201` | warning | raw bytes bypass every check and are not previewed |  |
