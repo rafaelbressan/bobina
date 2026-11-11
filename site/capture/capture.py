@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Record what the site shows of bobina: terminal casts and tickets, from real commands on real files.
 
-Runs the released bobina (installed from PyPI into site/.capture-venv, the version of site/.release/release.json)
-on the site's examples (site/examples/) and the release's own (examples/). Writes src/captures/captures.json (each
-cast: the command lines, their output as HTML and their exit codes) and public/captures/*.png (each ticket:
-`bobina preview` of a file shown next to it). Nothing here is drawn by hand; run it again after each release:
+Runs the released bobina (from PyPI, in site/.capture-venv; the version of site/.release/release.json) on the
+site's examples (site/examples/) and the release's own (examples/). Writes src/captures/captures.json (each cast:
+the command lines, their output as HTML and their exit codes), public/captures/*.png (each ticket: `bobina preview`
+of a file shown next to it) and capture/lock.txt (every package that made them, pinned). Nothing is drawn by hand.
 
-    cd site && npm run capture        # = node scripts/release.mjs && python3 capture/capture.py
+    cd site && npm run capture          # = node scripts/release.mjs && python3 capture/capture.py
+    python3 capture/capture.py --locked # the packages of lock.txt: the same bytes again (what CI compares)
 
-It stops, writing nothing, when a command exits with another code than expected or when an output holds a home
-folder, a temporary path or a Bluetooth address that is not the documented example. The build checks that the
-captures are of the release it describes."""
+A release records them by itself (.github/workflows/release-commit.yml). It stops, writing nothing, when a command
+exits with another code than expected, when an output shows the capture folder or a temporary path, or when
+tools/leakscan.py finds personal data in it."""
 
 from __future__ import annotations
 
@@ -32,8 +33,11 @@ import venv
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parents[1]
+ROOT = SITE.parent
 OUT_JSON = SITE / "src" / "captures" / "captures.json"
 OUT_PNG = SITE / "public" / "captures"
+LOCK = SITE / "capture" / "lock.txt"
+ENV_DIR = SITE / ".capture-venv"
 NOW = "2026-11-05T09:49:00"  # the date the docs' examples use
 COLUMNS = 64
 
@@ -72,13 +76,7 @@ CASTS = [
 # Tickets: (id, file in the work folder, extra arguments). The gallery adds every examples/templates/*.bob.md.
 TICKETS = [("receipt", "receipt.bob.md", []), ("price-tag", "price-tag.bob.md", [])]
 
-LEAKS = {
-    "home folder": re.compile(r"/(?:home|Users|root)/[\w.-]+"),
-    "temporary path": re.compile(r"/(?:tmp|var/folders|private)/"),
-    "bluetooth address": re.compile(
-        r"(?<![0-9A-Fa-f:])(?!AA:BB:CC:DD:EE:FF)[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}(?![0-9A-Fa-f:])"
-    ),
-}
+TEMPORARY = re.compile(r"/(?:tmp|var/folders|private/var)/")  # personal data is tools/leakscan.py's job
 
 
 def fail(msg: str) -> None:
@@ -94,27 +92,47 @@ def release() -> dict:
     return info
 
 
-def bobina_for(version: str, given: str | None) -> Path:
-    """The bobina that the site describes: VERSION from PyPI, in a venv of its own."""
-    if given:
-        return Path(given)
-    env_dir = SITE / ".capture-venv"
-    exe = env_dir / "bin" / "bobina"  # POSIX only, like the pseudo-terminal the casts need
-    current = subprocess.run([exe, "--version"], capture_output=True, text=True).stdout if exe.exists() else ""
-    if current.strip() != f"bobina {version}":
-        if not exe.exists():
-            venv.create(env_dir, with_pip=True)
-        pip = [str(env_dir / "bin" / "python"), "-m", "pip", "install", "--quiet", "--index-url"]
+def python_of(bobina: Path) -> Path:
+    """The interpreter a bobina script runs on: its shebang (a venv, pipx, uv tool), else the python next to it."""
+    try:
+        first = bobina.read_bytes()[:256].split(b"\n")[0].decode()
+    except (OSError, UnicodeDecodeError):
+        first = ""
+    if first.startswith("#!") and Path(first[2:].strip().split()[0]).is_file():
+        return Path(first[2:].strip().split()[0])
+    return bobina.parent / "python"
+
+
+def bobina_for(version: str, locked: bool) -> tuple[Path, str]:
+    """bobina VERSION from PyPI in a venv of its own: the newest packages that fit, or exactly those of lock.txt.
+    Returns the executable and the pinned list of what is installed."""
+    if locked:
+        if not LOCK.exists():
+            fail(f"--locked: no {LOCK.relative_to(ROOT)}")
+        spec = LOCK.read_text()
+        if f"bobina=={version}\n" not in spec:
+            fail(f"--locked: {LOCK.relative_to(ROOT)} is not for bobina {version}; record without --locked")
+    else:
+        spec = f"bobina=={version}\n"
+    marker = ENV_DIR / "capture-spec.txt"
+    exe = ENV_DIR / "bin" / "bobina"  # POSIX only, like the pseudo-terminal the casts need
+    if not (exe.exists() and marker.exists() and marker.read_text() == spec):
+        shutil.rmtree(ENV_DIR, ignore_errors=True)  # a fresh venv: no package left from another version
+        venv.create(ENV_DIR, with_pip=True)
+        req = ENV_DIR / "requirements.txt"
+        req.write_text(spec)
+        pip = [str(ENV_DIR / "bin" / "python"), "-m", "pip", "install", "--quiet", "--no-cache-dir"]
+        pip += ["--index-url", "https://pypi.org/simple", "-r", str(req)] + (["--no-deps"] if locked else [])
         for _ in range(20):  # PyPI's CDN can miss an upload for a few minutes (a release run starts at once)
-            if (
-                subprocess.run([*pip, "https://pypi.org/simple", "--no-cache-dir", f"bobina=={version}"]).returncode
-                == 0
-            ):
+            if subprocess.run(pip).returncode == 0:
                 break
             time.sleep(30)
         else:
-            fail(f"bobina=={version} could not be installed from PyPI")
-    return exe
+            fail(f"could not install {spec.strip()!r} from PyPI")
+        marker.write_text(spec)
+    freeze = subprocess.run([ENV_DIR / "bin" / "python", "-m", "pip", "freeze"], capture_output=True, text=True,
+                            check=True).stdout  # fmt: skip
+    return exe, "".join(sorted(line + "\n" for line in freeze.splitlines() if "==" in line))
 
 
 def ansi_to_html(text: str) -> str:
@@ -124,14 +142,27 @@ def ansi_to_html(text: str) -> str:
     )
     out, state = [], set()
     pos = 0
-    for m in re.finditer(r"\x1b\[([0-9;]*)m", text):
+    for m in re.finditer(r"\x1b\[([0-9;:]*)m", text):
         chunk = text[pos : m.start()]
         if chunk:
             esc = html.escape(chunk, quote=False)
             out.append(f'<span class="{" ".join(sorted(state))}">{esc}</span>' if state else esc)
         pos = m.end()
-        for code in (m.group(1) or "0").split(";"):
-            n = int(code or 0)
+        codes = [int(c) if c.isdigit() else 0 for c in re.split(r"[;:]", m.group(1) or "0")]
+        i = 0
+        while i < len(codes):
+            n = codes[i]
+            if n in (38, 48, 58):  # 256 colours (5;n) or RGB (2;r;g;b): one unit, dropped (the site is 1-bit)
+                i += (
+                    3
+                    if i + 1 < len(codes) and codes[i + 1] == 5
+                    else 5
+                    if i + 1 < len(codes) and codes[i + 1] == 2
+                    else 1
+                )
+                if n == 38:
+                    state = {s for s in state if not s.startswith("c")}
+                continue
             if n == 0:
                 state.clear()
             elif n in (1, 2, 3, 4, 7):
@@ -144,9 +175,10 @@ def ansi_to_html(text: str) -> str:
                 state = {s for s in state if not s.startswith("c")} | {f"c{n % 10}"}
             elif n == 39:
                 state = {s for s in state if not s.startswith("c")}
+            i += 1
     chunk = text[pos:]
     out.append(html.escape(chunk, quote=False))
-    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", "".join(out)).rstrip("\n")
+    return re.sub(r"\x1b\[[0-9;:]*[A-Za-z]", "", "".join(out)).rstrip("\n")
 
 
 def one_cell(html_text: str, covered: set[int]) -> str:
@@ -155,7 +187,7 @@ def one_cell(html_text: str, covered: set[int]) -> str:
     return "".join(f'<span class="g">{c}</span>' if ord(c) > 127 and ord(c) not in covered else c for c in html_text)
 
 
-def terminus_chars(bobina: Path) -> set[int]:
+def terminus_chars(python: Path) -> set[int]:
     """The characters of the site's terminal fonts, Terminus then Spleen (both one cell wide, both bundled with
     bobina), read with bobina's fontTools."""
     code = (
@@ -163,19 +195,24 @@ def terminus_chars(bobina: Path) -> set[int]:
         "print(' '.join(str(c) for f in ('TerminusTTF-4.49.3.ttf', 'spleen-12x24.otf') "
         "for c in TTFont(fonts_dir() / f).getBestCmap()))"
     )
-    out = subprocess.run([bobina.parent / "python", "-c", code], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([python, "-c", code], capture_output=True, text=True, check=True).stdout
     return {int(x) for x in out.split()}
 
 
 def plain(text: str) -> str:
-    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text.replace("\r\n", "\n").replace("\r", "")).rstrip("\n")
+    return re.sub(r"\x1b\[[0-9;:?]*[A-Za-z]", "", text.replace("\r\n", "\n").replace("\r", "")).rstrip("\n")
 
 
 def run_tty(argv: list[str], cwd: Path, env: dict, keys: str | None) -> tuple[str, int]:
     pid, fd = pty.fork()
-    if pid == 0:
-        os.chdir(cwd)
-        os.execvpe(argv[0], argv, env)
+    if pid == 0:  # the child: never return into this script, whatever happens
+        try:
+            os.chdir(cwd)
+            os.execvpe(argv[0], argv, env)
+        except BaseException as e:
+            os.write(2, f"capture: cannot run {argv[0]}: {e}\n".encode())
+        finally:
+            os._exit(127)
     buf, sent, status, deadline = b"", False, None, time.time() + 60
     while time.time() < deadline:  # read until the terminal closes (EOF, or EIO on Linux)
         ready, _, _ = select.select([fd], [], [], 0.5)
@@ -218,12 +255,17 @@ def run(step: dict, bobina: Path, cwd: Path, env: dict, covered: set[int]) -> di
     return {"cmd": step["cmd"], "exit": code, "text": plain(output), "html": one_cell(ansi_to_html(output), covered)}
 
 
-def check_leaks(where: str, text: str, work: Path) -> None:
-    if str(work) in text:
-        fail(f"{where}: shows the capture folder")
-    for name, rx in LEAKS.items():
-        if m := rx.search(text):
-            fail(f"{where}: a {name} ({m.group(0)!r}) in the output")
+def check_staged(staged: Path, work: Path) -> None:
+    """What would be written: no path of the capture folder or of a temporary folder, and no personal data."""
+    for f in (x for x in staged.rglob("*") if x.is_file()):
+        data = f.read_bytes()
+        if str(work).encode() in data:
+            fail(f"{f.name}: shows the capture folder")
+        if f.suffix != ".png" and (m := TEMPORARY.search(data.decode("utf-8", "replace"))):
+            fail(f"{f.name}: a temporary path ({m.group(0)}) in the output")
+    scan = subprocess.run([sys.executable, str(ROOT / "tools" / "leakscan.py"), str(staged)])
+    if scan.returncode != 0:
+        fail("tools/leakscan.py found personal data in the captures (above)")
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -233,11 +275,18 @@ def png_size(path: Path) -> tuple[int, int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--locked", action="store_true", help="install exactly the packages of capture/lock.txt")
     ap.add_argument("--bobina", help="use this bobina executable instead of the release from PyPI (a test run)")
     a = ap.parse_args()
     info = release()
     tree: Path = info["dir"]
-    bobina = bobina_for(info["version"], a.bobina)
+    if a.bobina:
+        bobina, lock = Path(shutil.which(a.bobina) or a.bobina).resolve(), None
+        if not bobina.is_file():
+            fail(f"--bobina: {a.bobina} is not a file")
+    else:
+        bobina, lock = bobina_for(info["version"], a.locked)
+    python = python_of(bobina)
     version = subprocess.run([bobina, "--version"], capture_output=True, text=True, check=True).stdout.split()[-1]
 
     work = Path(tempfile.mkdtemp(prefix="bobina-capture-"))
@@ -268,19 +317,18 @@ def main() -> None:
         subprocess.run([bobina, "printer", "add", "test", "--path", "/dev/null"], env=env, cwd=work, check=True,
                        capture_output=True)  # fmt: skip
 
-        casts, covered = [], terminus_chars(bobina)
-        for cast in CASTS:
-            steps = [run(step, bobina, work, env, covered) for step in cast["steps"]]
-            for s in steps:
-                check_leaks(f"cast {cast['id']}: {s['cmd']}", s["text"], work)
-            casts.append({"id": cast["id"], "title": cast["title"], "steps": steps})
+        covered = terminus_chars(python)
+        casts = [
+            {"id": c["id"], "title": c["title"], "steps": [run(s, bobina, work, env, covered) for s in c["steps"]]}
+            for c in CASTS
+        ]
 
         staged = work / "out"  # nothing is written into the site before every check passed
-        staged.mkdir()
+        (staged / "png").mkdir(parents=True)
         tickets = []
 
         def keep(tid: str, png: Path, group: str, file: str | None, label: str) -> None:
-            dest = staged / f"{tid}.png"
+            dest = staged / "png" / f"{tid}.png"
             shutil.copy(png, dest)
             w, h = png_size(dest)
             tickets.append({"id": tid, "group": group, "png": f"/captures/{tid}.png", "width": w, "height": h,
@@ -291,10 +339,9 @@ def main() -> None:
         for tid, name, args, group in todo:
             out = work / "png" / f"{tid}.png"
             out.parent.mkdir(exist_ok=True)
-            step = {"cmd": shlex.join(["bobina", "preview", name, *args, "-o", str(out)]), "expect": 0}
-            r = subprocess.run([bobina, *shlex.split(step["cmd"])[1:]], cwd=work, env=env, capture_output=True)
+            r = subprocess.run([bobina, "preview", name, *args, "-o", str(out)], cwd=work, env=env, capture_output=True)
             if r.returncode != 0:
-                fail(f"{step['cmd']}: exit {r.returncode}\n{r.stderr.decode()}")
+                fail(f"bobina preview {name}: exit {r.returncode}\n{r.stderr.decode()}")
             keep(tid, out, group, name, name)
 
         for png in sorted((work / "labels").glob("*.png")):  # written by the batch cast
@@ -313,13 +360,18 @@ def main() -> None:
             "casts": casts,
             "tickets": tickets,
         }
-        text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
-        check_leaks("captures.json", text, work)
+        (staged / "captures.json").write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        check_staged(staged, work)
+
         if OUT_PNG.exists():
             shutil.rmtree(OUT_PNG)
-        shutil.copytree(staged, OUT_PNG)
+        shutil.copytree(staged / "png", OUT_PNG)
         OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-        OUT_JSON.write_text(text, encoding="utf-8")
+        shutil.copy(staged / "captures.json", OUT_JSON)
+        if lock is not None and not a.locked:
+            LOCK.write_text(
+                f"# The packages that recorded the captures (capture.py writes it, --locked reads it)\n{lock}"
+            )
         print(f"capture: bobina {version} ({info['ref']}): {len(casts)} casts, {len(tickets)} tickets")
     finally:
         shutil.rmtree(work, ignore_errors=True)

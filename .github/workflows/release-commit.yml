@@ -70,7 +70,7 @@ jobs:
       VERSION: ${{ inputs.version }}
     steps:
       - name: A version number
-        run: '[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release version: $VERSION"; exit 1; }'
+        run: '[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$ ]] || { echo "not a release version: $VERSION"; exit 1; }'
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -86,10 +86,10 @@ jobs:
         env:
           BOBINA_SITE_REF: v${{ inputs.version }}
         run: node scripts/release.mjs && python3 capture/capture.py
-      - name: Pack them
+      - name: Pack them (with capture/lock.txt, the packages that made them, which CI installs to compare)
         run: |
           mkdir -p "$RUNNER_TEMP/captures/png"
-          cp site/src/captures/captures.json "$RUNNER_TEMP/captures/"
+          cp site/src/captures/captures.json site/capture/lock.txt "$RUNNER_TEMP/captures/"
           cp site/public/captures/*.png "$RUNNER_TEMP/captures/png/"
       - uses: actions/upload-artifact@v4
         with:
@@ -125,10 +125,11 @@ jobs:
           if [ -f "$RUNNER_TEMP/tested/bobina.rb" ]; then cp "$RUNNER_TEMP/tested/bobina.rb" Formula/bobina.rb; fi
           if [ -f "$RUNNER_TEMP/captures/captures.json" ]; then
             cp "$RUNNER_TEMP/captures/captures.json" site/src/captures/captures.json
+            cp "$RUNNER_TEMP/captures/lock.txt" site/capture/lock.txt
             rm -rf site/public/captures && mkdir site/public/captures
             cp "$RUNNER_TEMP"/captures/png/*.png site/public/captures/
           fi
-          git add -A -- Formula/bobina.rb site/src/captures site/public/captures
+          git add -A -- Formula/bobina.rb site/src/captures site/public/captures site/capture/lock.txt
           git status --short
       - name: Personal-data scan (a push with this job's token runs no workflow, so ci.yml does not scan it)
         env:

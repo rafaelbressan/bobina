@@ -1,14 +1,18 @@
 name: site
 
 # The website (site/, deployed by Vercel's GitHub integration; nothing is deployed from here). This builds it the way
-# Vercel does (a shallow clone without tags) and runs its checks: .md twins, links and anchors, the Accept routes of
+# Vercel does (a shallow clone without tags) and runs its checks: .md twins, links and anchors, the routes of
 # vercel.json, personal data, JavaScript budget (site/scripts/check.mjs).
+#
+# Between a release's tag and its commit of the captures (release-commit.yml), or when that commit failed, the newest
+# release has no captures yet: the build of the newest release only warns, and the strict checks are made against
+# the release the committed captures were recorded with. A push that changes something else stays green.
 
 on:
   push:
-    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", ".github/workflows/site.yml"]
+    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", "tools/leakscan.py", ".github/workflows/site.yml"]
   pull_request:
-    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", ".github/workflows/site.yml"]
+    paths: ["site/**", "vercel.json", "docs/**", "README.md", "CHANGELOG.md", "llms*.txt", "tools/leakscan.py", ".github/workflows/site.yml"]
   workflow_dispatch:
 
 permissions:
@@ -17,31 +21,43 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1 # like Vercel: the build fetches the latest release tag itself
+          fetch-depth: 1 # like Vercel: the build fetches the release tag itself
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - uses: actions/setup-python@v5 # for tools/leakscan.py, which check.mjs runs on dist/
+        with:
+          python-version: "3.12"
       - name: Install
         run: npm ci --prefix site --registry=https://registry.npmjs.org/
-      - name: The site of the latest release, with its checks
-        env:
-          BOBINA_SITE_STRICT: "1" # captures of another version fail here (Vercel only warns)
+      - name: The site of the newest release, as Vercel builds it (captures of an older release only warn)
         run: npm run build --prefix site
+      - name: Strict, for the release the committed captures were recorded with
+        run: |
+          version=$(node -p "require('./site/src/captures/captures.json').bobina")
+          BOBINA_SITE_REF="v$version" BOBINA_SITE_STRICT=1 npm run build --prefix site
       - name: The docs on this branch build too (what the next release will publish)
         env:
           BOBINA_SITE_REF: WORKTREE
         run: npm run build --prefix site
 
   captures:
-    # The casts and tickets are recorded from the released bobina (site/capture/capture.py); this records them again
-    # and fails when they differ. A release commits them by itself (release-commit.yml); by hand: `npm run capture`
-    # in site/, then commit.
+    # Records the casts and tickets again, for the release they are of and with the packages of capture/lock.txt, and
+    # fails when anything differs from the committed ones. It runs bobina and its dependencies from PyPI: read-only,
+    # no credentials kept. A release records them by itself (release-commit.yml); by hand: `npm run capture` in site/.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -49,8 +65,12 @@ jobs:
         with:
           node-version: "22"
       - name: Record again
-        run: cd site && node scripts/release.mjs && python3 capture/capture.py
+        working-directory: site
+        run: |
+          version=$(node -p "require('./src/captures/captures.json').bobina")
+          BOBINA_SITE_REF="v$version" node scripts/release.mjs
+          python3 capture/capture.py --locked
       - name: Same as the committed ones (new, changed or removed files)
         run: |
-          changes=$(git status --porcelain -- site/src/captures site/public/captures)
+          changes=$(git status --porcelain -- site/src/captures site/public/captures site/capture/lock.txt)
           if [ -n "$changes" ]; then echo "$changes"; echo "run: cd site && npm run capture, then commit"; exit 1; fi

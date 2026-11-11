@@ -41,24 +41,26 @@ while what it describes stays the release. A tag does not deploy by itself: the 
 
 ## Casts and tickets
 
-`capture/capture.py` installs the release from PyPI (`bobina==VERSION`, in `.capture-venv/`), runs real commands
-on real files (`examples/` of the release and `site/examples/`) in a temporary folder with a `/dev/null` file
-printer and a fixed date, and writes `src/captures/captures.json` (command lines, output as HTML, exit codes) and
-`public/captures/*.png` (`bobina preview` of each file shown next to it). Nothing is drawn by hand. It stops when
-an exit code is not the expected one or an output holds a home folder, a temporary path or a Bluetooth address.
+`capture/capture.py` installs the release from PyPI (`bobina==VERSION`, in a fresh `.capture-venv/`), runs real
+commands on real files (`examples/` of the release and `site/examples/`) in a temporary folder with a `/dev/null`
+file printer and a fixed date, and writes `src/captures/captures.json` (command lines, output as HTML, exit codes),
+`public/captures/*.png` (`bobina preview` of each file shown next to it) and `capture/lock.txt` (every package that
+made them, pinned). Nothing is drawn by hand. It writes nothing when an exit code is not the expected one, an
+output shows the capture folder or a temporary path, or `tools/leakscan.py` finds personal data in it.
 
 After each release (not a pre-release), `.github/workflows/release-commit.yml` records them with the new version
 in a read-only job and its `push` job commits them to `main` together with `Formula/bobina.rb`; that push makes
 Vercel publish the new release. If it failed: `gh workflow run release-commit.yml -f version=X.Y.Z`, or
-`npm run capture` here and commit. Until the captures match the release, the build uses the ones it has and prints
-a warning; CI (`.github/workflows/site.yml`, `BOBINA_SITE_STRICT=1`) fails instead, and records them again to
-compare with the committed ones.
+`npm run capture` here and commit.
+
+Until the captures match the newest release (between its tag and that commit, or when the commit failed), the
+build uses the ones it has and prints a warning. CI (`.github/workflows/site.yml`) is strict against the release
+the captures were recorded with (`BOBINA_SITE_REF=v<their version> BOBINA_SITE_STRICT=1`), and records them again
+with `capture.py --locked` (exactly the packages of `lock.txt`, so a new Pillow on PyPI changes nothing) to compare
+with the committed files: an unrelated push stays green.
 
 Recorded and committed rather than rendered on Vercel: the build stays Node only, and the images are reviewed like
 the golden tests.
-
-`vercel.json` also redirects a problem code as bobina prints it (`/problems/E107/`, `/problems/E107.md`) to its
-lower-case page.
 
 ## Look
 
@@ -70,13 +72,16 @@ a few lines of JS start it once, when it is seen. With reduced motion or without
 
 ## Checks (`scripts/check.mjs`)
 
-Every page has its twin and announces it; every internal link, anchor and image resolves (HTML, twins, llms
-files); every page path with `Accept: text/markdown` is routed by `vercel.json` to a twin that exists, and assets
-are not; no personal home folder or real Bluetooth address; no page over the JavaScript budget.
+Every page has its twin, announces it and links it visibly; every internal link, anchor and image resolves (HTML,
+twins, llms files); `vercel.json`, matched as Vercel matches it (`routes` regexes, case-sensitive because the file
+has `redirects`; `redirects` path patterns, always case-sensitive), routes every page path with
+`Accept: text/markdown` to a twin that exists and no asset, and redirects every problem code as bobina prints it
+(`/problems/E107/`, `/problems/E107.md`) to its lower-case page without a loop; `tools/leakscan.py` finds no personal
+data in what was built; no page is over the JavaScript budget.
 
 ## Vercel
 
-`../vercel.json` holds the whole configuration (install, build, output directory, routes, headers); there is no
+`../vercel.json` holds the whole configuration (install, build, output directory, routes, redirects); there is no
 token in the repository. To connect it once: Vercel → Add New → Project → import `rafaelbressan/bobina` (keep
 the Root Directory at the repository root; vercel.json sets the rest) → Deploy. Then Settings → Domains → add
 `bobina.md` (and `www.bobina.md`, redirecting to it) and set the DNS records Vercel shows at the registrar.

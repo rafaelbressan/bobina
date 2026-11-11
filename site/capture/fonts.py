@@ -4,8 +4,9 @@
 WOFF2 is only a compressed container: the font data is not changed, subset or renamed (the OFL FAQ allows WOFF
 copies under the original name on these terms). Needs fontTools with brotli:
 
-    site/.capture-venv/bin/python -m pip install --index-url https://pypi.org/simple fonttools brotli
-    site/.capture-venv/bin/python site/capture/fonts.py
+    python3 -m venv site/.fonts-venv
+    site/.fonts-venv/bin/pip install --index-url https://pypi.org/simple fonttools brotli
+    site/.fonts-venv/bin/python site/capture/fonts.py
 """
 
 import shutil

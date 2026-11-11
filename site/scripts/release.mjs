@@ -17,7 +17,7 @@ const ROOT = dirname(SITE);
 const OUT = join(SITE, '.release');
 const TREE = join(OUT, 'tree');
 const REPO = (process.env.BOBINA_SITE_REPO || 'https://github.com/rafaelbressan/bobina').replace(/\.git$/, '');
-const STABLE = /^v(\d+)\.(\d+)\.(\d+)$/;
+const STABLE = /^v(\d+)\.(\d+)\.(\d+)(?:\.post(\d+))?$/; // a release (v0.1.1, v0.1.1.post1), never an rc
 
 const log = (msg) => console.log(`release: ${msg}`);
 const git = (args, env) =>
@@ -31,11 +31,11 @@ const tryGit = (args, env) => {
 };
 
 function newest(tags) {
-  const key = (t) => t.match(STABLE).slice(1).map(Number);
+  const key = (t) => t.match(STABLE).slice(1).map((n) => Number(n ?? -1)); // v0.1.1 before v0.1.1.post1
   const stable = tags.filter((t) => STABLE.test(t));
   stable.sort((a, b) => {
     const [x, y] = [key(a), key(b)];
-    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] || x[3] - y[3];
   });
   return stable.at(-1) ?? null;
 }

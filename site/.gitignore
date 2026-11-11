@@ -3,4 +3,5 @@ dist/
 .astro/
 .release/
 .capture-venv/
+.fonts-venv/
 .scratch/

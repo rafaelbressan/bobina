@@ -22,8 +22,8 @@
   Homebrew 7 trusts a tap only then). On each release that is not a pre-release,
   `.github/workflows/release-commit.yml` points `url` and `sha256` at the new sdist, regenerates the resources,
   builds from source, runs `brew test` and `brew audit --strict`, and records the site's casts and tickets with the
-  new version (`site/capture/capture.py`), both with read-only access; its `push` job then commits the formula and
-  the captures to `main` in one commit with its own token (after the personal-data scan), which also publishes the
+  new version (`site/capture/capture.py`, with `site/capture/lock.txt`, the packages that made them), both with
+  read-only access; its `push` job then commits the formula and the captures to `main` in one commit with its own token (after the personal-data scan), which also publishes the
   site of the new release. When that fails, fix it and run it again: `gh workflow run release-commit.yml -f
   version=X.Y.Z`. Or bump by hand on a Mac, in the tap (a clone of this repository):
 

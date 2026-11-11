@@ -2,9 +2,11 @@
 // Checks of the built site (dist/), run by `npm run build` and in CI. It fails when:
 // - a page has no .md twin, or does not announce it (<link rel="alternate" type="text/markdown">);
 // - an internal link or image (HTML, .md twins, llms.txt, llms-full.txt) points at a file or anchor that is not there;
-// - vercel.json would not send `Accept: text/markdown` for a page to that page's twin;
-// - a page holds a personal home folder or a Bluetooth address other than the documented AA:BB:CC:DD:EE:FF;
+// - vercel.json would not send `Accept: text/markdown` for a page to that page's twin, or would not redirect a
+//   problem code in upper case (E107) to its page;
+// - tools/leakscan.py finds personal data in anything built;
 // - a page needs JavaScript for its content, or ships more JavaScript than the budget.
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,7 +75,11 @@ for (const page of pages) {
     if (!has(twin)) fail(`${path}: no Markdown twin ${twin}`);
     const alt = html.match(/<link rel="alternate" type="text\/markdown" href="([^"]+)"/);
     if (!alt || alt[1] !== '/' + twin) fail(`${path}: no <link rel="alternate" type="text/markdown" href="/${twin}">`);
-    if (!html.includes(`href="/${twin}"`) || !/View as Markdown/.test(html)) fail(`${path}: no "View as Markdown" link (Copy for AI needs JS)`);
+    // a visible link to the twin, for readers without JS (Copy for AI needs it)
+    const visible = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].some(
+      (a) => new RegExp(`\\shref="/${twin.replace('.', '\\.')}"`).test(a[1]) && !/\shidden\b/.test(a[1]) && /View as Markdown/.test(a[2]),
+    );
+    if (!visible) fail(`${path}: no visible <a href="/${twin}">View as Markdown</a>`);
   }
   for (const m of html.matchAll(/\s(?:href|src)="([^"]+)"/g)) {
     const url = m[1].replace(/&amp;/g, '&');
@@ -120,52 +126,73 @@ for (const f of [...twins, 'llms.txt', 'llms-full.txt']) {
 if (!/^# bobina/.test(read('llms.txt'))) fail('/llms.txt does not start with "# bobina"');
 if (!read('llms.txt').includes(`${SITE_URL}/cli.md`)) fail('/llms.txt does not link the .md pages');
 
-// 3. vercel.json: Accept: text/markdown on a page path is routed to its twin
+// 3. vercel.json, matched the way Vercel matches it
 const vercel = JSON.parse(readFileSync(join(SITE, '..', 'vercel.json'), 'utf8'));
+// `routes` src is a regex, case-insensitive unless the file also has redirects, rewrites or headers (Vercel's docs:
+// vercel-json#routes, "Case sensitivity"); `redirects` source is a path-to-regexp pattern, always case-sensitive.
+const routeFlags = ['redirects', 'rewrites', 'headers'].some((k) => (vercel[k] || []).length) ? '' : 'i';
+const routeRx = (r) => new RegExp(r.src, routeFlags);
+/** The path-to-regexp subset vercel.json uses: literals and `:name(regex)`, matched whole and case-sensitively. */
+function sourceRx(source) {
+  let rx = '';
+  for (const part of source.split(/(:\w+\([^)]*(?:\)[^)]*)*?\))/)) {
+    const m = part.match(/^:(\w+)\((.*)\)$/);
+    rx += m ? `(?<${m[1]}>${m[2]})` : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${rx}$`);
+}
+function redirectOf(path) {
+  for (const r of vercel.redirects || []) {
+    const m = path.match(sourceRx(r.source));
+    if (m) return r.destination.replace(/:(\w+)/g, (_, k) => m.groups?.[k] ?? '');
+  }
+  for (const r of (vercel.routes || []).filter((x) => x.status >= 300 && x.status < 400)) {
+    const m = path.match(routeRx(r));
+    if (m) return r.headers.Location.replace(/\$(\d)/g, (_, i) => m[i] ?? '');
+  }
+  return null;
+}
+
+// Accept: text/markdown on a page path is routed to its twin; files are not negotiated
 const negotiation = (vercel.routes || []).filter((r) => (r.has || []).some((h) => h.type === 'header' && h.key === 'accept'));
 if (!negotiation.length) fail('vercel.json: no route on the accept header');
 for (const page of pages.filter((p) => p !== '404.html')) {
   for (const path of [pathOf(page), pathOf(page).replace(/\/$/, '') || '/']) {
-    const route = negotiation.find((r) => new RegExp(r.src).test(path));
+    if (redirectOf(path)) fail(`vercel.json: ${path}, a page, is redirected (${redirectOf(path)})`);
+    const route = negotiation.find((r) => routeRx(r).test(path));
     if (!route) {
       fail(`vercel.json: ${path} with Accept: text/markdown matches no route`);
       continue;
     }
-    const m = path.match(new RegExp(route.src));
+    const m = path.match(routeRx(route));
     const dest = route.dest.replace(/\$(\d)/g, (_, i) => m[i] ?? '');
     if (!has(dest.slice(1))) fail(`vercel.json: ${path} → ${dest}, which does not exist`);
   }
 }
-// a problem code as bobina prints it (E107) redirects to its page and its twin, which are lower case
-const redirects = (vercel.routes || []).filter((r) => r.status === 308 && r.headers?.Location);
+for (const asset of ['/llms.txt', '/fonts/terminus.woff2', '/captures/receipt.png', '/cli.md']) {
+  if (negotiation.some((r) => routeRx(r).test(asset))) fail(`vercel.json: ${asset} would be negotiated too`);
+}
+// a problem code as bobina prints it (E107) redirects to its lower-case page and twin, which redirect nowhere
 for (const page of pages.filter((p) => /^problems\/[a-z]\d{3}\/index\.html$/.test(p))) {
   const code = page.split('/')[1];
-  for (const path of [`/problems/${code.toUpperCase()}/`, `/problems/${code.toUpperCase()}`, `/problems/${code.toUpperCase()}.md`]) {
-    const route = redirects.find((r) => new RegExp(r.src).test(path));
-    if (!route) {
-      fail(`vercel.json: ${path} is not redirected`);
-      continue;
-    }
-    const m = path.match(new RegExp(route.src));
-    const to = route.headers.Location.replace(/\$(\d)/g, (_, i) => m[i] ?? '');
-    if (!fileFor(to)) fail(`vercel.json: ${path} → ${to}, which does not exist`);
+  const up = code.toUpperCase();
+  for (const [path, want] of [[`/problems/${up}/`, `/problems/${code}/`], [`/problems/${up}`, `/problems/${code}/`], [`/problems/${up}.md`, `/problems/${code}.md`]]) {
+    const to = redirectOf(path);
+    if (to !== want) fail(`vercel.json: ${path} → ${to ?? 'no redirect'}, expected ${want}`);
+    else if (redirectOf(to)) fail(`vercel.json: ${to} redirects again (a loop?)`);
+    if (!fileFor(want)) fail(`vercel.json: ${want} does not exist`);
   }
-}
-for (const asset of ['/llms.txt', '/fonts/terminus.woff2', '/captures/receipt.png', '/cli.md']) {
-  if (negotiation.some((r) => new RegExp(r.src).test(asset))) fail(`vercel.json: ${asset} would be negotiated too`);
 }
 
-// 4. personal data (the same generic rules as tools/leakscan.py)
-const LEAKS = {
-  'home folder': /\/(?:home|Users)\/(?!user\b|runner\b|you\b|me\b)[a-z][\w.-]+/,
-  'bluetooth address': /(?<![0-9A-Fa-f:])(?!AA:BB:CC:DD:EE:FF)[0-9A-F]{2}(?::[0-9A-F]{2}){5}(?![0-9A-Fa-f:])/,
-};
-for (const f of files.filter((x) => /\.(html|md|txt|json|xml|js|css)$/.test(x) && !x.startsWith('pagefind/'))) {
-  const text = read(f);
-  for (const [name, rx] of Object.entries(LEAKS)) {
-    const m = text.match(rx);
-    if (m) fail(`/${f}: a ${name} (${m[0].slice(0, 3)}…)`);
-  }
+// 4. personal data: tools/leakscan.py, the scan the repository uses, on everything built
+const leakscan = join(SITE, '..', 'tools', 'leakscan.py');
+const python = ['python3', 'python'].find((p) => spawnSync(p, ['--version']).status === 0);
+if (!python) console.warn('check: WARNING: no Python here, so tools/leakscan.py did not scan dist/ (CI does)');
+else {
+  // pagefind/ is the search index and Pagefind's own scripts (third-party code, which names its authors)
+  const built = readdirSync(DIST).filter((f) => f !== 'pagefind').map((f) => join(DIST, f));
+  const scan = spawnSync(python, [leakscan, ...built], { encoding: 'utf8' });
+  if (scan.status !== 0) fail(`tools/leakscan.py found personal data in dist/:\n${scan.stdout}${scan.stderr}`);
 }
 
 if (!existsSync(join(DIST, 'pagefind', 'pagefind-ui.js'))) fail('no Pagefind index (run pagefind --site dist)');
