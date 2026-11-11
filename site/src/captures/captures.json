@@ -1,7 +1,7 @@
 {
  "about": "Written by site/capture/capture.py from real bobina runs; do not edit.",
- "bobina": "0.1.1",
- "release": "v0.1.1",
+ "bobina": "0.1.2",
+ "release": "v0.1.2",
  "now": "2026-11-05T09:49:00",
  "files": {
   "price-tag.bob.md": {
