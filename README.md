@@ -126,6 +126,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `template list \| show \| new` | receipt, label, todo, card, note, and a shop gallery: [guides/templates.md](docs/guides/templates.md) |
 | `seq list \| set \| reset` | persistent counters (`{{ seq.NAME }}`); `seq set ticket 100`: the next print uses 100 |
 | `printer scan \| add \| list \| use \| remove` | printers live in `~/.config/bobina/config.toml` |
+| `config locale [TAG]` | the locale of documents without `locale:` (first run: from the time zone, saved) |
 | `status`, `mode [esc\|tspl\|cpcl]` | printer state; command language |
 | `calibrate compare PHOTO FILE` | how close the preview is to the paper |
 | `calibrate tear` / `calibrate feed` | where the tear bar is; whether feeds after images need the safe mode |

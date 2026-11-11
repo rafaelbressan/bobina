@@ -171,7 +171,7 @@ def test_no_network_prints_with_boxes_and_says_how_to_get_the_font(tmp_path):
 
 
 def test_downloads_off_in_config_never_fetch(fake_pack, tmp_path):
-    (tmp_path / "config").mkdir()
+    (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text("font_downloads = false\n")
     res = build(THAI)
     assert fake_pack == [] and "config.toml" in next(n.message for n in res.nudges if n.code == "F305")
@@ -291,7 +291,7 @@ def test_a_word_split_across_fonts_still_wraps():
 
 def test_an_installed_font_without_a_letter_still_draws_the_others(fake_pack, tmp_path):
     scriptfonts.download(scriptfonts.PACKS["thai"])  # the tiny font: ก and ส, no ข
-    (tmp_path / "config").mkdir()
+    (tmp_path / "config").mkdir(exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text("font_downloads = false\n")
     res = build(THAI + "ข")
     assert "F305" not in codes(res), "the font is here: never say it is not downloaded"

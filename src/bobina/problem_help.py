@@ -19,6 +19,11 @@ FIX = {
         "Get the font once, with the network: bobina fonts get NAME (the message names it; a document works too: "
         "bobina fonts get menu.bob.md). Then it prints offline."
     ),
+    "F306": (
+        "The dates and numbers are readable, in English with the country's formats (th-TH prints as en-TH). For the "
+        "language itself: bobina fonts get LANG (or font_downloads = true in config.toml). Another locale: bobina "
+        "config locale TAG, or locale: in the document."
+    ),
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
     "F203": "Check the font name (bobina fonts list); install the font or use a bundled one.",
@@ -111,6 +116,15 @@ FIX = {
     "M159": "Rename one of the two columns so both get a usable name.",
     "M160": "Open the file in Excel and save it, so formula values are stored.",
     "M202": "Write the number with digits (24.90, 24,90 or R$ 24,90), or a smaller amount for add().",
+    "M203": (
+        "Nothing to fix if it is right: documents without locale: use it from now on, even if the machine travels. "
+        "Another: bobina config locale TAG (bobina config locale shows it)."
+    ),
+    "M204": (
+        "Set this machine's locale: bobina config locale pt-BR (any BCP 47 tag), or write locale: in the document. "
+        "Only a document's own locale: reads a typed 1.890 as a price; elsewhere it is printed as typed (M202)."
+    ),
+    "M205": "Write a BCP 47 tag (pt-BR, en-US, fr-CA); the message suggests the closest one bobina knows.",
     "M201": "Use CLDR date patterns (dd/MM/yyyy HH:mm), not Moment.js (DD/MM/YYYY).",
     "M310": "Templates cannot read files: put the content in the document.",
     "M311": 'A counter format takes exactly one {:spec} ("{:d}", "A-{:03}"); other unsafe operations are refused.',

@@ -27,8 +27,7 @@ File extension: **`.bob.md`** (canonical); `.bob` is accepted. Encoding: UTF-8.
 ---
 bob: 1                         # format version (informational for now)
 profile: mtp-ii-58             # printer profile; the CLI or the printer config can override it
-locale: pt-BR                  # BCP 47 — month names, number and currency format; default: system LANG, then en (`lang:` is accepted too).
-                               # Without it, money is written as the currency's country does: R$ 24,90 (BRL), ₹120.00, $5.00
+locale: pt-BR                  # BCP 47: month names, numbers and money, all in it (`lang:` too); default: the machine's (§7.1)
 timezone: America/Sao_Paulo    # IANA; default: the system zone
 align: left                    # default alignment: left | center | right | justify
 size: normal                   # default text size (§5)
@@ -223,7 +222,7 @@ real app gives the note `P302`; scan a print before customers use it (docs/TESTE
 a licence). What each field means in each scheme, its official name and its limit: `bobina help pay SCHEME`
 (`--json` too) and [pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
 An amount that reads two ways (`amount=1.890`: R$ 1.890,00 or R$ 1,89?) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
-The same value in `| paymoney`, or in `| currency` in a document without `locale:`, is printed as typed with `M202`.
+The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is printed as typed with `M202`.
 
 ### 6.4 Data Matrix and PDF417 ✓
 
@@ -307,6 +306,12 @@ Every filter keeps data as data: `{{ value | upper }}` from `--data`/`--set` is 
 cannot become an image path (`M312`), and neither can a value joined into a path (`'img/' ~ value`).
 
 ### 7.1 Dates and languages
+
+One locale for dates, numbers and money (`US$ 24,90`, `09/11/2026` in `pt-BR`): the document's `locale:`, else
+`locale` in config.toml (`bobina config locale [TAG]`), saved on first use from the time zone (`America/Sao_Paulo`:
+`pt-BR`; `LANG`'s language if official there) or else a non-English `LANG`, said once (`M203`); else English
+(`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); unknown: `M205`. No font
+for the script (downloads off): English words, its country's formats (`en-TH`, `F306`).
 
 Styles `short`, `medium`, `long`, `full` follow the document `locale` (the same line prints "Thursday, November 5,
 2026" in `en-US`). Patterns use CLDR syntax (`dd/MM/yyyy HH:mm`); a pattern containing `%` is strftime, with month
@@ -457,6 +462,7 @@ Nudges:
 | `F303` | note | size not supported natively, nearest native size used |
 | `F304` | note | font for another script downloaded (once; used offline from then on) |
 | `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
+| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -508,6 +514,9 @@ Nudges:
 | `M160` | note | Excel formula cells without a saved value print empty |
 | `M201` | warning | date pattern looks like Moment.js |
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |
+| `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |
+| `M204` | note | no locale for this machine: dates, numbers and money in English |
+| `M205` | warning | the document's locale: is not a locale bobina knows (the machine's is used) |
 | `M310` | error | templates cannot read files |
 | `M311` | error | unsafe template operation |
 | `M312` | error | a variable cannot choose a file path |

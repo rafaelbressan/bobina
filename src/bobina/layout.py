@@ -62,9 +62,11 @@ def _remember(key, value) -> None:
 
 
 class Layout:
-    def __init__(self, profile, doc: Document, rendered: Rendered | None, nudges: Nudges, net: bool = False):
+    def __init__(self, profile, doc: Document, rendered: Rendered | None, nudges: Nudges, net: bool = False,
+                 locale=None):  # fmt: skip
         self.p, self.doc, self.r, self.n = profile, doc, rendered, nudges
         self.net = net  # https images allowed (only from the command line: --allow-net)
+        self.locale = locale  # the job's locales.Choice (payment captions), the same as its templates use
         self.em = Emulator(profile)
         self.W = profile.width_dots
         self.cols = profile.columns
@@ -972,16 +974,9 @@ class Layout:
         from babel import numbers as bnumbers
 
         from . import pay
+        from .locales import choose
         from .model import Attrs
-        from .templating import (
-            ambiguity_message,
-            has_locale,
-            is_negative,
-            money_locale,
-            parse_number,
-            resolve_locale,
-            two_readings,
-        )
+        from .templating import ambiguity_message, is_negative, parse_number, two_readings
 
         kv = {k: self.text(v) for k, v in f.attrs.kv.items()}
         name = (kv.get("scheme") or "").strip().lower()
@@ -1010,20 +1005,19 @@ class Layout:
                 f.line,
                 "attributes only; a pasted payload needs scheme=other",
             )
-        loc = resolve_locale(self.doc.meta)
+        loc = (self.locale or choose(self.doc.meta)).locale  # the job's one locale, as in its dates and prices
         amount = None
         if str(kv.get("amount") or "").strip() and not carries:
             self.n.add("M156", f"{label} cannot carry an amount: the payer types it", f.line, "show the price as text")
         elif str(kv.get("amount") or "").strip():
             raw = kv["amount"]
-            mloc = money_locale(pay.currency(s, kv), loc, has_locale(self.doc.meta))
             negative = is_negative(raw)  # its own error below (also -R$ 10,00 and −10), not "reads two ways"
             both = None if negative else two_readings(raw, s.decimals)
             if both:  # 1.890: R$ 1,89 or R$ 1.890? a payment never guesses, whatever the locale
                 msg, hint = ambiguity_message(raw, *both)
                 self.n.add("Q111", f"{label}: {msg}", f.line, hint)
                 return []
-            n = parse_number(raw, bnumbers.get_decimal_symbol(mloc))  # read as the caption writes it
+            n = parse_number(raw, bnumbers.get_decimal_symbol(loc))  # read as the caption writes it
             problem = (
                 f"amount '{raw}' is not a number" if n is None
                 else f"amount {raw} cannot be negative" if n < 0
@@ -1049,7 +1043,7 @@ class Layout:
             )
         caption = str(kv.get("caption", "auto")).strip()
         if caption.lower() == "auto":
-            caption = pay.caption(s, amount, kv, loc, has_locale(self.doc.meta))  # computed text: never a keyword
+            caption = pay.caption(s, amount, kv, loc)  # computed text: never a keyword
         elif caption.lower() in NO_CAPTION:
             caption = ""
         keep = {k: v for k, v in f.attrs.kv.items() if k in pay.QR_ATTRS - {"caption", "scheme"}}

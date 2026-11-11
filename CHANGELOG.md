@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- One locale per job, never mixed: a document's `locale:`, else the machine's (`locale` in config.toml), else
+  English. A label without `locale:` on a machine in Brazil with `LANG=en_US` now prints "USE BY 09/11/2026" and
+  "R$ 24,90", not "11/9/26" next to "R$ 24,90"; a USD price there is "US$ 24,90".
+- The machine's locale is inferred on the first print, check, preview or `printer add` that needs it: the time
+  zone's country, with the `LANG` language when it is official there, else the country's first (`America/Sao_Paulo`
+  → pt-BR, `America/Toronto` + `fr_CA` → fr-CA, `Asia/Kolkata` + `en` → en-IN). It is saved in config.toml (the
+  rest of the file kept as it was) and said once (`M203`); it stays when the laptop travels.
+- `bobina config locale [TAG]` shows it (with a date, a number and an amount as they will print) or saves it;
+  `--json` (schema `bobina.config/1`).
+- No country in the time zone (`Etc/UTC`, containers): the `LC_ALL`, `LC_TIME` or `LANG` locale when it is not
+  English (saved and said like the time zone's), else English, said once (`M204`).
+- A typed amount that reads two ways (`1.890`) is read as a price only in a document that says its `locale:`;
+  with the machine's locale it is printed as typed with `M202`, and payments refuse it in any locale. An unknown
+  `locale:` in a document is `M205`, with the closest tag bobina knows.
+- `printer add`, `use`, `remove` and `calibrate` change config.toml under its lock, on the file as it is then.
+- A locale whose script needs a font prints in its language with that font (downloaded on first use, `F304`);
+  with downloads off and the font not here, or no font known, it prints English words with its country's formats
+  (th-TH → en-TH, `F306`, which says `bobina fonts get th`). config.toml keeps the person's locale (th-TH).
+- Removed: money written as the currency's country does (R$ 24,90 in an otherwise English document).
 - Rolls as they are described around the world. `bobina paper new` takes feet (`50ft`, `50'`) and `--width` (`57mm`,
   `2 1/4in`): a roll that is not as wide as the printer's paper (80 mm on a 58 mm printer) is recorded with the
   warning `P103`. A package code (`57x30`) is refused with its question: 30 metres (as sold in Brazil) or a 30 mm

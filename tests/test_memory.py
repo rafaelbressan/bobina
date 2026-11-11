@@ -75,10 +75,16 @@ def test_a_long_preview_stays_small_in_memory(isolated):
     """200 labels in a child process: the peak stays far from the old ~0.4 MB per label."""
     doc = isolated / "pote.bob.md"
     doc.write_text(DOC + "\n```qr\nhttps://exemplo.org/{{ seq.t }}\n```\n")
-    code = "import sys; from bobina.cli import main; sys.exit(main(sys.argv[1:]))"
-    r = subprocess.run(
-        [sys.executable, "-c", code, "preview", str(doc), "--repeat", "200", "-o", str(isolated / "t.png"), "--quiet"]
+    # the child's own high-water mark (/proc VmHWM): ru_maxrss of children also counts the pytest process they were
+    # forked from (kept over exec), which grows with the tests that ran before this one
+    code = (
+        "import sys; from bobina.cli import main; c = main(sys.argv[1:])\n"
+        "try: print([l.split()[1] for l in open('/proc/self/status') if l.startswith('VmHWM')][0])\n"
+        "except OSError: pass\nsys.exit(c)"
     )
-    assert r.returncode == 0
-    peak_mb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
+    argv = ["preview", str(doc), "--repeat", "200", "-o", str(isolated / "t.png"), "--quiet"]
+    r = subprocess.run([sys.executable, "-c", code, *argv], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    own = r.stdout.strip().splitlines()[-1:] if r.stdout.strip() else []
+    peak_mb = int(own[0]) / 1024 if own else resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
     assert peak_mb < 150, f"peak {peak_mb:.0f} MB"

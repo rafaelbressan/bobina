@@ -589,18 +589,22 @@ def marks_setting(args, cfg: dict) -> str:
     return value
 
 
-def build(args, source, base_dir, counters=None):
+def build(args, source, base_dir, counters=None, machine=None):
+    """machine: the job's locales.Machine (one for all the parts of a job); None: a new one, so each rebuild of
+    bobina edit reads config.toml again."""
     if counters is not None or not getattr(args, "reserve_counters", False):
-        return _build(args, source, base_dir, counters)
+        return _build(args, source, base_dir, counters, machine)
     store = counter_store(args)  # a print: numbers reserved now, given back if the build fails
     try:
-        return _build(args, source, base_dir, store)
+        return _build(args, source, base_dir, store, machine)
     except BaseException:
         store.release()
         raise
 
 
-def _build(args, source, base_dir, counters=None):
+def _build(args, source, base_dir, counters=None, machine=None):
+    from .. import locales
+
     cfg = config.load()
     _, pr = config.printer(cfg, args.printer)
     copies, repeat = getattr(args, "copies", 1), getattr(args, "repeat", 1)
@@ -622,6 +626,7 @@ def _build(args, source, base_dir, counters=None):
             plain=getattr(args, "plain", False),
             allow=allow_set(args),
             net=getattr(args, "allow_net", False),
+            locale=machine or locales.Machine(),  # the locale of a document without locale:
             **({"counters": counters} if counters is not None else {}),
         )
     except KeyError as e:
@@ -737,6 +742,9 @@ def _load_job(args, store):
         raise Fail(USAGE, "--then needs a document before it too: bobina print FIRST --then SECOND", problem="E104")
     built, first_src = [], None
     many = len(items) > 1
+    from .. import locales
+
+    machine = locales.Machine()  # one per job: its parts and their rows say its locale note once
     failed: list[tuple[Nudge, int]] = []  # every part is built; all problems are reported together
     for g, a in items:
         label = f"part {g + 1} ({_short(a.target)})" if many else ""
@@ -749,7 +757,7 @@ def _load_job(args, store):
                         err(f"— {label}")
                     cache[(g, a.target)] = ask_fields(a, s, b)
                 a.asked = cache[(g, a.target)]
-            res = build(a, s, b, counters=store)
+            res = build(a, s, b, counters=store, machine=machine)
         except Fail as e:
             if not many:
                 raise

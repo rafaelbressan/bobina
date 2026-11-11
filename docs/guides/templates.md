@@ -14,7 +14,7 @@ bobina print box.bob.md                       # confirmation screen, then paper
 A document uses a template with `template: NAME` in its front matter; **the other keys are the fields**. A field
 can also come from `--set NAME=VALUE`, `--ask` (asked on the terminal) or a column of `--data` (one label per row,
 see [batch-printing.md](batch-printing.md)). `locale: pt-BR` switches the template's fixed words and the date
-format to Portuguese. The full rules are in [FORMAT.md §8](../FORMAT.md).
+format to Portuguese (without it: the machine's, `bobina config locale`). The full rules are in [FORMAT.md §8](../FORMAT.md).
 
 ## Recipe: a box label (`label`)
 

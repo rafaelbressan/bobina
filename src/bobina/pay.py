@@ -455,25 +455,23 @@ def currency(s: Scheme | None, kv: dict) -> str | None:
     return (s.currency if s else None) or str(kv.get("currency") or "").upper() or None
 
 
-def money(s: Scheme | None, amount: float, kv: dict, loc, explicit: bool = True) -> str:
-    """An amount in the scheme's currency: R$ 10,00 · ₹120.00 · 0.001 BTC. In the document's locale when it declares
-    one (explicit), else as the currency's country writes it (templating.CURRENCY_HOME)."""
+def money(s: Scheme | None, amount: float, kv: dict, loc) -> str:
+    """An amount in the scheme's currency, in the job's one locale: R$ 10,00 (pt-BR) · US$ 5,00 (pt-BR) · ₹120.00
+    (en-IN) · 0.001 BTC."""
     from babel import numbers as bnumbers
-
-    from .templating import money_locale
 
     cur = currency(s, kv)
     if cur == "BTC":
         return f"{amount:.8f}".rstrip("0").rstrip(".") + " BTC"
     if cur:
-        return bnumbers.format_currency(amount, cur, locale=money_locale(cur, loc, explicit))
+        return bnumbers.format_currency(amount, cur, locale=loc)
     return bnumbers.format_decimal(amount, format="#,##0.00", locale=loc)
 
 
-def caption(s: Scheme, amount: float | None, kv: dict, loc, explicit: bool = True) -> str:
+def caption(s: Scheme, amount: float | None, kv: dict, loc) -> str:
     """The line under the code: the scheme and the amount ("Pix · R$ 10,00"), else the receiver's name."""
     title = s.title or str(kv.get("label") or "").strip()
-    what = money(s, amount, kv, loc, explicit) if amount is not None else str(kv.get("name") or "").strip()
+    what = money(s, amount, kv, loc) if amount is not None else str(kv.get("name") or "").strip()
     return " · ".join(x for x in (title, what) if x)
 
 

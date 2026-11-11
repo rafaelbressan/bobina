@@ -11,6 +11,9 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.delenv("LC_ALL", raising=False)
     monkeypatch.delenv("LC_TIME", raising=False)
+    # a machine whose locale was already chosen (the first run infers pt-BR from the zone: tests/test_locale.py)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "config.toml").write_text('locale = "en-US"\n')
     from bobina import scriptfonts
 
     def no_network(url, size):  # fonts for other scripts are never downloaded in tests (tests/test_scriptfonts.py)

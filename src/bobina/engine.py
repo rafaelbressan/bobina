@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from importlib import resources
 
-from . import escpos, preview, templating
+from . import escpos, locales, preview, templating
 from . import profile as profiles
 from .emulator import Emulator
 from .layout import Layout
@@ -230,7 +230,10 @@ def build(
     overrides: dict | None = None,
     net: bool = False,
     row: int | None = None,
+    locale=None,
 ) -> Result:
+    """locale: the machine's locale for a document without locale: (a tag, or the CLI's locales.Machine, which
+    infers and saves it on first use); None: such a document is English."""
     nudges = Nudges()
     meta, body, fm_lines = templating.split_front_matter(source)
     defaults, labels, schema = {}, None, {}
@@ -247,7 +250,7 @@ def build(
         merged.update({k: v for k, v in meta.items() if k != "template"})
         meta = merged
     prof = apply_overrides(profiles.load(profile_name or meta.get("profile") or config_profile), overrides)
-    rendered = None
+    rendered, choice = None, None
     if plain:
         doc = Document(meta=meta, base_dir=base_dir, blocks=[Paragraph(line=1, runs=[Run(body.rstrip("\n"))])])
     else:
@@ -273,12 +276,15 @@ def build(
         for old in sorted((doc_keys | set(fields or {})) & set(renamed) - set(schema)):
             new = renamed[old]
             nudges.add("M101", f"template field '{old}' was renamed to '{new}': it is ignored", None, f"write {new}:")
+        choice = locales.choose(meta, locale)  # plain text has no dates or prices: it never needs one
+        for code, msg, hint in choice.notes:
+            nudges.add(code, msg, None, hint)
         rendered = templating.render(
             body, meta, nudges, fields=fields, line_offset=fm_lines, counters=counters, defaults=defaults,
-            labels=labels, quiet_names=frozenset(empty_required),
+            labels=labels, quiet_names=frozenset(empty_required), locale=choice,
         )  # fmt: skip
         doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta)
-    rows = Layout(prof, doc, rendered, nudges, net=net).run()
+    rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")
     _note_untested(prof, rows, nudges)

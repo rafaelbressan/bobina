@@ -537,20 +537,22 @@ def test_bitcoin_refuses_a_wrong_address_and_too_many_decimals():
     assert any("more than 8 decimals" in n.message for n in res.nudges if n.code == "Q111")
 
 
-def test_without_a_locale_money_is_written_as_its_country_does():
-    # LANG is en_US in the tests: a Pix caption still reads R$ 10,00, as on every Brazilian receipt
-    res = build('```pay {scheme=pix to="you@example.com" amount=10}\n```\n')
-    assert "Pix · R$ 10,00" in _text(res)
-    res = build('---\nlocale: en\n---\n```pay {scheme=pix to="you@example.com" amount=10}\n```\n')
-    assert "R$10.00" in _text(res)  # a document that says its locale keeps it
-    assert "₹120.00" in _text(build('```pay {scheme=upi to="shop@okbank" name="N" amount=120}\n```\n'))
+def test_money_is_written_in_the_jobs_one_locale():
+    # never as the currency's country does: a caption next to an English date reads R$10.00, a pt-BR one R$ 10,00
+    pix = '```pay {scheme=pix to="you@example.com" amount=10}\n```\n'
+    assert "Pix · R$10.00" in _text(build(pix))  # the engine alone, without a locale: English
+    assert "Pix · R$ 10,00" in _text(build(pix, locale="pt-BR"))  # the machine's
+    assert "Pix · R$10.00" in _text(build("---\nlocale: en\n---\n" + pix, locale="pt-BR"))  # the document's wins
+    assert "₹120.00" in _text(build('```pay {scheme=upi to="shop@okbank" name="N" amount=120}\n```\n', locale="en-IN"))
+    usd = build("{{ 24.9 | currency('USD') }} {{ today | date('short') }}\n", locale="pt-BR")
+    assert "US$ 24,90 05/11/2026" in _text(usd)
 
 
 def test_a_template_price_in_brl_without_a_locale(capsys):
     from bobina.engine import build as b
 
-    assert "R$ 24,90" in _text(b("{{ 24.9 | currency }}\n"))
-    assert "R$24.90" in _text(b("---\nlocale: en-US\n---\n{{ 24.9 | currency }}\n"))
+    assert "R$24.90" in _text(b("{{ 24.9 | currency }}\n"))
+    assert "R$ 24,90" in _text(b("---\nlocale: pt-BR\n---\n{{ 24.9 | currency }}\n"))
 
 
 def test_a_bad_cpf_is_not_only_about_phones():
@@ -564,20 +566,24 @@ def test_the_legend_of_help_pay_says_the_mark_once():
 
 
 def test_a_brl_price_is_read_as_brazilians_type_it():
-    # a document that says pt-BR means thousands; without a locale 1.890 reads two ways and is printed as typed
+    # a document that says pt-BR means thousands; elsewhere (even with the machine's pt-BR) 1.890 is printed as typed
     assert "R$ 1.890,00" in _text(build('---\nlocale: pt-BR\n---\n{{ "1.890" | currency }}\n'))
+    res = build('{{ "1.890" | currency }}\n', locale="pt-BR")
+    assert "1.890" in _text(res) and "M202" in _codes(res)
     res = build('{{ "1.890" | currency }}\n')
     assert "1.890" in _text(res) and "M202" in _codes(res)
-    assert "R$ 1.890,00" in _text(build('{{ "1.890,00" | currency }}\n'))  # two separators: one reading
+    assert "R$1,890.00" in _text(build('{{ "1.890,00" | currency }}\n'))  # two separators: one reading
+    res = build('{{ "1.890" | paymoney("pix") }}\n', locale="pt-BR")  # a payment never takes it, in any locale
+    assert "M202" in _codes(res)
     res = build(
         '```pay {scheme=pix to="you@example.com" amount="1.890,00"}\n```\n'
     )  # a payment takes no bare 1.890 (Q111)
-    assert "Pix · R$ 1.890,00" in _text(res)
+    assert "Pix · R$1,890.00" in _text(res)
 
 
 def test_only_typed_amounts_with_two_decimals_can_read_two_ways():
     res = build("{{ 1.126 | currency }}\n")  # a computed float is one number
-    assert "R$ 1,13" in _text(res) and "M202" not in _codes(res)
+    assert "R$1.13" in _text(res) and "M202" not in _codes(res)
     res = build('{{ "1.500" | paymoney("bitcoin") }}\n')  # 1500 or 1.5 BTC: refused, as the pay block does
     assert "M202" in _codes(res)
     res = build('```pay {scheme=pix to="a@b.c" amount=-1.890}\n```\n')

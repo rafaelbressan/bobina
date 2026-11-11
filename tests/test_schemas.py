@@ -66,3 +66,9 @@ def test_print_and_preview_json_match_their_schemas(tmp_path, capsys):
     _check(json.loads(capsys.readouterr().out), _schema("print"))  # stdout is only the JSON, no screen
     assert cli.main(["preview", doc, "-o", str(tmp_path / "a.png"), "--json"]) == cli.OK
     _check(json.loads(capsys.readouterr().out), _schema("preview"))
+
+
+def test_config_json_matches_its_schema(capsys):
+    for argv in (["config", "locale", "--json"], ["config", "locale", "th-TH", "--json"]):
+        assert cli.main(argv) == cli.OK
+        _check(json.loads(capsys.readouterr().out), _schema("config"))
