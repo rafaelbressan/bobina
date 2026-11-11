@@ -430,7 +430,7 @@ Claude Desktop, Cursor: `{"mcpServers": {"bobina": {"command": "bobina", "args":
 | `template_list`, `template_show` | `template list --json`; `template show NAME --json` and the document to fill |
 | `help` | `help TOPIC [NAME] --json`: a topic, a problem code (`Q111`), a pay scheme (`pay pix`) |
 | `status`, `paper` | `status --json`, `paper --json` |
-| `paper_new` | `paper new LENGTH --json`: a roll the user loaded, with the length they gave (`30m`; a unit is required) |
+| `paper_new` | `paper new --json`: a roll the user loaded, with the length (`30m`, `50ft`) or diameter (`40mm`) and width they gave; a package code (`57x30`) is refused: ask the user |
 
 The document is `text` (given on stdin) or `path` (absolute, or `@NAME`); the other arguments are the options of
 the command: `set`, `data`, `profile`, `printer` (check and preview take it too: look with the printer print
