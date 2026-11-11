@@ -1569,7 +1569,7 @@ There is no server yet; a print server and a chat bot are planned, and they chan
 | Principal | Trust | Examples |
 |---|---|---|
 | The person at the terminal | trusted | flags, `~/.config/bobina/config.toml`, `--editor`, printer `command` |
-| Document author | trusted for layout, **not** for files outside its folder | a `.bob.md` you wrote, or one somebody shared |
+| Document author | trusted for layout and the images it names, **not** for templates outside its folder | a `.bob.md` you wrote, or one somebody shared |
 | Data | **untrusted** | `--data` CSV cells, `--set` values, future server/chat input |
 | Template from elsewhere | like a document | built-ins, `~/.config/bobina/templates/`, the document folder |
 
