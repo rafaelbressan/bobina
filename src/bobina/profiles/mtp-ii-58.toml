@@ -11,6 +11,7 @@ paper_mm = 58
 command_set = "escpos"
 language_switch = false   # 1F 1B 1F FC … is accepted and ignored by this firmware (tested 2026-11-06)
 encoding = "utf-8"        # UTF-8 accepted directly, no ESC t
+match_names = ["MTP-II", "PT-210"]  # the names it gives itself: bobina init suggests this profile for them
 
 [margins]
 top_dots = 24             # ESC J 24: avoids the faded start (N-series)

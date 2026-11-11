@@ -444,6 +444,7 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E403` | error | printer not ready (paper, cover, error) |
 | `E404` | error | operation not supported by this printer's transport |
 | `E405` | error | printer busy: another bobina job kept it too long |
+| `E406` | error | `bobina init` found no printer to set up |
 | `E501` | error | document error |
 
 Nudges:
@@ -489,9 +490,14 @@ Nudges:
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
+| `P104` | note | roll length not set: no paper estimate |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
+| `P401` | note | no Bluetooth or USB search here (says why) |
+| `P402` | note | the name does not settle the profile: one was taken |
+| `P403` | warning | a USB printer this user cannot write to |
+| `P404` | warning | config.toml names a profile bobina does not know |
 | `M101` | warning | unknown attribute |
 | `M102` | note | unknown block type, printed as preformatted text |
 | `M103` | note | attribute not implemented yet (ignored) |

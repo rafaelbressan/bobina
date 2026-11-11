@@ -11,7 +11,7 @@ bobina needs Python 3.11 or newer. Pick one way:
 | Windows | `uv tool install bobina` or `pipx install bobina` (printer driver: `drivers/windows/`) |
 | A checkout, to change bobina | `./install.sh` (editable install, plus the Bluetooth service on Linux) |
 
-Then `bobina printer scan`, `bobina printer add NAME ADDRESS` and `bobina status`.
+Then `bobina init` (printer, profile, locale, roll, a test strip).
 
 ## Bluetooth needs the system Python
 

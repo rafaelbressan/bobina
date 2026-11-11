@@ -406,13 +406,63 @@ def _confirm_strip(args, what: str) -> bool:
     return False
 
 
+FEED_INTRO = (
+    "Three lines below. A to B: 10 mm drawn as an image. B to C: a 10 mm paper feed. "
+    "If B and C touch (or are closer than A and B): bobina calibrate feed touching. "
+    "If they are 10 mm apart: bobina calibrate feed apart"
+)
+
+
+def feed_strip(prof_name, prof, pr, intro: str = FEED_INTRO, tail: bool = True) -> tuple[bytes, float]:
+    """(bytes, length in mm) of the feed test: lines A, B, C, one piece of paper (a cutter cuts only at its end).
+    tail=False: nothing after C, no cut (bobina init prints the tear ruler right after it)."""
+    from PIL import Image
+
+    from .. import escpos
+
+    head = engine.build(
+        "# FEED TEST {.center}\n\n" + intro,
+        profile_name=prof_name,
+        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0, "cutter": "none"},
+    )
+    W, mm = prof.width_dots, prof.dpi / 25.4
+    gap, top = round(10 * mm), round(3 * mm)
+    end = int(prof.get("margins.feed_after_dots", 88)) if tail else 0
+    line = escpos.raster(Image.new("1", (W, 3), 0), 3)  # one GS v 0 block each: the test needs B whole, then ESC J
+    data = (
+        head.data + escpos.blank_rows(W, top) + line + escpos.blank_rows(W, gap, band=gap) + line  # A, 10 mm, B
+        + escpos.feed(gap) + line  # ESC J of 10 mm right after B, then C
+        + (escpos.blank_rows(W, end) + escpos.cut(prof) if end else b"")  # past the tear bar whatever the answer
+    )  # fmt: skip
+    return data, head.length_mm + (top + 3 + gap + 3 + gap + 3 + end) / mm
+
+
+TEAR_INTRO = (
+    "Tear at the serrated edge. The number at the torn edge is the distance (mm) from the head to the tear bar. "
+    "Then: bobina calibrate tear MM"
+)
+
+
+def tear_strip(prof_name, prof, pr, intro: str = TEAR_INTRO):
+    """(bytes, length in mm, ruler image) of the tear test: a ruler at the very end of the paper, no feed after it;
+    a cutter cuts there, once (the text above it is not cut off)."""
+    from .. import escpos
+
+    head = engine.build(
+        "# TEAR TEST {.center}\n\n" + intro,
+        profile_name=prof_name,
+        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0, "cutter": "none"},  # by name
+    )
+    ruler = tear_ruler(prof)
+    data = head.data + escpos.raster(ruler, int(prof.get("transport.band_rows", 64))) + escpos.cut(prof)
+    return data, head.length_mm + ruler.height / (prof.dpi / 25.4), ruler
+
+
 def _calibrate_feed(args):
     """Does this printer obey a paper feed right after an image? Prints lines A, B, C: A–B is 10 mm of white raster
     rows (exact on any printer), B–C is an ESC J of 10 mm sent right after B. On the MTP-II B and C touch (08/11). If
     they touch, the feed was ignored (or dropped while the printer was busy with the image): white rows fix both, so
     'touching' keeps the safe mode for this printer and 'apart' turns it off (ESC J again: ~4 KB less per label)."""
-    from .. import escpos
-
     if args.photo:
         answer = args.photo.lower()
         if answer not in FEED_ANSWERS:
@@ -440,24 +490,7 @@ def _calibrate_feed(args):
     else:
         cfg, name, pr = _calibrated_printer(args, "feed")
     prof_name, prof = _strip_profile(args, cfg, pr)
-    intro = engine.build(
-        "# FEED TEST {.center}\n\nThree lines below. A to B: 10 mm drawn as an image. B to C: a 10 mm paper feed. "
-        "If B and C touch (or are closer than A and B): bobina calibrate feed touching. "
-        "If they are 10 mm apart: bobina calibrate feed apart",
-        profile_name=prof_name,
-        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0},
-    )
-    from PIL import Image
-
-    W, mm = prof.width_dots, prof.dpi / 25.4
-    gap, top, tail = round(10 * mm), round(3 * mm), int(prof.get("margins.feed_after_dots", 88))
-    line = escpos.raster(Image.new("1", (W, 3), 0), 3)  # one GS v 0 block each: the test needs B whole, then ESC J
-    data = (
-        intro.data + escpos.blank_rows(W, top) + line + escpos.blank_rows(W, gap, band=gap) + line  # A, 10 mm, B
-        + escpos.feed(gap) + line  # ESC J of 10 mm right after B, then C
-        + escpos.blank_rows(W, tail)  # out past the tear bar whatever the answer
-    )  # fmt: skip
-    length = intro.length_mm + (top + 3 + gap + 3 + gap + 3 + tail) / mm
+    data, length = feed_strip(prof_name, prof, pr)
     nxt = ["bobina calibrate feed touching", "bobina calibrate feed apart"]
     if args.dry_run:
         _say(args, f"dry run: {length / 10:.1f} cm (lines A, B, C; nothing printed)", printed=False,
@@ -498,19 +531,9 @@ def cmd_calibrate(args):
                 final_feed_mm=round(feed_mm, 1),
             )
             return OK
-        from .. import escpos
-
         cfg, pr = _strip_printer(args)
         prof_name, prof = _strip_profile(args, cfg, pr)  # the printer's profile, as the feed strip
-        intro = engine.build(
-            "# TEAR TEST {.center}\n\nTear at the serrated edge. The number at the torn edge "
-            "is the distance (mm) from the head to the tear bar. Then: bobina calibrate tear MM",
-            profile_name=prof_name,
-            overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0},  # build loads by name
-        )
-        ruler = tear_ruler(prof)
-        data = intro.data + escpos.raster(ruler, int(prof.get("transport.band_rows", 64)))
-        length = intro.length_mm + ruler.height / (prof.dpi / 25.4)
+        data, length, ruler = tear_strip(prof_name, prof, pr)
         nxt = ["bobina calibrate tear MM"]
         if args.dry_run:
             ruler.convert("L").save("tear-ruler.png")

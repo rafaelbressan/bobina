@@ -47,17 +47,15 @@ anything; bobina only warns, and tells you why (`warning[Q101] … (evidence: N6
 ```bash
 curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh   # installs uv if missing
 # or: uv tool install bobina · pipx install bobina · a .deb or Homebrew: docs/INSTALL.md
-bobina printer scan           # find the Bluetooth address
-bobina printer add mtp AA:BB:CC:DD:EE:FF
-bobina status                 # paper, cover, errors
+bobina init                   # printer, profile, locale, roll, test strip
+bobina init --yes             # agents, scripts: no questions, no print
 ```
 
 Bluetooth printing needs Linux and the system Python (uv's and Homebrew's Pythons have no Bluetooth sockets;
-`get.sh` picks the right one). The .deb, pipx from apt, the Bluetooth boot service, extras and a checkout
+`get.sh` picks the right one). The .deb, pipx, the boot service, extras and a checkout
 (`./install.sh`): [docs/INSTALL.md](docs/INSTALL.md).
-Printer on another machine? `bobina printer add tower --command "ssh tower bobina send --yes -"`.
-No printer at hand? `bobina printer add test --path out.bin` appends every job's bytes to `out.bin` (a file
-printer: `status` and `paper` need Bluetooth; `bobina printer list` shows where each printer goes).
+Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
+`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
 
 ## The format in one screen
 
@@ -125,6 +123,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `edit [FILE] [--template NAME]` | write in your editor, confirm, print |
 | `template list \| show \| new` | receipt, label, todo, card, note, and a shop gallery: [guides/templates.md](docs/guides/templates.md) |
 | `seq list \| set \| reset` | persistent counters (`{{ seq.NAME }}`); `seq set ticket 100`: the next print uses 100 |
+| `init` | first run; again to change one part |
 | `printer scan \| add \| list \| use \| remove` | printers live in `~/.config/bobina/config.toml` |
 | `config locale [TAG]` | the locale of documents without `locale:` (first run: from the time zone, saved) |
 | `status`, `mode [esc\|tspl\|cpcl]` | printer state; command language |

@@ -16,6 +16,7 @@ from .common import ALIASES, GLOBAL_WITH_VALUE, LEFT_OUT, MARKS, OK, SECURITY, U
 from .device import MODES, cmd_calibrate, cmd_mode, cmd_paper, cmd_printer, cmd_send, cmd_status
 from .documents import cmd_check, cmd_edit, cmd_preview, cmd_print, cmd_view
 from .history import cmd_history
+from .init import cmd_init
 from .library import cmd_fonts, cmd_library, cmd_profile, cmd_seq, cmd_template
 from .settings import cmd_config
 
@@ -274,6 +275,7 @@ COMMAND_KIND = {
     "profile": "reads", "template": "reads", "seq": "reads", "fonts": "reads", "library": "reads",
     "paper": "reads", "help": "reads", "config": "reads",
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
+    "init": "prints",  # the test strip; --yes asks nothing and prints nothing
 }  # fmt: skip
 _PARENTS: dict = {}
 
@@ -664,6 +666,24 @@ def make_parser():
     p.add_argument("--path", help="append bytes to this file/device")
     p.add_argument("--default", action="store_true")
     p.add_argument("--seconds", type=int, default=8, help="scan duration")
+    p = _cmd(
+        sub,
+        "init",
+        "set bobina up: printer, profile, locale, roll, test strip",
+        "the first run: finds the printer (Bluetooth, USB), suggests its profile, confirms the locale, records the"
+        " roll and prints a test strip that also measures the tear bar. Run again to change one part. --yes (agents,"
+        " scripts): asks nothing and prints nothing",
+        [
+            "bobina init",
+            "bobina init --yes",
+            "bobina init --yes --printer AA:BB:CC:DD:EE:FF",
+            "bobina init --command 'ssh tower bobina send --yes -'",
+            "bobina init --yes --printer ./test.bin --json",
+        ],
+        cmd_init,
+    )
+    p.add_argument("--command", dest="command", help="a printer on another machine: pipe the bytes to this command")
+    p.add_argument("--seconds", type=int, default=8, help="Bluetooth scan duration")
     p = _cmd(
         sub,
         "config",
