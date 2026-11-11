@@ -8,12 +8,18 @@
   (said in the terminal). A note in the terminal at each metre of paper. Two layouts (`--layout`, `chat_layout`,
   `/strip` and `/tickets` in the chat): one strip with the AI on top once and dashed lines between answers, or one
   ticket per answer fed to the tear bar. `--questions` prints your messages too, on the right; `--manual` (or
-  `/manual`) prints only on `p`. A printer out of reach never stops the chat.
+  `/manual`) prints only on `p`. A printer out of reach never stops the chat. Printed messages have a limit of
+  about 3 lines (`chat_question_limit`): a longer one is not sent, never cut.
+- On paper, `--style` (`chat_style`): `plain`, or with icons: `bubbles` (your message white on black on the
+  right), `boxes` or `labels`; the AI's answer under ✦ and its name. Icons are bundled as 1-bit bitmaps (Lucide,
+  ISC; `tools/gen_icons.py`), the start of a reusable icon set (`bobina.icons`).
+- On a terminal, with `bobina[ai]` (prompt_toolkit): a welcome block, an input box with a status line under the
+  last message (the scrollback stays), your messages on the right, a spinner (Esc stops the answer), slash
+  commands with completion, a live counter when your messages print. Plain lines in pipes, as before.
 - `bobina ai list | use NAME [--model MODEL]`: the AIs this machine has, best first: Claude Code, Codex and Gemini
   CLI with their own login, a local Ollama, then `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (their SDKs are the extra
   `bobina[ai]`). The choice is saved in config.toml; the first `bobina chat` asks. None found: `E601` says what to
   install or set.
-- `--model` is no longer a typing hint for `--profile` (it is the AI's model in `bobina chat`).
 
 ## 0.1.2 — 2026-11-11
 
