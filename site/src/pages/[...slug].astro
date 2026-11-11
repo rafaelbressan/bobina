@@ -1,0 +1,35 @@
+---
+// One page per Markdown file of the release (README.md is the home page's twin, not a page here).
+import { getCollection, render } from 'astro:content';
+import Doc from '../layouts/Doc.astro';
+import { SHORT_TITLES } from '../lib/nav';
+import { GITHUB_REF, githubUrl, slugOf, titleOf, tokens } from '../lib/site';
+import { rewriteMarkdown } from '../lib/site';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('docs');
+  return entries.filter((e) => slugOf(e.id)).map((entry) => ({ params: { slug: slugOf(entry.id)! }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const slug = slugOf(entry.id)!;
+const { Content, headings } = await render(entry);
+const body = entry.body ?? '';
+const title = SHORT_TITLES[slug] ?? titleOf(body, slug);
+const first = body
+  .split(/\n\s*\n/)
+  .find((p) => p.trim() && !p.startsWith('#') && !p.startsWith('|') && !p.startsWith('```'));
+const description = first ? first.replace(/\s+/g, ' ').replace(/[`*_]/g, '').trim().slice(0, 200) : undefined;
+---
+
+<Doc
+  title={title}
+  slug={slug}
+  tokens={tokens(rewriteMarkdown(body, entry.id))}
+  source={githubUrl(entry.id)}
+  sourceLabel={`${entry.id} at ${GITHUB_REF}`}
+  description={description}
+  headings={headings}
+>
+  <Content />
+</Doc>

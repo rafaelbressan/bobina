@@ -1,0 +1,158 @@
+---
+import Base from '../layouts/Base.astro';
+import Cast from '../components/Cast.astro';
+import Printer from '../components/Printer.astro';
+import Ticket from '../components/Ticket.astro';
+import Tools from '../components/Tools.astro';
+import { captures, cast, file, ticket, tickets } from '../lib/captures';
+import { NAV } from '../lib/nav';
+import { lede, whyIntro, whyPoints } from '../lib/readme';
+import { githubUrl, release, tokens } from '../lib/site';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { TREE } from '../lib/site';
+
+const agents = NAV.find((n) => n.slug === 'agents')!.href;
+const readmeTokens = tokens(readFileSync(join(TREE, 'README.md'), 'utf8'));
+const order = file('pantry.csv')
+  .text.split('\n')
+  .slice(1)
+  .filter(Boolean)
+  .map((l) => 'label-' + l.split(',')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+const labels = tickets('batch').sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+const fileUrl = (name: string) => {
+  const f = file(name);
+  return f.path.startsWith('site/') ? `${release.repo}/blob/main/${f.path}` : githubUrl(f.path);
+};
+const installLine = 'uv tool install bobina';
+---
+
+<Base title="bobina: Markdown on thermal roll printers" slug="" md="/index.md">
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <h1 id="hero-title">Markdown in,<br />receipts out.</h1>
+        <p class="lede" set:html={lede} />
+        <div class="install">
+          <pre><code><span class="cast-prompt">$ </span>{installLine}</code></pre>
+        </div>
+        <p class="note">
+          Or pipx, a .deb, Homebrew, or the installer script: <a href="/install/">Install</a>. Linux, macOS and Windows; Bluetooth
+          printing on Linux.
+        </p>
+        <div class="cta">
+          <a class="btn solid" href="/cli/">Read the CLI reference</a>
+          <a class="btn" href="/format/">The document format</a>
+          <a class="btn" href={agents}>For agents</a>
+        </div>
+        <div style="margin-top:2rem">
+          <Cast
+            cast={cast('print')}
+            max="30rem"
+            caption={`The confirmation screen on the printer's real 32-column grid; p prints. Recorded from bobina ${captures.bobina}.`}
+          />
+        </div>
+      </div>
+      <Printer
+        tickets={[ticket('receipt')]}
+        label="The receipt printed by the command"
+        after="cast-print"
+        caption="receipt.bob.md, as bobina preview renders it: the exact dots sent to the printer."
+      />
+    </section>
+
+    <section class="band" aria-labelledby="why">
+      <header>
+        <h2 id="why"><span class="inv">Nudges</span>, not blocks</h2>
+        <p set:html={whyIntro} />
+      </header>
+      <div class="split">
+        <figure class="source">
+          <figcaption><a href={fileUrl('price-tag.bob.md')}>price-tag.bob.md</a></figcaption>
+          <pre><code>{file('price-tag.bob.md').text}</code></pre>
+        </figure>
+        <Cast cast={cast('nudges')} caption="Two warnings, each with a suggestion and the printed test behind it. Nothing is refused." />
+      </div>
+      <div class="split" style="margin-top:1.5rem;align-items:center">
+        <Ticket ticket={ticket('price-tag')} alt="The price tag as printed: small text and a small QR code, as the warnings said" caption="…and it prints anyway, if you say so." />
+        <ul class="facts" style="margin:0">
+          {whyPoints.map((p) => <li set:html={p} />)}
+        </ul>
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="gallery">
+      <header>
+        <h2 id="gallery">Real tickets from real files</h2>
+        <p>
+          Every ticket on this site is <code>bobina preview</code> of the file next to it, rendered by bobina {captures.bobina}
+          (1 dot of a 58 mm printer = 1 pixel). The templates come with bobina: <code>bobina template list</code>.
+        </p>
+      </header>
+      <div class="gallery">
+        {
+          tickets('gallery').map((t) => (
+            <div>
+              <Ticket ticket={t} alt={`Ticket printed from ${t.file}`} caption={t.file} />
+              <details>
+                <summary>Source</summary>
+                <pre><code>{file(t.file).text}</code></pre>
+                <a class="note" href={fileUrl(t.file)}>
+                  {file(t.file).path}
+                </a>
+              </details>
+            </div>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="batch">
+      <header>
+        <h2 id="batch">One label per row</h2>
+        <p>
+          A document with <code>{'{{ blanks }}'}</code> plus a table (CSV, TSV, JSON, Excel) prints one label per row. Step by
+          step: <a href="/guides/batch-printing/">the batch printing guide</a>.
+        </p>
+      </header>
+      <div class="split">
+        <div style="display:grid;gap:1rem;min-width:0">
+          <figure class="source">
+            <figcaption><a href={fileUrl('jar-label.bob.md')}>{file('jar-label.bob.md').path}</a></figcaption>
+            <pre><code>{file('jar-label.bob.md').text}</code></pre>
+          </figure>
+          <figure class="source">
+            <figcaption><a href={fileUrl('pantry.csv')}>{file('pantry.csv').path}</a></figcaption>
+            <pre><code>{file('pantry.csv').text}</code></pre>
+          </figure>
+          <Cast cast={cast('batch')} />
+        </div>
+        <Printer tickets={labels} label="A pantry jar label" caption="The four PNGs the preview command wrote, one per row." />
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="agents">
+      <header>
+        <h2 id="agents">Made for agents too</h2>
+        <p>
+          Without a terminal nobody can answer the confirmation screen, so the print stops with a code that says what to
+          do. Every problem has a code, every command that returns data has <code>--json</code>, and
+          <code>bobina mcp</code> is a Model Context Protocol server.
+        </p>
+      </header>
+      <div class="split">
+        <Cast cast={cast('agents')} max="36rem" />
+        <div class="prose">
+          <p>This site is agent-ready:</p>
+          <ul>
+            <li><a href="/llms.txt">/llms.txt</a>, the index, and <a href="/llms-full.txt">/llms-full.txt</a>, the docs in one file.</li>
+            <li>Every page as Markdown: add <code>.md</code> (<a href="/cli.md">/cli.md</a>), or ask for <code>Accept: text/markdown</code>.</li>
+            <li>A ready skill: <a href={githubUrl('skills/bobina/SKILL.md')}>skills/bobina/SKILL.md</a>.</li>
+            <li>The MCP server: <code>claude mcp add bobina -- bobina mcp</code> (<a href={agents}>more</a>).</li>
+          </ul>
+          <Tools md="/index.md" tokens={readmeTokens} />
+        </div>
+      </div>
+    </section>
+  </main>
+</Base>

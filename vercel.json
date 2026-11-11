@@ -1,0 +1,46 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --prefix site --registry=https://registry.npmjs.org/",
+  "buildCommand": "npm run build --prefix site",
+  "outputDirectory": "site/dist",
+  "routes": [
+    {
+      "src": "^/$",
+      "has": [{ "type": "header", "key": "accept", "value": { "re": "text/markdown" } }],
+      "dest": "/index.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept" }
+    },
+    {
+      "src": "^/((?:[^/.]+/)*[^/.]+)/?$",
+      "has": [{ "type": "header", "key": "accept", "value": { "re": "text/markdown" } }],
+      "dest": "/$1.md",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept" }
+    },
+    {
+      "src": "^/.+\\.md$",
+      "headers": { "Content-Type": "text/markdown; charset=utf-8", "Vary": "Accept" },
+      "continue": true
+    },
+    {
+      "src": "^/(?:[^.]*)$",
+      "headers": { "Vary": "Accept" },
+      "continue": true
+    },
+    {
+      "src": "^/llms(?:-full)?\\.txt$",
+      "headers": { "Content-Type": "text/plain; charset=utf-8" },
+      "continue": true
+    },
+    {
+      "src": "^/_astro/.+",
+      "headers": { "Cache-Control": "public, max-age=31536000, immutable" },
+      "continue": true
+    },
+    {
+      "src": "^/.*",
+      "headers": { "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin" },
+      "continue": true
+    }
+  ]
+}

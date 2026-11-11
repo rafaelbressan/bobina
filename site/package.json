@@ -1,0 +1,22 @@
+{
+  "name": "bobina-site",
+  "private": true,
+  "type": "module",
+  "description": "bobina.md: the docs of the latest bobina release, for people and agents",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "release": "node scripts/release.mjs",
+    "dev": "node scripts/release.mjs && ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "node scripts/release.mjs && ASTRO_TELEMETRY_DISABLED=1 astro build && pagefind --site dist --silent && node scripts/check.mjs",
+    "check": "node scripts/check.mjs",
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
+    "capture": "node scripts/release.mjs && python3 capture/capture.py"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.7",
+    "astro": "7.4.8",
+    "pagefind": "1.6.0"
+  }
+}

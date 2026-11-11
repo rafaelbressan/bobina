@@ -1,0 +1,66 @@
+---
+// Tickets coming out of a printer: real `bobina preview` PNGs (one, or several on one strip). The paper feeds
+// line by line (CSS steps()) once, when the printer is first seen, or when the cast named in `after` has
+// printed. Without JS, or with reduced motion, the tickets are simply there.
+import type { Ticket } from '../lib/captures';
+
+interface Props {
+  tickets: Ticket[];
+  label: string; // what is printed, for people who do not see it
+  after?: string; // id of a cast (#cast-ID) to wait for
+  caption?: string;
+}
+const { tickets, label, after, caption } = Astro.props;
+const width = Math.max(...tickets.map((t) => t.width));
+const height = tickets.reduce((h, t) => h + t.height + 30, 0);
+const steps = Math.max(8, Math.round(height / 24)); // one step per 24-dot text line, like the printer
+const dur = Math.min(3.2, 0.7 + height / 500).toFixed(2);
+---
+
+<figure class="printer" data-printer data-after={after} style={`--w:${width}px;--steps:${steps};--dur:${dur}s`}>
+  <div class="printer-out">
+    <div class="printer-strip">
+      {
+        tickets.map((t) => (
+          <div class="paper" style={`--w:${t.width + 20}px`}>
+            <img src={t.png} width={t.width} height={t.height} alt={`${label}: ${t.label}`} loading="lazy" decoding="async" />
+          </div>
+        ))
+      }
+    </div>
+  </div>
+  <div class="printer-body" aria-hidden="true"><span>58 mm · 203 dpi</span><span class="printer-led"></span></div>
+  {caption && <figcaption class="note" style="margin-top:.75rem;text-align:center">{caption}</figcaption>}
+</figure>
+
+<script>
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!still && 'IntersectionObserver' in window) {
+    const start = (el: HTMLElement) => {
+      if (el.classList.contains('is-printing')) return;
+      el.classList.add('is-printing');
+    };
+    const seen = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const el = e.target as HTMLElement;
+          seen.unobserve(el);
+          const cast = el.dataset.after && document.getElementById(el.dataset.after);
+          // the cast prints it: wait for its command when it is playing, otherwise print now
+          setTimeout(() => {
+            if (cast && cast.classList.contains('is-playing')) {
+              cast.addEventListener('cast:done', () => start(el), { once: true });
+              setTimeout(() => start(el), 20000); // never leave the paper in the printer
+            } else start(el);
+          }, 150);
+        }
+      },
+      { threshold: 0.2 },
+    );
+    for (const el of document.querySelectorAll<HTMLElement>('[data-printer]')) {
+      el.classList.add('is-armed');
+      seen.observe(el);
+    }
+  }
+</script>

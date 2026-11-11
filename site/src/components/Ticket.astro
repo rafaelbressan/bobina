@@ -1,0 +1,18 @@
+---
+// A ticket at rest: the real `bobina preview` PNG of a file, on paper.
+import type { Ticket } from '../lib/captures';
+
+interface Props {
+  ticket: Ticket;
+  alt: string;
+  caption?: string;
+}
+const { ticket, alt, caption } = Astro.props;
+---
+
+<figure class="ticket">
+  <div class="paper" style={`--w:${ticket.width + 20}px`}>
+    <img src={ticket.png} width={ticket.width} height={ticket.height} alt={alt} loading="lazy" decoding="async" />
+  </div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

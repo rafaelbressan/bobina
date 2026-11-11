@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BINARY = {".png", ".jpg", ".jpeg", ".gif", ".ttf", ".otf", ".whl", ".bin", ".zip"}
+BINARY = {".png", ".jpg", ".jpeg", ".gif", ".ttf", ".otf", ".woff", ".woff2", ".whl", ".bin", ".zip"}
 
 GENERIC = {
     "mac address": re.compile(r"(?<![0-9A-Fa-f:])(?!AA:BB:CC:DD:EE:FF)[0-9A-F]{2}(?::[0-9A-F]{2}){5}(?![0-9A-Fa-f:])"),
