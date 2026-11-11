@@ -170,12 +170,17 @@ def cmd_printer(args):
         if args.path:
             p["path"] = args.path
         p["profile"] = args.profile or profiles.BUILTIN
-        printers[args.name] = p
-        if args.default or not cfg.get("default_printer"):
-            cfg["default_printer"] = args.name
-        config.save(cfg)
+
+        def add(cfg):
+            cfg.setdefault("printers", {})[args.name] = p
+            if args.default or not cfg.get("default_printer"):
+                cfg["default_printer"] = args.name
+
+        config.update(add)
         print(f"added {args.name} → {config.path()}")
-        _, notes = common.machine_locale().get()  # a new machine: its locale is chosen (and said) here too
+        from .. import locales
+
+        _, notes = locales.Machine().get()  # a new machine: its locale is chosen (and said) here too
         if notes and not args.quiet:
             from ..nudges import Nudge
 
@@ -183,15 +188,19 @@ def cmd_printer(args):
                 err(line)
         return OK
     if args.action in ("use", "remove"):
-        if args.name not in printers:
-            raise Fail(USAGE, f"unknown printer '{args.name}' (see: bobina printer list)", problem="E401")
-        if args.action == "use":
-            cfg["default_printer"] = args.name
-        else:
-            del printers[args.name]
-            if cfg.get("default_printer") == args.name:
-                cfg.pop("default_printer")
-        config.save(cfg)
+
+        def change(cfg):
+            printers = cfg.setdefault("printers", {})
+            if args.name not in printers:
+                raise Fail(USAGE, f"unknown printer '{args.name}' (see: bobina printer list)", problem="E401")
+            if args.action == "use":
+                cfg["default_printer"] = args.name
+            else:
+                del printers[args.name]
+                if cfg.get("default_printer") == args.name:
+                    cfg.pop("default_printer")
+
+        config.update(change)
         print(f"{args.action}: {args.name}")
         return OK
     return USAGE
@@ -221,9 +230,7 @@ def cmd_paper(args):
                     problem="E101",
                 )
             if args.remember and args.length:
-                cfg = config.load()
-                cfg["paper_roll"] = args.length
-                config.save(cfg)
+                config.update(lambda cfg: cfg.__setitem__("paper_roll", args.length))
             paper.new_roll(name, mm, note)
             if not args.json:  # --json: the roll as it is now, below
                 print(f"{name}: new roll of {mm / 1000:.1f} m" + (f" ({note})" if note else ""))
@@ -328,6 +335,17 @@ def _calibrated_printer(args, what: str):
     return cfg, name, pr
 
 
+def _keep(name: str, key: str, value) -> None:
+    """Saves one measured value of printer NAME on the config as it is now (config.update)."""
+
+    def change(cfg):
+        if name not in (cfg.get("printers") or {}):  # removed by another command meanwhile
+            raise Fail(USAGE, f"printer '{name}' is no longer in config.toml", problem="E401")
+        cfg["printers"][name][key] = value
+
+    config.update(change)
+
+
 def _strip_printer(args):
     """(cfg, printer dict) for a strip: the configured printer, a bare --printer MAC, or {} (none, a dry run)."""
     cfg = config.load()
@@ -376,7 +394,7 @@ def _calibrate_feed(args):
             _say(args, f"dry run: {name} would be set to blank_rows_after_raster = {str(value).lower()}", **facts)
             return OK
         pr["blank_rows_after_raster"] = value
-        config.save(cfg)
+        _keep(name, "blank_rows_after_raster", value)
         if value:
             _say(args, f"{name}: feeds after images are not obeyed; they keep going as white rows (safe mode)", **facts)
         else:
@@ -435,7 +453,7 @@ def cmd_calibrate(args):
                 _say(args, f"dry run: {name} would be set to tear_mm = {mm:g}", **facts)
                 return OK
             pr["tear_mm"] = mm
-            config.save(cfg)
+            _keep(name, "tear_mm", mm)
             over = common.printer_overrides(pr)
             feed_mm = over["margins.tear_mm"] + over["margins.tear_margin_mm"]
             _say(

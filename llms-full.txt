@@ -996,8 +996,9 @@ One locale writes a job's dates, numbers and money, never mixed (`US$ 24,90` and
 document's `locale:`, else the machine's, `locale` in config.toml (`bobina config locale [TAG]`). The first print,
 check or preview without one infers it from the time zone (country, then the `LANG` language if official there,
 else the country's first: `America/Sao_Paulo` gives `pt-BR`), saves it and says so once (`M203`). No country
-(`Etc/UTC`): English (`en`: 11/5/26, R$24.90) and `M204`, where a typed `1.890` is not read as a price. A script
-bobina cannot draw yet (Thai) prints English words with its country's formats (`en-TH`, `F304`).
+(`Etc/UTC`): the `LC_ALL`, `LC_TIME` or `LANG` locale if it is not English, else English (`en`: 11/5/26, R$24.90,
+`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); an unknown one is `M205`. A
+script bobina cannot draw yet (Thai) prints English words with its country's formats (`en-TH`, `F306`).
 
 Styles `short`, `medium`, `long`, `full` follow the document `locale` (the same line prints "Thursday, November 5,
 2026" in `en-US`). Patterns use CLDR syntax (`dd/MM/yyyy HH:mm`); a pattern containing `%` is strftime, with month
@@ -1146,7 +1147,7 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
-| `F304` | note | no font for the locale's script yet: English words with its country's formats |
+| `F306` | note | no font for the locale's script yet: English words with its country's formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -1199,6 +1200,7 @@ Nudges:
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |
 | `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |
 | `M204` | note | no locale for this machine: dates, numbers and money in English |
+| `M205` | warning | the document's locale: is not a locale bobina knows (the machine's is used) |
 | `M310` | error | templates cannot read files |
 | `M311` | error | unsafe template operation |
 | `M312` | error | a variable cannot choose a file path |

@@ -25,7 +25,7 @@
       "type": ["string", "null"]
     },
     "source": {
-      "enum": ["config", "time zone", "default"]
+      "enum": ["config", "time zone", "environment", "default"]
     },
     "prints_as": {
       "type": "string"

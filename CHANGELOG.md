@@ -11,10 +11,14 @@
   rest of the file kept as it was) and said once (`M203`); it stays when the laptop travels.
 - `bobina config locale [TAG]` shows it (with a date, a number and an amount as they will print) or saves it;
   `--json` (schema `bobina.config/1`).
-- No country in the time zone (`Etc/UTC`, containers): English, said once (`M204`); a typed `1.890` is still not
-  read as a price there. With a locale set, `| currency` reads it in that locale; payments always refuse it.
+- No country in the time zone (`Etc/UTC`, containers): the `LC_ALL`, `LC_TIME` or `LANG` locale when it is not
+  English (saved and said like the time zone's), else English, said once (`M204`).
+- A typed amount that reads two ways (`1.890`) is read as a price only in a document that says its `locale:`;
+  with the machine's locale it is printed as typed with `M202`, and payments refuse it in any locale. An unknown
+  `locale:` in a document is `M205`, with the closest tag bobina knows.
+- `printer add`, `use`, `remove` and `calibrate` change config.toml under its lock, on the file as it is then.
 - A locale whose script bobina cannot draw yet (Thai, Hindi, Japanese, right-to-left scripts) prints English words
-  with its country's formats (th-TH → en-TH, `F304`), until bobina has fonts per script.
+  with its country's formats (th-TH → en-TH, `F306`), until bobina has fonts per script.
 - Removed: money written as the currency's country does (R$ 24,90 in an otherwise English document).
 
 ## 0.1.1 — 2026-11-10

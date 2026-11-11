@@ -566,9 +566,10 @@ def test_the_legend_of_help_pay_says_the_mark_once():
 
 
 def test_a_brl_price_is_read_as_brazilians_type_it():
-    # pt-BR (the document's or the machine's) means thousands; without a locale 1.890 reads two ways: as typed
+    # a document that says pt-BR means thousands; elsewhere (even with the machine's pt-BR) 1.890 is printed as typed
     assert "R$ 1.890,00" in _text(build('---\nlocale: pt-BR\n---\n{{ "1.890" | currency }}\n'))
-    assert "R$ 1.890,00" in _text(build('{{ "1.890" | currency }}\n', locale="pt-BR"))
+    res = build('{{ "1.890" | currency }}\n', locale="pt-BR")
+    assert "1.890" in _text(res) and "M202" in _codes(res)
     res = build('{{ "1.890" | currency }}\n')
     assert "1.890" in _text(res) and "M202" in _codes(res)
     assert "R$1,890.00" in _text(build('{{ "1.890,00" | currency }}\n'))  # two separators: one reading

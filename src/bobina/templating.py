@@ -591,12 +591,12 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         return dt
 
     def two_ways(v, where: str, payment: bool) -> bool:
-        """An amount like 1.890 reads two ways. A payment never takes it; a price takes it when the locale was set
-        (the document's or the machine's: then 1.890 is what that language means), never in the English fallback."""
+        """An amount like 1.890 reads two ways. A payment never takes it; a price takes it only when the document says
+        its locale (the author's intent: 1.890 is what that language means), never by the machine's locale."""
         both = two_readings(v) if (payment or not explicit_locale) else None
         if both:
             msg, hint = ambiguity_message(v, *both)
-            hint += "" if payment else ", or set a locale (then 1.890 means what that language means)"
+            hint += "" if payment else ", or write locale: in the document (then 1.890 means what it means there)"
             nudges.add("M202", f"{msg} ({where}): printed as it is", suggestion=hint)
         return bool(both)
 

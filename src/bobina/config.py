@@ -51,7 +51,7 @@ def _toml_value(v) -> str:
     return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def save(cfg: dict):
+def _write(cfg: dict) -> None:
     lines = ["# bobina configuration (written by bobina; comments are not preserved)"]
     for k, v in cfg.items():
         if not isinstance(v, dict):
@@ -64,7 +64,48 @@ def save(cfg: dict):
     fileio.atomic_write(path(), "\n".join(lines) + "\n")  # a reader never sees half a config
 
 
+def save(cfg: dict) -> None:
+    """Writes CFG as the whole config, under the file's lock. To change a config read earlier, use update():
+    a save of an old copy drops what another bobina saved meanwhile (the locale of a first print)."""
+    with fileio.locked(path()):
+        _write(cfg)
+
+
+def update(change):
+    """change(cfg) on the config as it is now, read and written under the file's lock (printer add, calibrate…):
+    two commands at the same time keep both changes. Returns what change returned."""
+    with fileio.locked(path()):
+        cfg = load()
+        out = change(cfg)
+        _write(cfg)
+        return out
+
+
 TABLE = re.compile(r"^\s*\[\[?[^\[\]]+\]\]?\s*(#.*)?$")  # [printers.mtp], [[x]]
+KEY = re.compile(r"^\s*[A-Za-z0-9_\-\"'.]+\s*=")  # a key = value line
+
+
+def _places(lines: list[str], first_table: int) -> list[tuple[int, bool]]:
+    """Where a new top-level key may go, best first, and whether a blank line must follow it: after the last
+    top-level key (and the lines that continue its value), else before the comment block that opens the first
+    table (never between it and its header)."""
+    keys = [i for i in range(first_table) if KEY.match(lines[i])]
+    out = []
+    if keys:
+        i = keys[-1] + 1
+        while (
+            i < first_table and lines[i].strip() and not lines[i].lstrip().startswith("#") and not KEY.match(lines[i])
+        ):
+            i += 1  # the rest of a value written over several lines
+        out.append((i, False))
+    if first_table == len(lines):  # no table: at the end
+        return [*out, (len(lines), False)]
+    i = first_table
+    while i > 0 and lines[i - 1].lstrip().startswith("#"):
+        i -= 1
+    while i > 0 and not lines[i - 1].strip():
+        i -= 1
+    return [*out, (i, bool(lines[i].strip())), (first_table, True)]
 
 
 def set_value(key: str, value) -> None:
@@ -84,20 +125,20 @@ def set_value(key: str, value) -> None:
         same = re.compile(rf"^\s*{re.escape(key)}\s*=")
         hit = next((i for i in range(first_table) if same.match(lines[i])), None)
         if hit is not None:
-            lines[hit] = line
+            candidates = [[*lines[:hit], line, *lines[hit + 1 :]]]
         else:
-            i = first_table
-            while i > 0 and not lines[i - 1].strip():  # before the blank lines that open the first table
-                i -= 1
-            lines.insert(i, line)
-        new = "\n".join(lines) + "\n"
-        try:
-            ok = tomllib.loads(new).get(key) == value
-        except tomllib.TOMLDecodeError:
-            ok = False
-        if not ok:
-            raise fileio.StateError(f"{p}: could not set {key} without changing the rest; set {line} by hand")
-        fileio.atomic_write(p, new)
+            gap = [""]
+            candidates = [[*lines[:i], line, *(gap if blank else []), *lines[i:]]
+                          for i, blank in _places(lines, first_table)]  # fmt: skip
+        for new_lines in candidates:
+            new = "\n".join(new_lines) + "\n"
+            try:
+                if tomllib.loads(new).get(key) == value:
+                    fileio.atomic_write(p, new)
+                    return
+            except tomllib.TOMLDecodeError:
+                continue
+        raise fileio.StateError(f"{p}: could not set {key} without changing the rest; set {line} by hand")
 
 
 def printer(cfg: dict, name: str | None) -> tuple[str | None, dict | None]:

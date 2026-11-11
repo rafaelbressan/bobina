@@ -22,60 +22,48 @@ def _examples(loc) -> dict:
     }
 
 
-def _state() -> dict:
-    """What documents without locale: use on this machine now, and where it comes from (nothing is written)."""
-    saved = config.load().get("locale")
-    zone = locales.system_zone()
-    if saved and locales.parse(saved):
-        value, source = locales.tag(locales.parse(saved)), "config"
-    elif saved:
-        value, source = None, "default"  # an unknown tag in config.toml: English, as M204 says
-    else:
-        value, source = locales.infer(zone, locales.system_language()[0]), "time zone"
-        source = source if value else "default"
-    loc = locales.parse(value) or locales.parse(locales.FALLBACK)
-    shown = locales.printable(loc)
-    return {"schema": "bobina.config/1", "key": "locale", "value": value, "source": source,
-            "prints_as": locales.tag(shown), "time_zone": zone, "path": str(config.path()),
-            "example": _examples(shown), "_loc": loc, "_saved": saved}  # fmt: skip
-
-
 def cmd_config(args):
-    notes = []
     if args.value is not None:
         loc = locales.parse(args.value)
         if loc is None:
-            hint = "→ a BCP 47 tag: pt-BR, en-US, fr-CA, en-IN"
+            near = locales.closest(args.value)
+            hint = (f"→ did you mean {near}? " if near else "→ ") + "a BCP 47 tag: pt-BR, en-US, fr-CA, en-IN"
             raise Fail(USAGE, f"'{args.value}' is not a locale bobina knows\n{hint}", problem="E304")
         try:
             config.set_value("locale", locales.tag(loc))
         except OSError as e:
             raise Fail(USAGE, f"cannot write {config.path()}: {e.strerror or e}", problem="E209") from None
-    st = _state()
-    loc, saved = st.pop("_loc"), st.pop("_saved")
-    if st["prints_as"] != locales.tag(loc):
-        notes.append(locales.script_note(loc, locales.parse(st["prints_as"]), "config.toml"))
+    found = locales.Machine().peek()  # the same answer a print would act on; nothing written
+    loc = locales.parse(found.value) or locales.parse(locales.FALLBACK)
+    shown = locales.printable(loc)
+    notes = []
+    if shown != loc:
+        notes.append(
+            locales.script_note(loc, shown, found.detail if found.source == "config" else f"from {found.detail}")
+        )
         if args.value is not None:
-            locales.first_time(f"F304 {locales.tag(loc)}")  # said here: the next print does not repeat it
+            locales.first_time(f"{locales.SCRIPT} {found.value}")  # said here: the next print does not repeat it
     from ..nudges import Nudge
 
     problems = [Nudge(c, m, None, h) for c, m, h in notes]
+    st = {"schema": "bobina.config/1", "key": "locale", "value": found.value, "source": found.source,
+          "prints_as": locales.tag(shown), "time_zone": found.zone, "path": str(config.path()),
+          "example": _examples(shown)}  # fmt: skip
     if args.json:
         print_json({**st, "problems": [n.as_dict() for n in problems]}, indent=2, ensure_ascii=False)
         return OK
     ex = " · ".join(st["example"].values())
     if args.value is not None:
-        print(f"locale {st['value']} saved in {st['path']}: {ex}")
-    elif st["source"] == "config":
-        print(f"locale {st['value']} (config.toml): {ex}")
+        print(f"locale {found.value} saved in {st['path']}: {ex}")
+    elif found.source == "config":
+        print(f"locale {found.value} (config.toml): {ex}")
         print("documents with locale: keep theirs · change it: bobina config locale TAG")
-    elif st["source"] == "time zone":
-        print(f"locale not set: the first print, check or preview saves {st['value']} (from the time zone"
-              f" {st['time_zone']}): {ex}")  # fmt: skip
-        print(f"set it now: bobina config locale {st['value']}")
+    elif found.source in ("time zone", "environment"):
+        print(f"locale not set: the first print, check or preview saves {found.value} (from {found.detail}): {ex}")
+        print(f"set it now: bobina config locale {found.value}")
     else:
-        zone = f"no country in the time zone {st['time_zone']}" if st["time_zone"] else "no time zone"
-        why = f"locale = {saved!r} in config.toml is not a locale bobina knows" if saved else zone
+        zone = f"no country in the time zone {found.zone}" if found.zone else "no time zone"
+        why = f"locale = {found.bad!r} in config.toml is not a locale bobina knows" if found.bad else zone
         print(f"{why}: documents without locale: print in English (en): {ex}")
         print("set yours: bobina config locale TAG (pt-BR, en-GB, fr-CA …)")
     if problems and not args.quiet:

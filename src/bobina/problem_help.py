@@ -11,7 +11,7 @@ FIX = {
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
     "F303": "Use a size the printer has natively (small, normal, large, title, huge), or a font size in px (raster).",
-    "F304": (
+    "F306": (
         "Nothing to fix: the dates and numbers are readable, in English with the country's formats (th-TH prints as "
         "en-TH). Another locale: bobina config locale TAG, or locale: in the document."
     ),
@@ -111,8 +111,9 @@ FIX = {
     ),
     "M204": (
         "Set this machine's locale: bobina config locale pt-BR (any BCP 47 tag), or write locale: in the document. "
-        "Without one, a typed 1.890 is not read as a price (M202)."
+        "Only a document's own locale: reads a typed 1.890 as a price; elsewhere it is printed as typed (M202)."
     ),
+    "M205": "Write a BCP 47 tag (pt-BR, en-US, fr-CA); the message suggests the closest one bobina knows.",
     "M201": "Use CLDR date patterns (dd/MM/yyyy HH:mm), not Moment.js (DD/MM/YYYY).",
     "M310": "Templates cannot read files: put the content in the document.",
     "M311": 'A counter format takes exactly one {:spec} ("{:d}", "A-{:03}"); other unsafe operations are refused.',
