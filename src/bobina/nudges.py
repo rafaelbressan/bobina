@@ -80,6 +80,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     # P printer
     "P101": ("warning", "the paper roll is almost over (estimate)", ""),
     "P102": ("warning", "the print is longer than the paper left on the roll (estimate)", ""),
+    "P103": ("warning", "the roll is not as wide as this printer's paper (recorded anyway)", ""),
     "P301": ("note", "this job uses a feature not tested on paper yet", ""),
     "P302": ("note", "a payment code nobody has scanned with its app yet", ""),
     "P201": ("warning", "raw bytes bypass every check and are not previewed", ""),

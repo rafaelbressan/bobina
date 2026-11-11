@@ -473,6 +473,7 @@ Nudges:
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
+| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |

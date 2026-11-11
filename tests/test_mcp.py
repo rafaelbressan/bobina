@@ -221,6 +221,42 @@ def test_paper_new_needs_the_length_with_its_unit(file_printer):
     assert not r.is_error and "exit 0" in texts(r)[0]
     r = call("paper")
     assert not r.is_error and "30" in "\n".join(texts(r))
+    r = call("paper_new", {})  # no size: the agent asks, never a usual roll
+    assert r.is_error and "ask the user" in texts(r)[0]
+    assert output(call("paper_new", {"length": "50ft"}))["roll_mm"] == 15240
+
+
+@needs_mcp
+def test_paper_new_a_package_code_is_a_question_for_the_user(file_printer):
+    for code in ("57x30", "80 x 40"):
+        msg = texts(call("paper_new", {"length": code}))[0]
+        assert "Ask the user one question" in msg and "metres" in msg and "diameter in mm" in msg
+    msg = texts(call("paper_new", {"length": "2 1/4\" x 50'"}))[0]  # units on both: split, nothing to ask
+    assert 'length "50ft", width "2 1/4in"' in msg
+
+
+@needs_mcp
+def test_paper_new_from_the_diameter_and_a_width_that_does_not_fit(file_printer):
+    r = call("paper_new", {"diameter": "40mm", "core": "12mm", "width": "57mm"})
+    assert not r.is_error and "--diameter=40mm --core=12mm --width=57mm" in texts(r)[0]
+    assert 18_000 < output(r)["roll_mm"] < 20_000 and "P103" not in "\n".join(texts(r))
+    r = call("paper_new", {"length": "40m", "width": "80mm"})  # recorded, with a warning
+    assert not r.is_error and output(r)["roll_mm"] == 40000
+    assert [p["code"] for p in output(r)["problems"]] == ["P103"]
+    for bad in ({"length": "30m", "diameter": "40mm"}, {"length": "30m", "core": "12mm"}, {"diameter": "40"},
+                {"length": "0m"}):  # fmt: skip
+        assert call("paper_new", bad).is_error
+
+
+@needs_mcp
+def test_paper_new_uses_the_servers_profile_allow_and_strict(file_printer):
+    """P103 judged as prints are: bobina mcp --profile, --allow and --strict."""
+    r = call("paper_new", {"length": "40m", "width": "80mm"}, profile="epson-tm-t70-sa")  # an 80 mm printer
+    assert "--profile=epson-tm-t70-sa" in texts(r)[0] and "problems" not in output(r)
+    r = call("paper_new", {"length": "40m", "width": "80mm"}, allow=["P103"])
+    assert not r.is_error and "problems" not in output(r)
+    r = call("paper_new", {"length": "20m", "width": "80mm"}, strict=True)  # stopped: the roll is not recorded
+    assert r.is_error and "exit 3" in texts(r)[0] and output(r)["roll_mm"] == 40000
 
 
 @needs_mcp

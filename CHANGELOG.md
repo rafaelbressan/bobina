@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Rolls as they are described around the world. `bobina paper new` takes feet (`50ft`, `50'`) and `--width` (`57mm`,
+  `2 1/4in`): a roll that is not as wide as the printer's paper (80 mm on a 58 mm printer) is recorded with the
+  warning `P103`. A package code (`57x30`) is refused with its question: 30 metres (as sold in Brazil) or a 30 mm
+  diameter (European catalogues)? The MCP tool paper_new takes the same length, or the roll's `diameter` (and
+  `core`), and `width`; with a package code it tells the agent to ask the user that question.
+
 ## 0.1.1 — 2026-11-10
 
 - `bobina mcp`: a Model Context Protocol server (stdio) for agents, with the extra `bobina[mcp]`. Its tools

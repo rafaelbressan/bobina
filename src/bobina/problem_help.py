@@ -76,6 +76,8 @@ FIX = {
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
     "P102": "Load a new roll first (bobina paper new LENGTH), or print fewer labels.",
+    "P103": "This roll is for another printer: load one as wide as the profile's paper (57 and 58 mm are the same"
+    " rolls), or record it for the printer it fits (--printer).",
     "P301": "The bytes follow the ESC/POS spec but nobody has seen them on paper: look at the result (docs/TESTED.md).",
     "P302": "Scan a printed code with the real app before customers use it, and tell us (docs/TESTED.md).",
     "P201": "Raw bytes are sent as they are: make sure they are meant for this printer.",

@@ -8,20 +8,99 @@ from __future__ import annotations
 
 import math
 import re
+import shlex
 import time
 
 from . import fileio, paths
 
-UNIT = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*$")
+MM = {"mm": 1, "cm": 10, "m": 1000, "metre": 1000, "metres": 1000, "meter": 1000, "meters": 1000,
+      "ft": 304.8, "feet": 304.8, "foot": 304.8, "'": 304.8, "’": 304.8, "′": 304.8,
+      "in": 25.4, "inch": 25.4, "inches": 25.4, '"': 25.4, "”": 25.4, "″": 25.4}  # fmt: skip
+CANON = {"'": "ft", "’": "ft", "′": "ft", "feet": "ft", "foot": "ft", '"': "in", "”": "in", "″": "in", "inch": "in",
+         "inches": "in", "metre": "m", "metres": "m", "meter": "m", "meters": "m"}  # fmt: skip
+NUMBER = r"\d+[\s-]+\d+/\d+|\d+/\d+|\d+(?:[.,]\d+)?"  # 15, 1,5, 2 1/4, 2-1/4, 1/2
+_UNIT = "|".join(re.escape(u) for u in sorted(MM, key=len, reverse=True))
+UNIT = re.compile(rf"^\s*({NUMBER})\s*({_UNIT})?\s*$", re.I)
+_PART = rf"({NUMBER})\s*({_UNIT})?"
+CODE = re.compile(rf"^\s*{_PART}\s*[x×*]\s*{_PART}(?:\s*[x×*]\s*{_PART})?\s*$", re.I)  # 57x30, 2 1/4" x 50'
+FIT_MM = 3  # 57 mm rolls are sold for 58 mm printers, 3 1/8" (79.4 mm) ones for 80 mm
 
 
-def parse_length(s: str, default_unit: str = "m") -> float:
-    """'15m', '1500cm', '40mm', '15' (meters) -> millimetres."""
+def _number(s: str) -> float:
+    s = s.replace("-", " ").strip()
+    if "/" not in s:
+        return float(s.replace(",", "."))
+    whole, _, frac = s.rpartition(" ")
+    num, den = frac.split("/")
+    if int(den) == 0:
+        raise ValueError(f"'{s}': a fraction over 0")
+    return float(whole or 0) + int(num) / int(den)
+
+
+def parse_length(s: str, default_unit: str | None = "m", zero: bool = False) -> float:
+    """'15m', '1500cm', '40mm', '50ft', "50'", '2 1/4in', '15' (default_unit; None: a unit is required) -> mm.
+    More than 0 (zero=True: 0 too, a total used). A package code (57x30) is not one length: paper new explains it
+    (code_advice); every other command only refuses it."""
     m = UNIT.match(str(s))
+    unit = (m.group(2) or default_unit or "").lower() if m else ""
+    if not unit:
+        if CODE.match(str(s)):
+            raise ValueError(f"'{s}' is several numbers (a package code?): give one length with its unit (30m, 40mm)")
+        raise ValueError(f"length '{s}': use 15m, 1500cm, 40mm or 50ft")
+    mm = _number(m.group(1)) * MM[unit]
+    if mm < 0 or (mm == 0 and not zero):
+        raise ValueError(f"length '{s}': more than 0")
+    return mm
+
+
+def parse_width(s: str) -> float:
+    """The paper width of a roll: '57mm', '80', '2 1/4in', '3 1/8"' -> mm (a bare number is mm)."""
+    mm = parse_length(s, "mm")
+    if not 10 <= mm <= 300:
+        raise ValueError(f"width '{s}': a roll is 10 to 300 mm wide (57mm, 80mm, 2 1/4in)")
+    return mm
+
+
+def fits(width_mm: float, paper_mm: float) -> bool:
+    return abs(width_mm - paper_mm) <= FIT_MM
+
+
+def code_advice(s: str, cli: bool = False) -> str | None:
+    """What to do with a package code given as one length, or None. A number with its unit is decided (m, cm, ft:
+    the length; mm, in: the diameter, then the core); only a second number without a unit is asked about, never
+    guessed: in Brazil "57x30" is 30 metres, in European catalogues a 30 mm diameter (57 x 40 x 12: and a 12 mm
+    core); in the US "2 1/4 x 50" is 50 feet. cli: the bobina paper new command; otherwise the arguments of the MCP
+    tool paper_new."""
+    m = CODE.match(str(s))
     if not m:
-        raise ValueError(f"length '{s}': use 15m, 1500cm or 40mm")
-    v = float(m.group(1).replace(",", "."))
-    return v * {"mm": 1, "cm": 10, "m": 1000}[m.group(2) or default_unit]
+        return None
+    w, d, core = (n.strip() if n else "" for n in m.groups()[0::2])
+    wu, du, cu = (CANON.get(u.lower(), u.lower()) if u else "" for u in m.groups()[1::2])
+    inch = wu == "in" or (not wu and ("/" in w or _number(w) < 10))
+    width = w + (wu or ("in" if inch else "mm"))
+
+    def call(length="", diameter=""):
+        core_ = f"{core}{cu or ('in' if du == 'in' else 'mm')}" if core and diameter else ""
+        if cli:
+            q = shlex.quote
+            what = q(length) if length else f"--diameter {q(diameter)}" + (f" --core {q(core_)}" if core_ else "")
+            return f"bobina paper new {what} --width {q(width)}"
+        given = [("length", length), ("diameter", diameter), ("core", core_), ("width", width)]
+        return ", ".join(f'{k} "{v}"' for k, v in given if v)
+
+    if du:  # the second number says what it is: nothing to ask
+        split = call(length=d + du) if du in ("cm", "m", "ft") else call(diameter=d + du)
+        return f"'{s}' is a package code: {'run' if cli else 'give its parts as'} {split}"
+    if inch:  # the US: inches x feet (a diameter is not given that way)
+        ask = "Is" if cli else "never guess it. Ask the user: is"
+        return f"'{s}' is a package code: {ask} {d} the roll's length in feet? (then {call(length=d + 'ft')})"
+    as_length, as_diameter = call(length=d + "m"), call(diameter=d + "mm")
+    if cli:
+        return f"'{s}' is a package code: is {d} the roll's length in metres ({as_length}) or its outer diameter" \
+               f" in mm ({as_diameter})?"  # fmt: skip
+    return f"'{s}' is a package code, not a length: never guess it. Ask the user one question: is {d} the roll's" \
+           f" length in metres, as rolls are sold in Brazil (then {as_length}), or its outer diameter in mm, as in" \
+           f" European catalogues (then {as_diameter})?"  # fmt: skip
 
 
 def from_diameter(outer_mm: float, core_mm: float = 12.0, thickness_mm: float = 0.06) -> float:
@@ -41,7 +120,7 @@ def get(printer: str) -> dict | None:
     return _load().get(printer)
 
 
-def new_roll(printer: str, roll_mm: float, note: str = ""):
+def new_roll(printer: str, roll_mm: float, note: str = "", width_mm: float | None = None):
     def put(d):
         d[printer] = {
             "roll_mm": round(roll_mm, 1),
@@ -49,6 +128,7 @@ def new_roll(printer: str, roll_mm: float, note: str = ""):
             "prints": 0,
             "loaded": time.strftime("%Y-%m-%d %H:%M"),
             "note": note,
+            **({"width_mm": round(width_mm, 1)} if width_mm else {}),
         }
 
     fileio.locked_update(_path(), put)
@@ -82,7 +162,7 @@ def check(printer: str, job_mm: float, nudges) -> str:
         r = get(printer)
     except fileio.StateError as e:
         return f" paper: not counted ({e})"
-    if not r:
+    if not r or not r.get("roll_mm"):  # 0: a damaged or hand-edited roll, not a division by zero
         return " paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)"
     left = r["roll_mm"] - r.get("used_mm", 0.0)
     after = left - job_mm
