@@ -200,6 +200,7 @@ class Tok:
     space: bool = False
     brk: bool = False
     tracking: int = 0
+    glue: bool = False  # part of the word before it (another script, another font): never a line break before it
 
     @property
     def font(self):
@@ -258,25 +259,87 @@ def checkbox(px: int, done: bool) -> Image.Image:
     return im
 
 
+# Scripts written without spaces between words: a line may break between any two letters (clusters)
+UNSPACED = {"Hani", "Hira", "Kana", "Bopo", "Thai", "Laoo", "Khmr", "Mymr", "Tibt"}
+PREPOSED = set("\u0e40\u0e41\u0e42\u0e43\u0e44\u0ec0\u0ec1\u0ec2\u0ec3\u0ec4")  # Thai, Lao: before their consonant
+
+
+def _unspaced(text: str) -> bool:
+    from .scriptfonts import script_of
+
+    return any(script_of(c) in UNSPACED for c in text)
+
+
+def _breaks(text: str) -> list[int]:
+    """Offsets where a line may break inside `text`: before a letter, never before a combining mark, after a
+    virama (conjunct) or after a vowel written before its consonant."""
+    import unicodedata
+
+    out = []
+    for i in range(1, len(text)):
+        a, b = text[i - 1], text[i]
+        if unicodedata.category(b).startswith("M") or b in "\u200c\u200d" or a in "\u200c\u200d":
+            continue
+        if unicodedata.combining(a) == 9 or a in PREPOSED:
+            continue
+        out.append(i)
+    return out
+
+
+def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
+    """The longest head of `t` that fits in `room` dots (at a break), and the rest."""
+    import dataclasses
+
+    best = None
+    for i in _breaks(t.text):
+        head = dataclasses.replace(t, text=t.text[:i])
+        if head.width() > room:
+            break
+        best = i
+    if best is None:
+        return None, t
+    return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
+
+
 def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
-    lines, cur, cw, avail = [], [], 0, width
+    units: list[list[Tok]] = []  # words: a token and the glued parts after it
     for t in toks:
+        if t.glue and units and not units[-1][0].brk and not units[-1][-1].space:
+            units[-1].append(t)
+        else:
+            units.append([t])
+    lines, cur, cw, avail = [], [], 0, width
+    units.reverse()
+    while units:
+        u = units.pop()
+        t = u[0]
         if t.brk:
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
             continue
-        tw = t.width()
+        tw = sum(x.width() for x in u)
         if t.space:
             if cur:
                 cur.append(t)
                 cw += tw
             continue
+        if cw + tw > avail and len(u) == 1 and _unspaced(t.text):  # Chinese, Thai: fill the line, then go on
+            head, rest = _split(t, avail - cw)
+            if head is not None or cur:
+                if head is not None:
+                    cur.append(head)
+                while cur and cur[-1].space:
+                    cur.pop()
+                lines.append(cur)
+                cur, cw, avail = [], 0, width - hang
+                units.append([rest])
+                continue
         if cur and cw + tw > avail:
             while cur and cur[-1].space:
                 cw -= cur.pop().width()
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
-        cur.append(t)
+        cur.extend(u)
         cw += tw
     while cur and cur[-1].space:
         cur.pop()
@@ -284,13 +347,51 @@ def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
     return lines
 
 
+def visual_order(line: list[Tok], rtl: bool) -> list[Tok]:
+    """Tokens of one line in the order they are drawn, left to right (Unicode bidi, simplified to whole tokens:
+    each token is drawn by raqm, which orders the letters inside it). Digits and punctuation take the direction
+    of the tokens around them when both agree, else the paragraph's."""
+    from .scriptfonts import direction
+
+    base = "R" if rtl else "L"
+    dirs = [direction(t.text) for t in line]
+    if "R" not in dirs:
+        return line
+    res = []
+    for i, d in enumerate(dirs):
+        if not d:
+            before = next((x for x in reversed(dirs[:i]) if x), base)
+            after = next((x for x in dirs[i + 1 :] if x), base)
+            d = before if before == after else base
+        res.append(d)
+    runs: list[list] = []
+    for t, d in zip(line, res, strict=True):
+        if runs and runs[-1][0] == d:
+            runs[-1][1].append(t)
+        else:
+            runs.append([d, [t]])
+    for r in runs:
+        if r[0] == "R":
+            r[1].reverse()
+    if rtl:
+        runs.reverse()
+    return [t for _, ts in runs for t in ts]
+
+
 def render_block(
-    toks: list[Tok], width: int, align: str, leading: int, prefix: Image.Image | None, indent: int = 0
+    toks: list[Tok],
+    width: int,
+    align: str,
+    leading: int,
+    prefix: Image.Image | None,
+    indent: int = 0,
+    rtl: bool = False,
 ) -> tuple[Image.Image, list[str]]:
     pw = prefix.width if prefix else 0
     lines = layout_lines(toks, width - indent - pw, 0)
     imgs, texts = [], []
-    for i, ln in enumerate(lines):
+    for i, logical in enumerate(lines):
+        ln = visual_order(logical, rtl)
         ascent = max([t.font.getmetrics()[0] for t in ln] or [toks[0].font.getmetrics()[0] if toks else 16])
         descent = max([t.font.getmetrics()[1] for t in ln] or [4])
         h = ascent + descent + leading
@@ -311,7 +412,7 @@ def render_block(
             row.paste(p, (int(x), 0))
             x += p.width + extra.get(k, 0)
         imgs.append(row)
-        texts.append("".join(t.text for t in ln))
+        texts.append("".join(t.text for t in logical))
     out = Image.new("L", (width, sum(i.height for i in imgs)), 255)
     y = 0
     for im in imgs:

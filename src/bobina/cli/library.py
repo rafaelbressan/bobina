@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .. import engine
 from .. import profile as profiles
-from .common import OK, USAGE, Fail, print_json
+from .common import OK, UNREACHABLE, USAGE, Fail, err, print_json
 
 
 def cmd_profile(args):
@@ -194,6 +194,13 @@ def font_test_doc(family: str) -> str:
 def cmd_fonts(args):
     from .. import rasterfont
 
+    names = list(getattr(args, "names", None) or [])
+    args.family = names[0] if names else None
+    args.px = names[1] if len(names) > 1 else None
+    if args.action == "scripts":
+        return fonts_scripts(args)
+    if args.action == "get":
+        return fonts_get(args, names)
     if args.action == "test":
         if not args.family:
             raise Fail(USAGE, 'usage: bobina fonts test "FAMILY"', problem="E101")
@@ -224,6 +231,97 @@ def cmd_fonts(args):
     print('\nuntested fonts: bobina measures the stem (≥ 2 dots); test one: bobina fonts test "FAMILY"')
     print("evidence: docs/printers/mtp-ii-58.md (tests F1, F2, R5)")
     return OK
+
+
+def _pack_status(sf, p, auto: bool) -> str:
+    if all(sf._bundled_draws(s) for s in p.scripts):  # Arabic, Hebrew…: only for a letter DejaVu Sans lacks
+        return "if a letter is missing" if auto else "not downloaded"
+    return "on first use" if auto else "not downloaded"
+
+
+def fonts_scripts(args):
+    """The fonts bobina downloads for other scripts: size, license, whether they are here."""
+    from .. import scriptfonts as sf
+
+    auto = sf.downloads_on()
+    rows = []
+    for p in sf.PACKS.values():
+        here = sf.installed(p)
+        rows.append(
+            {
+                "name": p.id,
+                "font": p.family,
+                "scripts": [sf.script_name(s) for s in p.scripts],
+                "bytes": p.size,
+                "license": sf.LICENSE,
+                "source": p.url,
+                "status": "downloaded" if here else _pack_status(sf, p, auto),
+                "path": str(here or sf.pack_dir(p) / p.file),
+            }
+        )
+    if args.json:
+        print_json(rows, indent=2, ensure_ascii=False)
+        return OK
+    print(f"{'NAME':21s}{'FONT':22s}{'SIZE':9s}STATUS")
+    for r in rows:
+        print(f"{r['name']:21s}{r['font']:22s}{sf.human_size(r['bytes']):9s}{r['status']}")
+    print("\nLatin, Greek, Cyrillic, Armenian, Georgian, Hebrew, Arabic, Lao: the bundled fonts draw them.")
+    print(f"The others are downloaded the first time a document needs them ({sf.LICENSE}, github.com/notofonts),")
+    print(f"kept in {sf.fonts_dir()} and used offline from then on.")
+    if auto:
+        print("Get them now: bobina fonts get NAME (or a document); never download: font_downloads = false")
+    else:
+        print("Automatic downloads are off (font_downloads = false); bobina fonts get NAME still downloads.")
+    return OK
+
+
+def fonts_get(args, names: list[str]):
+    """Downloads fonts now (they work offline after): by name, script, language, or what a document needs."""
+    from .. import scriptfonts as sf
+
+    if not names:
+        raise Fail(USAGE, "usage: bobina fonts get NAME|LANGUAGE|DOCUMENT … (bobina fonts scripts lists them)",
+                   problem="E101")  # fmt: skip
+    wanted, unknown = [], []
+    for n in names:
+        path = Path(n).expanduser()
+        if path.is_file():
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                raise Fail(USAGE, f"{n}: {e.strerror or e}", problem="E201") from None
+            wanted += sf.packs_needed(text)
+            continue
+        found, bad = sf.resolve_names([n])
+        wanted += found
+        unknown += bad
+    if unknown:
+        raise Fail(
+            USAGE,
+            f"no font to download for {', '.join(unknown)}\n→ bobina fonts scripts lists the names (thai, chinese…);"
+            " a language (hi, ja) or a document works too",
+            problem="E207",
+        )
+    wanted = list(dict.fromkeys(wanted))
+    results, failed = [], 0
+    for p in wanted:
+        had = sf.installed(p) is not None
+        try:
+            f = sf.download(p)
+        except sf.FontDownloadError as e:
+            failed += 1
+            results.append({"name": p.id, "font": p.family, "status": "failed", "error": str(e)})
+            if not args.json:
+                err(f"✗ {p.family}: {e}")
+            continue
+        results.append({"name": p.id, "font": p.family, "status": "present" if had else "downloaded", "path": str(f)})
+        if not args.json:
+            print(f"{p.family}: {'already here' if had else 'downloaded'} ({f.parent})")
+    if args.json:
+        print_json(results, indent=2, ensure_ascii=False)
+    elif not wanted:
+        print("nothing to download: the bundled fonts draw every letter")
+    return UNREACHABLE if failed else OK
 
 
 def cmd_library(args):
