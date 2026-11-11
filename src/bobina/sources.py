@@ -290,12 +290,12 @@ def render_svg(data: bytes, width: int):
         import resvg_py
     except ImportError:
         raise ImageError("I105", "SVG support is not installed", "pip install 'bobina[svg]'") from None
-    try:
-        png = resvg_py.svg_to_bytes(svg_string=clean_svg(data), width=width, background="white")
+    try:  # fitted into width x MAX_RENDER_DOTS: a tall SVG is never drawn at full size (gigabytes) to be refused
+        png = resvg_py.svg_to_bytes(svg_string=clean_svg(data), width=width, height=MAX_RENDER_DOTS, background="white")
     except Exception as e:  # noqa: BLE001 - resvg reports parse errors as generic exceptions
         raise ImageError("I101", f"SVG: {str(e)[:80]}") from None
     im = Image.open(io.BytesIO(bytes(png)))
-    if im.height > MAX_RENDER_DOTS:
+    if im.width < width:  # the height limit set the scale: at the paper width it would be taller
         raise ImageError("I101", f"SVG renders taller than {MAX_RENDER_DOTS} dots")
     return im
 

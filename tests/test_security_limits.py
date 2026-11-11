@@ -229,3 +229,34 @@ def test_image_files_over_the_limit_and_folders_are_refused(tmp_path, monkeypatc
     for src in ("big.png", "."):
         with pytest.raises(sources.ImageError):
             sources.load(src, str(tmp_path))
+
+
+# -- SVG and PDF: never rendered taller than MAX_RENDER_DOTS, even on the way to a refusal -----------------
+
+
+def tall_svg(height: int) -> bytes:
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 {height}" width="1" height="{height}">'
+        f'<rect width="1" height="{height}"/></svg>'
+    ).encode()
+
+
+@pytest.mark.parametrize("height", [21, 5000, 10_000_000])  # 384 x 1.9 M dots: 5.8 GB of pixels before
+def test_a_tall_svg_is_refused_without_being_drawn(height):
+    start = time.monotonic()
+    with pytest.raises(sources.ImageError, match="taller than"):
+        sources.render_svg(tall_svg(height), 384)
+    assert time.monotonic() - start < 5
+
+
+def test_an_svg_at_the_height_limit_still_renders():
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="48" height="1000"><rect width="48" height="1000"/></svg>'
+    assert sources.render_svg(svg, 384).size == (384, 8000)
+
+
+def test_a_tall_pdf_page_is_refused_before_it_is_rendered(tmp_path):
+    from PIL import Image
+
+    Image.new("L", (10, 10_000), 0).save(tmp_path / "tall.pdf")  # 10 x 10 000 pt: 384 000 dots at 384 wide
+    with pytest.raises(sources.ImageError, match="taller than"):
+        sources.render_pdf((tmp_path / "tall.pdf").read_bytes(), 384)
