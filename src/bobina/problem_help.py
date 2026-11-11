@@ -11,6 +11,14 @@ FIX = {
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
     "F303": "Use a size the printer has natively (small, normal, large, title, huge), or a font size in px (raster).",
+    "F304": (
+        "Nothing to fix: the font is kept and used offline from now on (bobina fonts scripts). To never download: "
+        "font_downloads = false in config.toml."
+    ),
+    "F305": (
+        "Get the font once, with the network: bobina fonts get NAME (the message names it; a document works too: "
+        "bobina fonts get menu.bob.md). Then it prints offline."
+    ),
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
     "F203": "Check the font name (bobina fonts list); install the font or use a bundled one.",

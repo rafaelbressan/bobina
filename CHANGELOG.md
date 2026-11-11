@@ -7,6 +7,13 @@
   warning `P103`. A package code (`57x30`) is refused with its question: 30 metres (as sold in Brazil) or a 30 mm
   diameter (European catalogues)? The MCP tool paper_new takes the same length, or the roll's `diameter` (and
   `core`), and `width`; with a package code it tells the agent to ask the user that question.
+- Thai, Devanagari and the other Indic scripts, Khmer, Myanmar, Ethiopic, Chinese, Japanese and Korean print as
+  letters, not boxes: the first time a document needs one, bobina downloads its Noto font (38 KB for Thai, 4.5
+  to 8.3 MB for CJK), says so before it starts (font, license, size, source; `F304` in the problems) and keeps it
+  for offline use. Every file is pinned (URL, size, sha256). Without network, or with `font_downloads = false`,
+  the line prints with boxes and `F305` says how to get the font: `bobina fonts get thai` (or `hi`, or a
+  document); `bobina fonts scripts` lists them. Lines in these scripts and in Arabic or Hebrew are drawn whole
+  (joined, stacked, right to left; Chinese and Thai wrap between letters), no longer letter by letter.
 
 ## 0.1.1 — 2026-11-10
 

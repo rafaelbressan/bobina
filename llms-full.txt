@@ -209,7 +209,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `status` | paper / cover / error / language mode; `--list` explains every state | `s` |
 | `mode [esc \| tspl \| cpcl]` | show or switch the printer command language | `m` |
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
-| `fonts list \| test \| mark` | recommended fonts and the font test registry | — |
+| `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
 | `profile list \| show \| use` | printer profiles | — |
@@ -578,7 +578,8 @@ Two terminals, a script and the tower over ssh may run bobina at once. Its own f
   a `command` printer have `timeout` (printer entry, default 120 s), `bluetoothctl` calls are bounded. stdin takes
   up to 10 MB (a document), `bobina send -` up to 64 MB.
 - **Servers, bots, cron: `BOBINA_NONINTERACTIVE=1`.** bobina never asks on the terminal: `--ask` and the
-  confirmation stop at once with `E107` (pass `--yes` and `--set`). Also give the target explicitly and start
+  confirmation stop at once with `E107` (pass `--yes` and `--set`); the notice before a font download is the
+  note `F304` in the problems, never a terminal line. Also give the target explicitly and start
   bobina with stdin closed (`stdin=DEVNULL`): with no target, bobina reads a document from stdin.
 - **One process per job.** bobina keeps some settings per process (problem format, Pillow's image size limit,
   caches), so call it as a command, not as a library from several threads. A server runs one `bobina`
@@ -628,7 +629,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 | 1 | usage error |
 | 2 | document error (parse) |
 | 3 | nudges with `--strict` |
-| 4 | printer unreachable / Bluetooth |
+| 4 | printer unreachable / Bluetooth; `fonts get` could not download |
 | 5 | printer error state (no paper, cover open) |
 | 6 | printer language mismatch (e.g. printer in TSPL, document needs ESC/POS) |
 | 7 | confirmation required (no terminal and no `--yes`) or declined |
@@ -642,6 +643,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 - Config: `~/.config/bobina/config.toml` (default profile, printers, editor, preferences).
 - Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
+- Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `font_downloads = false` in config.toml (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 
 ## Decided
 
@@ -810,6 +812,13 @@ Quality nudges, from the printed tests of the profile:
 - inverted raster text thinner than bold 20 px → `F204`;
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
+
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
+downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
+OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
+`font_downloads = false` in config.toml: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
+follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
+Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
@@ -1138,6 +1147,8 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |
+| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -1566,6 +1577,7 @@ with vendor commands), paper and battery, counters, and the history of the last 
 | Malformed codes | barcode 1–250 printable ASCII; QR overflow; Pix key ≤ 77 chars, numeric amount, TLV ≤ 99 → nudge `Q109`, no crash | `test_oversized_or_invalid_codes_*` |
 | Counter format strings | only one `{:spec}` allowed (`FMT_RE`), no attribute access | — |
 | Font lookups | `fc-match` without a shell; the result must match the requested family | — |
+| Fonts for other scripts (Thai, CJK…) | a document can make bobina download one, once: only the files pinned in `scriptfonts.py` (https at a fixed notofonts / Google Fonts commit, exact size and sha256, no redirects, 12 MB), written atomically; a file that does not match is thrown away. Reveals to GitHub that some text needs that script; `font_downloads = false` turns it off (`F305`, boxes) | `test_scriptfonts.py` |
 
 Raw blocks written by the **author** are allowed by design (escape hatch): they always raise `P201`
 in the confirmation screen and are never previewed. A shared document with a `raw` block can switch

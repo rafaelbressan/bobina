@@ -7,7 +7,7 @@ import unicodedata
 
 from PIL import Image, ImageOps
 
-from . import imaging, rasterfont, sources
+from . import imaging, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
 from .model import Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
@@ -78,6 +78,8 @@ class Layout:
         fonts = meta.get("fonts") or {}
         self.fonts = {**rasterfont.DEFAULT_ROLES, **(fonts if isinstance(fonts, dict) else {})}
         self._judged: set = set()
+        lang = str(meta.get("locale") or meta.get("lang") or "")
+        self.scripts = scriptfonts.Resolver(nudges, lang)  # fonts for other scripts, downloaded once
 
     # ------------------------------------------------------------ helpers
     def text(self, s: str) -> str:
@@ -211,6 +213,23 @@ class Layout:
                 return f"glyph {c.ch}"
         return ""
 
+    def drawn_whole(self, runs) -> str:
+        """The first letter that makes a native block go raster as a whole ('' for none): one the printer lacks
+        and that cannot be drawn cell by cell (a script that shapes or runs right to left), or that only a
+        script font has (Chinese on a printer without it)."""
+        decided: dict[str, tuple[bool, bool]] = {}  # script -> (shapes, a script font draws it): once per script
+        for r in runs:
+            for ch in self.text(r.text):
+                if ch.isspace() or self.p.native_glyph(ch) or ch in CHECKBOX:
+                    continue
+                s = scriptfonts.script_of(ch)
+                if s not in decided:
+                    decided[s] = (s not in scriptfonts.SIMPLE, bool(scriptfonts.packs_for(s)))
+                shapes, has_font = decided[s]
+                if shapes or (has_font and not self.em.has_glyph(ch)):
+                    return ch
+        return ""
+
     def attr_dots(self, attrs, key: str, line: int, hi: int) -> int | None:
         """`key=N` (dots), `Npx` or `Nmm` -> dots, or None when absent/invalid (M101)."""
         v = attrs.kv.get(key)
@@ -258,6 +277,47 @@ class Layout:
             rasterfont.judge(family, ref, px, bold, self.n, line)
         return ref.path
 
+    def script_parts(self, piece: str, path: str, fallback: str, line, context: str) -> list[tuple[str, str]]:
+        """A word the block's font cannot draw -> [(text, font file)]: the block's font, the bundled fallback,
+        else the font for that script (downloaded once, scriptfonts). Mixed text (Olá(สวัสดี)) picks per run;
+        digits and punctuation the script font lacks come from the block's font."""
+        fb = rasterfont.cmap(fallback)
+        if all(ord(ch) in fb for ch in piece if not ch.isspace()):
+            return [(piece, fallback)]
+        parts: list[tuple[str, str]] = []
+
+        def add(txt: str, pth: str):
+            if parts and parts[-1][1] == pth:
+                parts[-1] = (parts[-1][0] + txt, pth)
+            else:
+                parts.append((txt, pth))
+
+        for script, txt in scriptfonts.split_runs(piece):
+            own = next((f for f in (path, fallback) if scriptfonts.covers(f, txt)), None)
+            if own is not None:
+                add(txt, own)
+                continue
+            pth = None if script in scriptfonts.NEUTRAL else self.scripts.path(script, txt, line, context)
+            told = pth is None and bool(scriptfonts.packs_for(script))  # F305 said why: no F302 on top of it
+            miss = []
+            for ch in txt:
+                if parts and unicodedata.category(ch).startswith("M"):  # a mark stays with its letter
+                    add(ch, parts[-1][1])
+                    continue
+                f = next((f for f in (pth, path, fallback) if f and scriptfonts.covers(f, ch)), None)
+                if f is None:
+                    f = pth or fallback
+                    miss.append(ch)
+                add(ch, f)
+            if miss and not told:
+                self.n.add(
+                    "F302",
+                    f"glyph(s) {''.join(dict.fromkeys(miss))} missing in every font",
+                    line,
+                    self.scripts.hints.get(script, ""),
+                )
+        return parts
+
     def raster_block(
         self,
         runs,
@@ -276,6 +336,7 @@ class Layout:
     ) -> list:
         toks: list = []
         fallback = rasterfont.resolve("DejaVu Sans").path
+        context = "".join(r.text for r in runs)  # Han next to kana is Japanese (scriptfonts.packs_for)
         for r in runs:
             if r.text == "\n":
                 toks.append(rasterfont.Tok("", fallback, px, brk=True))
@@ -294,44 +355,60 @@ class Layout:
                     toks.append(rasterfont.Tok("", path, rpx, brk=True))
                     continue
                 cm = rasterfont.cmap(path)
-                pth = path
+                parts = [(piece, path)]
                 if cm and any(ord(ch) not in cm for ch in piece if not ch.isspace()):
-                    pth = fallback
-                    miss = [ch for ch in piece if ord(ch) not in rasterfont.cmap(fallback) and not ch.isspace()]
-                    if miss:
-                        self.n.add("F302", f"glyph(s) {''.join(miss)} missing in every font", line)
-                toks.append(
-                    rasterfont.Tok(
-                        piece,
-                        pth,
-                        rpx,
-                        bold=b,
-                        italic=r.italic or extra.get("italic", False),
-                        underline=r.underline or extra.get("underline", False),
-                        strike=r.strike or extra.get("strike", False),
-                        invert=r.invert,
-                        space=piece.isspace(),
+                    parts = self.script_parts(piece, path, fallback, line, context)
+                for k, (txt, pth) in enumerate(parts):
+                    toks.append(
+                        rasterfont.Tok(
+                            txt,
+                            pth,
+                            rpx,
+                            bold=b,
+                            italic=r.italic or extra.get("italic", False),
+                            underline=r.underline or extra.get("underline", False),
+                            strike=r.strike or extra.get("strike", False),
+                            invert=r.invert,
+                            space=txt.isspace(),
+                            glue=k > 0,  # the parts of one word stay on one line
+                        )
                     )
-                )
+        rtl = scriptfonts.base_rtl(self.text(context))
         pimg = None
         if prefix:
             ptxt = "".join(c.ch for c in prefix)
+            if rtl:  # the bullet goes on the right: its space between it and the first letter
+                ptxt = " " * (len(ptxt) - len(ptxt.rstrip())) + ptxt.rstrip()
             if prefix[0].ch in CHECKBOX:
                 pimg = rasterfont.checkbox(px, prefix[0].ch != "☐")
+                if rtl:  # its gap on the inner side, next to the first letter
+                    box = pimg.crop((0, 0, pimg.width - 6, pimg.height))
+                    pimg = Image.new("L", pimg.size, 255)
+                    pimg.paste(box, (6, 0))
             else:
                 t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
                 asc, desc = t.font.getmetrics()
                 pimg = rasterfont.draw_tok(t, asc, asc + desc)
         align = attrs.kv.get("align") or next(
-            (a for a in ("center", "right", "left", "justify") if attrs.has(a)), self.align
+            (a for a in ("center", "right", "left", "justify") if attrs.has(a)),
+            "right" if rtl and "align" not in self.doc.meta else self.align,  # Arabic, Hebrew: from the right
         )
         if leading is None:
             leading = max(2, round(px * 0.25))
-        for t in toks:
-            t.tracking = tracking
+        for t in toks:  # letters that join or stack are never spaced apart: tracking stays off for them
+            t.tracking = 0 if tracking and scriptfonts.shaped(t.text) else tracking
+        if tracking and any(scriptfonts.shaped(t.text) for t in toks):
+            self.n.add(
+                "M103",
+                "tracking= is ignored for letters that join, stack or run right to left (Thai, Arabic, Devanagari…)",
+                line,
+                "nothing to fix; the other words keep their spacing",
+            )
         if not toks:
             return []
-        im, texts = rasterfont.render_block(toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots)
+        im, texts = rasterfont.render_block(
+            toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl
+        )
         view_rows = [
             TextRow([Cell(ch) for ch in t[: self.cols]], (1, 1), "left" if align == "justify" else align, line)
             for t in texts
@@ -382,6 +459,29 @@ class Layout:
                 line=line,
                 attrs=attrs,
                 px=px,
+                bold=bold or attrs.has("bold"),
+                extra={**extra, **{k: True for k in ("italic", "underline", "strike") if attrs.has(k)}},
+                prefix=prefix,
+                indent=indent,
+                tracking=tracking,
+                leading=leading,
+                indent_dots=indent_dots * (self.p.cell[0] if indent_is_columns else 1),
+            )
+        drawn = self.drawn_whole(runs)
+        if drawn:  # Thai, Arabic, Devanagari…: letters join, stack or run right to left, so never cell by cell
+            scale = scale or self.scale_for(attrs.kv.get("size"), line)
+            self.n.add(
+                "F301",
+                f"glyph {drawn} is not in the printer font: line printed as an image",
+                line,
+                "keep it (fine) or use a character from the native set",
+            )
+            return self.raster_block(
+                runs,
+                "Spleen",  # the printer font's look for the letters it has
+                line=line,
+                attrs=attrs,
+                px=self.p.cell[1] * scale[1],
                 bold=bold or attrs.has("bold"),
                 extra={**extra, **{k: True for k in ("italic", "underline", "strike") if attrs.has(k)}},
                 prefix=prefix,

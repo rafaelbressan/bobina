@@ -796,13 +796,21 @@ def make_parser():
         sub,
         "fonts",
         "recommended fonts",
-        "tested fonts, minimum sizes, test tickets",
-        ["bobina fonts list", 'bobina fonts test "DejaVu Serif"', 'bobina fonts mark "DejaVu Serif" 20'],
+        "tested fonts, minimum sizes, test tickets; fonts for other scripts (Thai, Hindi, Chinese…)",
+        [
+            "bobina fonts list",
+            'bobina fonts test "DejaVu Serif"',
+            'bobina fonts mark "DejaVu Serif" 20',
+            "bobina fonts scripts",
+            "bobina fonts get thai devanagari",
+            "bobina fonts get menu.bob.md",
+        ],
         cmd_fonts,
     )
-    p.add_argument("action", nargs="?", default="list", choices=["list", "test", "mark"])
-    p.add_argument("family", nargs="?")
-    p.add_argument("px", nargs="?")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "test", "mark", "scripts", "get"])
+    p.add_argument(
+        "names", nargs="*", metavar="NAME", help="test/mark: FAMILY [MIN_PX]; get: scripts, languages or documents"
+    )
     p.add_argument("--note")
     p.add_argument("--plain", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--set", action="append", help=argparse.SUPPRESS)
@@ -879,6 +887,16 @@ def parse_args(ap, argv: list[str]):
     return args
 
 
+def _font_notice(args) -> None:
+    """Before a font for another script is downloaded, one line on the terminal says which, its license, size and
+    source. Not with -q, BOBINA_NONINTERACTIVE or problems as JSON: there, the F304 note in the problems says it."""
+    from .. import scriptfonts
+    from .common import _FMT, err, noninteractive
+
+    quiet = getattr(args, "quiet", False) or noninteractive() or _FMT[0] in ("json", "jsonl")
+    scriptfonts.NOTICE = None if quiet else (lambda m: err(f"bobina: {m}"))
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     from .common import set_command, set_problem_format
@@ -905,6 +923,7 @@ def main(argv=None) -> int:
     from .common import json_written
 
     json_written(reset=True)
+    _font_notice(args)
     if cmd in NO_JSON and getattr(args, "json", False):  # said, never ignored in silence (it also muted warnings)
         err(f"note: --json does nothing in bobina {cmd}: it writes no data (bobina check --json for the problems)")
         args.json = False

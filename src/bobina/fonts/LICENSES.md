@@ -11,6 +11,9 @@ All bundled fonts are redistributed unmodified under their own licenses (full te
 | spleen-12x24.otf | Spleen | BSD 2-Clause — `licenses/Spleen-BSD-2.txt` | 2018-2026 Frederic Cambus |
 | DejaVuSans*.ttf | DejaVu Sans | Bitstream Vera license + public domain changes — `licenses/DejaVu-LICENSE.txt` | Bitstream, Inc.; Tavmjong Bah |
 
+Fonts for other scripts (Noto Sans Thai, Devanagari, CJK…, SIL OFL 1.1) are not bundled: bobina downloads one
+the first time a document needs it and saves its license next to it (`src/bobina/scriptfonts.py`).
+
 Spleen 12x24 emulates the printer's internal 12x24 font in previews; DejaVu Sans is the fallback for
 symbols the printer font lacks. The copyright and license fields above match the name tables inside
 each font file.

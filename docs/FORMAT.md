@@ -121,6 +121,13 @@ Quality nudges, from the printed tests of the profile:
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
 
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
+downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
+OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
+`font_downloads = false` in config.toml: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
+follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
+Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
+
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
 | Size at 203 dpi | Height | What works (tests F1, F2, R5) |
@@ -448,6 +455,8 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |
+| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |

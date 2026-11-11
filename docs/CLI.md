@@ -31,7 +31,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `status` | paper / cover / error / language mode; `--list` explains every state | `s` |
 | `mode [esc \| tspl \| cpcl]` | show or switch the printer command language | `m` |
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
-| `fonts list \| test \| mark` | recommended fonts and the font test registry | — |
+| `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
 | `profile list \| show \| use` | printer profiles | — |
@@ -400,7 +400,8 @@ Two terminals, a script and the tower over ssh may run bobina at once. Its own f
   a `command` printer have `timeout` (printer entry, default 120 s), `bluetoothctl` calls are bounded. stdin takes
   up to 10 MB (a document), `bobina send -` up to 64 MB.
 - **Servers, bots, cron: `BOBINA_NONINTERACTIVE=1`.** bobina never asks on the terminal: `--ask` and the
-  confirmation stop at once with `E107` (pass `--yes` and `--set`). Also give the target explicitly and start
+  confirmation stop at once with `E107` (pass `--yes` and `--set`); the notice before a font download is the
+  note `F304` in the problems, never a terminal line. Also give the target explicitly and start
   bobina with stdin closed (`stdin=DEVNULL`): with no target, bobina reads a document from stdin.
 - **One process per job.** bobina keeps some settings per process (problem format, Pillow's image size limit,
   caches), so call it as a command, not as a library from several threads. A server runs one `bobina`
@@ -450,7 +451,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 | 1 | usage error |
 | 2 | document error (parse) |
 | 3 | nudges with `--strict` |
-| 4 | printer unreachable / Bluetooth |
+| 4 | printer unreachable / Bluetooth; `fonts get` could not download |
 | 5 | printer error state (no paper, cover open) |
 | 6 | printer language mismatch (e.g. printer in TSPL, document needs ESC/POS) |
 | 7 | confirmation required (no terminal and no `--yes`) or declined |
@@ -464,6 +465,7 @@ job may already be on paper: check the paper and `bobina history` before printin
 - Config: `~/.config/bobina/config.toml` (default profile, printers, editor, preferences).
 - Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
+- Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `font_downloads = false` in config.toml (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 
 ## Decided
 
