@@ -1,0 +1,143 @@
+# What a release changes in the repository, for a version already on PyPI: Formula/bobina.rb (the Homebrew tap)
+# and the site's casts and tickets (site/capture/capture.py), in one commit to main, which also makes Vercel
+# publish the site of the new release. release.yml calls it on each release; when that failed, run it by hand:
+#   gh workflow run release-commit.yml -f version=X.Y.Z
+# The jobs that run third-party code (brew builds sdists, the capture runs bobina from PyPI) can only read; push,
+# which builds and runs nothing, is the only one that can write.
+name: release-commit
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "a version on PyPI, e.g. 0.1.1"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    # This repository is the tap (brew tap rafaelbressan/bobina https://github.com/rafaelbressan/bobina). A release
+    # (not a pre-release) points Formula/bobina.rb at this version's sdist, regenerates its resources, builds it from
+    # source and tests it. The formula leaves as an artifact.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: A version number
+        run: '[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$ ]] || { echo "not a release version: $VERSION"; exit 1; }'
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: The formula for this version, built and tested
+        run: |
+          brew tap rafaelbressan/bobina "$GITHUB_WORKSPACE"  # a clone of this checkout, as users tap it from GitHub
+          brew trust --tap rafaelbressan/bobina || true  # Homebrew 7 loads third-party taps only when trusted
+          formula="$(brew --repository rafaelbressan/bobina)/Formula/bobina.rb"
+          read -r url sha256 <<<"$(curl -fsSL "https://pypi.org/pypi/bobina/$VERSION/json" | python3 -c '
+          import json, sys
+          u = [u for u in json.load(sys.stdin)["urls"] if u["packagetype"] == "sdist"][0]
+          print(u["url"], u["digests"]["sha256"])')"
+          sed -i '' -E -e "s|^  url \".*\"|  url \"$url\"|" -e "s|^  sha256 \".*\"|  sha256 \"$sha256\"|" "$formula"
+          # bobina itself was uploaded minutes ago; its dependencies keep Homebrew's release cooldown
+          brew update-python-resources --ignore-main-package-cooldown --exclude-packages pillow rafaelbressan/bobina/bobina
+          brew install --build-from-source rafaelbressan/bobina/bobina
+          brew test rafaelbressan/bobina/bobina
+          brew audit --strict rafaelbressan/bobina/bobina
+          mkdir "$RUNNER_TEMP/tested" && cp "$formula" "$RUNNER_TEMP/tested/bobina.rb"  # not ./formula: macOS reads it as Formula/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formula
+          path: ${{ runner.temp }}/tested/bobina.rb
+
+  captures:
+    # The site's casts and tickets, recorded from this version (installed from PyPI) on the docs and examples of its
+    # tag. They leave as an artifact.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: A version number
+        run: '[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release version: $VERSION"; exit 1; }'
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Record the casts and tickets of bobina ${{ inputs.version }}
+        working-directory: site
+        env:
+          BOBINA_SITE_REF: v${{ inputs.version }}
+        run: node scripts/release.mjs && python3 capture/capture.py
+      - name: Pack them
+        run: |
+          mkdir -p "$RUNNER_TEMP/captures/png"
+          cp site/src/captures/captures.json "$RUNNER_TEMP/captures/"
+          cp site/public/captures/*.png "$RUNNER_TEMP/captures/png/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captures
+          path: ${{ runner.temp }}/captures/
+
+  push:
+    # commits what passed to main, in one commit: a fresh checkout, nothing built or run; the only job that can write.
+    # A failed formula does not hold back the captures, nor the other way round.
+    needs: [formula, captures]
+    if: ${{ !cancelled() && (needs.formula.result == 'success' || needs.captures.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        if: needs.formula.result == 'success'
+        with:
+          name: formula
+          path: ${{ runner.temp }}/tested
+      - uses: actions/download-artifact@v4
+        if: needs.captures.result == 'success'
+        with:
+          name: captures
+          path: ${{ runner.temp }}/captures
+      - name: Put them in place
+        run: |
+          if [ -f "$RUNNER_TEMP/tested/bobina.rb" ]; then cp "$RUNNER_TEMP/tested/bobina.rb" Formula/bobina.rb; fi
+          if [ -f "$RUNNER_TEMP/captures/captures.json" ]; then
+            cp "$RUNNER_TEMP/captures/captures.json" site/src/captures/captures.json
+            rm -rf site/public/captures && mkdir site/public/captures
+            cp "$RUNNER_TEMP"/captures/png/*.png site/public/captures/
+          fi
+          git add -A -- Formula/bobina.rb site/src/captures site/public/captures
+          git status --short
+      - name: Personal-data scan (a push with this job's token runs no workflow, so ci.yml does not scan it)
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: python3 tools/leakscan.py Formula/bobina.rb site/src/captures/captures.json
+      - name: Commit it to main
+        run: |
+          if git diff --cached --quiet; then echo "main already has the formula and captures of bobina $VERSION"; exit 0; fi
+          what=$(git diff --cached --name-only | sed -e 's|^Formula/bobina.rb$|Formula/bobina.rb|' -e 's|^site/.*|site captures|' | sort -u | paste -sd, - | sed 's/,/ and /g')
+          bot() { git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" "$@"; }
+          bot commit -m "$what: bobina $VERSION"
+          git push origin HEAD:main || { git fetch origin main && bot rebase origin/main && git push origin HEAD:main; }  # once

@@ -30,6 +30,15 @@
       "headers": { "Content-Type": "text/plain; charset=utf-8" },
       "continue": true
     },
+    { "src": "^/problems/B(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/b$1$2" } },
+    { "src": "^/problems/E(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/e$1$2" } },
+    { "src": "^/problems/F(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/f$1$2" } },
+    { "src": "^/problems/I(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/i$1$2" } },
+    { "src": "^/problems/L(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/l$1$2" } },
+    { "src": "^/problems/M(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/m$1$2" } },
+    { "src": "^/problems/P(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/p$1$2" } },
+    { "src": "^/problems/Q(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/q$1$2" } },
+    { "src": "^/problems/S(\\d{3})(/?|\\.md)$", "status": 308, "headers": { "Location": "/problems/s$1$2" } },
     {
       "src": "^/$",
       "has": [{ "type": "header", "key": "accept", "value": { "re": "text/markdown" } }],

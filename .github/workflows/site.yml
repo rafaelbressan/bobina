@@ -27,6 +27,8 @@ jobs:
       - name: Install
         run: npm ci --prefix site --registry=https://registry.npmjs.org/
       - name: The site of the latest release, with its checks
+        env:
+          BOBINA_SITE_STRICT: "1" # captures of another version fail here (Vercel only warns)
         run: npm run build --prefix site
       - name: The docs on this branch build too (what the next release will publish)
         env:
@@ -35,7 +37,8 @@ jobs:
 
   captures:
     # The casts and tickets are recorded from the released bobina (site/capture/capture.py); this records them again
-    # and fails when they differ: after a release, run `npm run capture` in site/ and commit the result.
+    # and fails when they differ. A release commits them by itself (release-commit.yml); by hand: `npm run capture`
+    # in site/, then commit.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

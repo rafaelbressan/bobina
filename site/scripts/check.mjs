@@ -136,6 +136,21 @@ for (const page of pages.filter((p) => p !== '404.html')) {
     if (!has(dest.slice(1))) fail(`vercel.json: ${path} → ${dest}, which does not exist`);
   }
 }
+// a problem code as bobina prints it (E107) redirects to its page and its twin, which are lower case
+const redirects = (vercel.routes || []).filter((r) => r.status === 308 && r.headers?.Location);
+for (const page of pages.filter((p) => /^problems\/[a-z]\d{3}\/index\.html$/.test(p))) {
+  const code = page.split('/')[1];
+  for (const path of [`/problems/${code.toUpperCase()}/`, `/problems/${code.toUpperCase()}`, `/problems/${code.toUpperCase()}.md`]) {
+    const route = redirects.find((r) => new RegExp(r.src).test(path));
+    if (!route) {
+      fail(`vercel.json: ${path} is not redirected`);
+      continue;
+    }
+    const m = path.match(new RegExp(route.src));
+    const to = route.headers.Location.replace(/\$(\d)/g, (_, i) => m[i] ?? '');
+    if (!fileFor(to)) fail(`vercel.json: ${path} → ${to}, which does not exist`);
+  }
+}
 for (const asset of ['/llms.txt', '/fonts/terminus.woff2', '/captures/receipt.png', '/cli.md']) {
   if (negotiation.some((r) => new RegExp(r.src).test(asset))) fail(`vercel.json: ${asset} would be negotiated too`);
 }

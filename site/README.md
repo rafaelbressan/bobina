@@ -8,7 +8,7 @@ cd site
 npm ci                     # .npmrc pins the public registry
 npm run dev                # http://localhost:4321
 npm run build              # dist/: astro build, pagefind, then scripts/check.mjs
-npm run capture            # after a release: record the casts and tickets again, then commit them
+npm run capture            # record the casts and tickets again (a release does it by itself)
 ```
 
 ## Where the content comes from
@@ -26,8 +26,8 @@ Nothing is copied by hand. `scripts/release.mjs` runs before every build and dec
 loader. `src/lib/site.ts` maps files to pages (`docs/CLI.md` → `/cli/`, `docs/problems/E107.md` →
 `/problems/e107/`) and rewrites links: between docs they become site links, to other repository files GitHub
 links at the release tag; images the docs show are copied to `/repo/`. So the site's own code changes on `main`
-while what it describes stays the release. A release does not deploy by itself: commit the new captures (below),
-and that push builds the site.
+while what it describes stays the release. A tag does not deploy by itself: the release's commit to `main`
+(formula and captures, below) does, and so does any later push.
 
 ## For agents
 
@@ -46,11 +46,19 @@ on real files (`examples/` of the release and `site/examples/`) in a temporary f
 printer and a fixed date, and writes `src/captures/captures.json` (command lines, output as HTML, exit codes) and
 `public/captures/*.png` (`bobina preview` of each file shown next to it). Nothing is drawn by hand. It stops when
 an exit code is not the expected one or an output holds a home folder, a temporary path or a Bluetooth address.
-The build stops when the captures are of another version than the release (`npm run capture` fixes it), and CI
-records them again and compares (`.github/workflows/site.yml`).
 
-Rendered here and committed rather than on Vercel: the build stays Node only, and the images are reviewed in the
-pull request like the golden tests.
+After each release (not a pre-release), `.github/workflows/release-commit.yml` records them with the new version
+in a read-only job and its `push` job commits them to `main` together with `Formula/bobina.rb`; that push makes
+Vercel publish the new release. If it failed: `gh workflow run release-commit.yml -f version=X.Y.Z`, or
+`npm run capture` here and commit. Until the captures match the release, the build uses the ones it has and prints
+a warning; CI (`.github/workflows/site.yml`, `BOBINA_SITE_STRICT=1`) fails instead, and records them again to
+compare with the committed ones.
+
+Recorded and committed rather than rendered on Vercel: the build stays Node only, and the images are reviewed like
+the golden tests.
+
+`vercel.json` also redirects a problem code as bobina prints it (`/problems/E107/`, `/problems/E107.md`) to its
+lower-case page.
 
 ## Look
 

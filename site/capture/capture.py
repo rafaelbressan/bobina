@@ -105,7 +105,15 @@ def bobina_for(version: str, given: str | None) -> Path:
         if not exe.exists():
             venv.create(env_dir, with_pip=True)
         pip = [str(env_dir / "bin" / "python"), "-m", "pip", "install", "--quiet", "--index-url"]
-        subprocess.run([*pip, "https://pypi.org/simple", f"bobina=={version}"], check=True)
+        for _ in range(20):  # PyPI's CDN can miss an upload for a few minutes (a release run starts at once)
+            if (
+                subprocess.run([*pip, "https://pypi.org/simple", "--no-cache-dir", f"bobina=={version}"]).returncode
+                == 0
+            ):
+                break
+            time.sleep(30)
+        else:
+            fail(f"bobina=={version} could not be installed from PyPI")
     return exe
 
 

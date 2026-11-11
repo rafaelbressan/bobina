@@ -24,10 +24,12 @@ export interface Ticket {
   label: string;
 }
 
+// A release commits its captures a moment after its tag (release-commit.yml): until then the site builds with the
+// captures it has, and says so. CI sets BOBINA_SITE_STRICT=1 to fail instead.
 if (data.bobina !== release.version) {
-  const msg = `the captures are of bobina ${data.bobina}, the site describes ${release.version} (${release.ref}): run \`npm run capture\` in site/`;
-  if (release.mode === 'release') throw new Error(msg);
-  console.warn(`warning: ${msg}`);
+  const msg = `the casts and tickets were recorded with bobina ${data.bobina}, the site describes ${release.version} (${release.ref}); release-commit.yml records them for a release, or run \`npm run capture\` in site/`;
+  if (process.env.BOBINA_SITE_STRICT === '1' && release.mode === 'release') throw new Error(msg);
+  console.warn(`\n\x1b[33mWARNING: ${msg}\x1b[0m\n`);
 }
 
 export const captures = data as {
