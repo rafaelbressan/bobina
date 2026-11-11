@@ -4,7 +4,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
-const SITE_DIR = process.cwd(); // npm runs every script from site/
+// npm runs every script from site/; an editor or `astro --root site` may start at the repository root
+const SITE_DIR = existsSync(join(process.cwd(), 'astro.config.mjs')) ? process.cwd() : join(process.cwd(), 'site');
 export const SITE_URL = (process.env.BOBINA_SITE_URL || 'https://bobina.md').replace(/\/$/, '');
 
 export interface Release {
@@ -55,7 +56,7 @@ export function siteLink(target: string, from: string, opts: { md?: boolean; ima
   }
   if (!path || rel.startsWith('..') || !exists(rel)) return null;
   const base = opts.md ? SITE_URL : '';
-  if (opts.image) return `${base}/repo/${rel}`; // copied into the site by scripts/check.mjs
+  if (opts.image) return `${base}/repo/${rel}`; // copied by the repoImages integration (astro.config.mjs)
   const slug = slugOf(rel);
   if (slug !== null) return (opts.md ? SITE_URL + mdUrl(slug) : htmlUrl(slug)) + anchor;
   if (rel === 'llms.txt' || rel === 'llms-full.txt') return `${base}/${rel}`;
@@ -63,10 +64,35 @@ export function siteLink(target: string, from: string, opts: { md?: boolean; ima
   return githubUrl(rel, statSync(join(TREE, rel)).isDirectory()) + anchor;
 }
 
+/**
+ * A Markdown text cut into prose and fenced code, alternately (odd parts are code). A fence closes only with the
+ * same character, at least as many times: ```` ```` ```` holds ``` lines (README.md, FORMAT.md, pay.md).
+ */
+export function splitFences(text: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let fence: { char: string; size: number } | null = null;
+  for (const line of text.split(/(?<=\n)/)) {
+    const m = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    // CommonMark: the info string of a backtick fence holds no backtick (```` ```pix ```` is inline code)
+    const opens = m && (m[1][0] === "~" || !line.trimStart().slice(m[1].length).includes("`"));
+    if (!fence && opens) {
+      parts.push(current);
+      current = line;
+      fence = { char: m[1][0], size: m[1].length };
+    } else if (fence && m && m[1][0] === fence.char && m[1].length >= fence.size && /^\s*[`~]+\s*$/.test(line)) {
+      parts.push(current + line);
+      current = '';
+      fence = null;
+    } else current += line;
+  }
+  parts.push(current);
+  return parts;
+}
+
 /** Rewrite the links of a Markdown text (outside fenced code) for its .md twin. */
 export function rewriteMarkdown(text: string, from: string): string {
-  const parts = text.split(/(^(?:```|~~~)[^\n]*\n[\s\S]*?^(?:```|~~~)[ \t]*$)/m); // odd parts are fenced code
-  return parts
+  return splitFences(text)
     .map((part, i) =>
       i % 2
         ? part

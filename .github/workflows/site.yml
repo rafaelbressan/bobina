@@ -47,5 +47,7 @@ jobs:
           node-version: "22"
       - name: Record again
         run: cd site && node scripts/release.mjs && python3 capture/capture.py
-      - name: Same as the committed ones
-        run: git diff --stat --exit-code -- site/src/captures site/public/captures
+      - name: Same as the committed ones (new, changed or removed files)
+        run: |
+          changes=$(git status --porcelain -- site/src/captures site/public/captures)
+          if [ -n "$changes" ]; then echo "$changes"; echo "run: cd site && npm run capture, then commit"; exit 1; fi

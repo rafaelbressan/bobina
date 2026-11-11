@@ -168,8 +168,8 @@ def run_tty(argv: list[str], cwd: Path, env: dict, keys: str | None) -> tuple[st
     if pid == 0:
         os.chdir(cwd)
         os.execvpe(argv[0], argv, env)
-    buf, sent, deadline = b"", False, time.time() + 60
-    while time.time() < deadline:
+    buf, sent, status, deadline = b"", False, None, time.time() + 60
+    while time.time() < deadline:  # read until the terminal closes (EOF, or EIO on Linux)
         ready, _, _ = select.select([fd], [], [], 0.5)
         if ready:
             try:
@@ -180,14 +180,18 @@ def run_tty(argv: list[str], cwd: Path, env: dict, keys: str | None) -> tuple[st
                 break
             buf += data
         elif keys and not sent and buf:
-            os.write(fd, keys.encode())  # the command is waiting for an answer
+            os.write(fd, keys.encode())  # quiet with output on screen: the command waits for an answer
             sent = True
-        elif os.waitpid(pid, os.WNOHANG)[0]:
-            break
-    done, status = os.waitpid(pid, os.WNOHANG)
-    if not done:
+    while status is None and time.time() < deadline:  # then wait for the exit, which may come a moment later
+        done, st = os.waitpid(pid, os.WNOHANG)
+        if done:
+            status = st
+        else:
+            time.sleep(0.05)
+    os.close(fd)
+    if status is None:
         os.kill(pid, signal.SIGKILL)
-        _, status = os.waitpid(pid, 0)
+        os.waitpid(pid, 0)
         fail(f"{shlex.join(argv)}: still running after 60 s")
     return buf.decode("utf-8", "replace"), os.waitstatus_to_exitcode(status)
 
@@ -263,13 +267,12 @@ def main() -> None:
                 check_leaks(f"cast {cast['id']}: {s['cmd']}", s["text"], work)
             casts.append({"id": cast["id"], "title": cast["title"], "steps": steps})
 
-        if OUT_PNG.exists():
-            shutil.rmtree(OUT_PNG)
-        OUT_PNG.mkdir(parents=True)
+        staged = work / "out"  # nothing is written into the site before every check passed
+        staged.mkdir()
         tickets = []
 
         def keep(tid: str, png: Path, group: str, file: str | None, label: str) -> None:
-            dest = OUT_PNG / f"{tid}.png"
+            dest = staged / f"{tid}.png"
             shutil.copy(png, dest)
             w, h = png_size(dest)
             tickets.append({"id": tid, "group": group, "png": f"/captures/{tid}.png", "width": w, "height": h,
@@ -302,9 +305,13 @@ def main() -> None:
             "casts": casts,
             "tickets": tickets,
         }
+        text = json.dumps(data, indent=1, ensure_ascii=False) + "\n"
+        check_leaks("captures.json", text, work)
+        if OUT_PNG.exists():
+            shutil.rmtree(OUT_PNG)
+        shutil.copytree(staged, OUT_PNG)
         OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-        OUT_JSON.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-        check_leaks("captures.json", OUT_JSON.read_text(encoding="utf-8"), work)
+        OUT_JSON.write_text(text, encoding="utf-8")
         print(f"capture: bobina {version} ({info['ref']}): {len(casts)} casts, {len(tickets)} tickets")
     finally:
         shutil.rmtree(work, ignore_errors=True)

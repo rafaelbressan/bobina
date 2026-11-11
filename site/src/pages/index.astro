@@ -18,7 +18,7 @@ const order = file('pantry.csv')
   .text.split('\n')
   .slice(1)
   .filter(Boolean)
-  .map((l) => 'label-' + l.split(',')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+  .map((l) => 'label-' + l.split(',')[0].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')); // as capture.py
 const labels = tickets('batch').sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 const fileUrl = (name: string) => {
   const f = file(name);

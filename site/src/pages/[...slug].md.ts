@@ -3,13 +3,15 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import { hubs } from '../lib/hubs';
-import { rewriteMarkdown, slugOf } from '../lib/site';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { rewriteMarkdown, slugOf, TREE } from '../lib/site';
 
 export async function getStaticPaths() {
   const entries = await getCollection('docs');
   const pages = entries
     .filter((e) => slugOf(e.id) !== null)
-    .map((e) => ({ params: { slug: slugOf(e.id) || 'index' }, props: { text: rewriteMarkdown(e.body ?? '', e.id) } }));
+    .map((e) => ({ params: { slug: slugOf(e.id) || 'index' }, props: { text: rewriteMarkdown(readFileSync(join(TREE, e.id), 'utf8'), e.id) } })); // the file as it is
   const extra = (await hubs()).map((h) => ({ params: { slug: h.slug }, props: { text: h.markdown } }));
   return [...pages, ...extra];
 }

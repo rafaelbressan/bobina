@@ -90,13 +90,28 @@ for (const page of pages) {
 }
 
 // 2. the Markdown side: twins, llms.txt, llms-full.txt
+
+/** The text outside fenced code. A fence closes only with the same character, at least as many times (```` holds ```). */
+function prose(text) {
+  let out = '';
+  let fence = null;
+  for (const line of text.split(/(?<=\n)/)) {
+    const m = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    const opens = m && (m[1][0] === "~" || !line.trimStart().slice(m[1].length).includes("`")); // CommonMark
+    if (!fence && opens) fence = { char: m[1][0], size: m[1].length };
+    else if (fence && m && m[1][0] === fence.char && m[1].length >= fence.size && /^\s*[`~]+\s*$/.test(line)) fence = null;
+    else if (!fence) out += line;
+  }
+  return out;
+}
+
 const twins = files.filter((f) => f.endsWith('.md'));
 for (const f of [...twins, 'llms.txt', 'llms-full.txt']) {
   if (!has(f)) {
     fail(`/${f} is missing`);
     continue;
   }
-  const text = read(f).replace(/^(```|~~~)[^\n]*\n[\s\S]*?^\1[ \t]*$/gm, '').replace(/`[^`\n]*`/g, '');
+  const text = prose(read(f)).replace(/`[^`\n]*`/g, '');
   for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
     if (m[1].startsWith(SITE_URL) || m[1].startsWith('/')) checkTarget(`/${f}`, m[1]);
     else if (!/^[a-z][a-z0-9+.-]*:|^#/i.test(m[1]) && /\.md(#|$)/.test(m[1])) fail(`/${f}: a repository link left as is: ${m[1]}`);
