@@ -1,0 +1,67 @@
+---
+// A terminal cast: real commands and their real output (capture/capture.py). Without JS it is a plain <pre>;
+// with JS, the first time it is seen, each command is typed and its output feeds in (not with reduced motion).
+import type { Cast } from '../lib/captures';
+
+interface Props {
+  cast: Cast;
+  caption?: string;
+  max?: string; // max height of the screen
+}
+const { cast, caption, max } = Astro.props;
+const lines = (s: string) => s.split('\n').length;
+---
+
+<figure class="cast" data-cast id={`cast-${cast.id}`} style={max ? `--cast-max:${max}` : undefined}>
+  <div class="cast-bar" aria-hidden="true"><i><span></span></i>{cast.title}</div>
+  <pre tabindex="0" aria-label={`Terminal: ${cast.title}`}><code>{
+    cast.steps.map((s, i) => (
+      <span class="cast-step" style={`--lines:${lines(s.text)};--t:${Math.min(1.2, 0.08 * lines(s.text) + 0.15).toFixed(2)}s`}><span class="cast-prompt">$ </span><span class="cast-cmd" data-cmd={s.cmd}>{s.cmd}</span>{'\n'}{s.text && <span class="cast-out" set:html={s.html + '\n'} />}{s.exit !== 0 && <span class="cast-exit">{`[exit ${s.exit}]\n`}</span>}{i < cast.steps.length - 1 ? '\n' : ''}</span>
+    ))
+  }</code></pre>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<script>
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  async function play(fig: HTMLElement) {
+    fig.classList.add('is-playing');
+    const screen = fig.querySelector('pre')!;
+    for (const step of fig.querySelectorAll<HTMLElement>('.cast-step')) {
+      const cmd = step.querySelector<HTMLElement>('.cast-cmd')!;
+      const full = cmd.dataset.cmd!;
+      cmd.textContent = '';
+      step.classList.add('is-on');
+      for (let i = 1; i <= full.length; i++) {
+        cmd.textContent = full.slice(0, i);
+        await wait(18 + Math.random() * 30);
+      }
+      await wait(260);
+      step.classList.add('is-out');
+      const t = parseFloat(getComputedStyle(step).getPropertyValue('--t')) || 0.6;
+      await wait(t * 1000);
+      screen.scrollTo({ top: screen.scrollHeight, behavior: 'smooth' });
+      await wait(450);
+    }
+    fig.dispatchEvent(new CustomEvent('cast:done', { bubbles: true }));
+  }
+
+  if (!still && 'IntersectionObserver' in window) {
+    const seen = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          seen.unobserve(e.target);
+          play(e.target as HTMLElement);
+        }
+      },
+      { threshold: 0.35 },
+    );
+    for (const fig of document.querySelectorAll<HTMLElement>('[data-cast]')) {
+      fig.classList.add('is-armed');
+      seen.observe(fig);
+    }
+  }
+</script>

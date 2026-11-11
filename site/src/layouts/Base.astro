@@ -1,0 +1,86 @@
+---
+import '../styles/site.css';
+import { NAV, MORE, sectionOf } from '../lib/nav';
+import { release, SITE_URL } from '../lib/site';
+
+interface Props {
+  title: string;
+  description?: string;
+  slug: string; // '' for the home page; null-like pages (404) pass '404'
+  md?: string | null; // the .md twin of this page
+}
+const { title, description, slug, md } = Astro.props;
+const section = sectionOf(slug);
+const canonical = new URL(Astro.url.pathname, SITE_URL).href;
+const fullTitle = slug === '' ? title : `${title} · bobina`;
+const desc =
+  description ??
+  'bobina prints Markdown on cheap 58/80 mm thermal roll printers: receipts, labels, QR and payment codes, with a preview you can trust and nudges instead of blocks.';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={desc} />
+    {slug !== "404" && <link rel="canonical" href={canonical} />}
+    {md && <link rel="alternate" type="text/markdown" href={md} title="This page as Markdown" />}
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fonts/atkinson-hyperlegible-regular.woff2" as="font" type="font/woff2" crossorigin />
+    <meta name="theme-color" content="#e7e0cf" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161615" media="(prefers-color-scheme: dark)" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={desc} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <slot name="head" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to the content</a>
+    <header class="top">
+      <div class="top-in">
+        <a class="brand" href="/" aria-label={`bobina, home (version ${release.version})`}>
+          <b>bobina</b><small>v{release.version}</small>
+        </a>
+        <nav class="nav" aria-label="Sections">
+          {NAV.map((n) => <a href={n.href} aria-current={section === n.slug ? 'page' : undefined}>{n.label}</a>)}
+        </nav>
+        <form class="search" action="/search/" role="search">
+          <label class="visually-hidden" for="q">Search the docs</label>
+          <input id="q" name="q" type="search" placeholder="Search the docs" />
+        </form>
+        <details class="menu">
+          <summary>Menu</summary>
+          <div class="menu-panel">
+            <nav class="nav" aria-label="Sections">
+              <a href="/">Home</a>
+              {NAV.map((n) => <a href={n.href} aria-current={section === n.slug ? 'page' : undefined}>{n.label}</a>)}
+            </nav>
+            <form class="search" action="/search/" role="search">
+              <label class="visually-hidden" for="q2">Search the docs</label>
+              <input id="q2" name="q" type="search" placeholder="Search the docs" />
+            </form>
+          </div>
+        </details>
+      </div>
+    </header>
+    <slot />
+    <footer class="foot">
+      <div class="foot-in">
+        <ul>
+          {MORE.map((n) => <li><a href={n.href}>{n.label}</a></li>)}
+          <li><a href={release.repo}>GitHub</a></li>
+          <li><a href="/llms.txt">llms.txt</a></li>
+          <li><a href="/llms-full.txt">llms-full.txt</a></li>
+        </ul>
+        <p class="note">
+          Docs of bobina {release.version}{release.tag ? ` (${release.tag})` : ` (${release.ref}, not a release)`}. MIT licensed. No
+          tracking.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,217 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --prefix site --registry=https://registry.npmjs.org/",
+  "buildCommand": "npm run build --prefix site",
+  "outputDirectory": "site/dist",
+  "routes": [
+    {
+      "src": "^/.*",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/_astro/.+",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/(?:[^.]*)$",
+      "headers": {
+        "Vary": "Accept"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/.+\\.md$",
+      "headers": {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Vary": "Accept"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/llms(?:-full)?\\.txt$",
+      "headers": {
+        "Content-Type": "text/plain; charset=utf-8"
+      },
+      "continue": true
+    },
+    {
+      "src": "^/$",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept",
+          "value": {
+            "re": "text/markdown"
+          }
+        }
+      ],
+      "dest": "/index.md",
+      "headers": {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Vary": "Accept"
+      }
+    },
+    {
+      "src": "^/((?:[a-z0-9_-]+/)*[a-z0-9_-]+)/?$",
+      "has": [
+        {
+          "type": "header",
+          "key": "accept",
+          "value": {
+            "re": "text/markdown"
+          }
+        }
+      ],
+      "dest": "/$1.md",
+      "headers": {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Vary": "Accept"
+      }
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/problems/B:n(\\d{3})",
+      "destination": "/problems/b:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/B:n(\\d{3})/",
+      "destination": "/problems/b:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/B:n(\\d{3}).md",
+      "destination": "/problems/b:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/E:n(\\d{3})",
+      "destination": "/problems/e:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/E:n(\\d{3})/",
+      "destination": "/problems/e:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/E:n(\\d{3}).md",
+      "destination": "/problems/e:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/F:n(\\d{3})",
+      "destination": "/problems/f:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/F:n(\\d{3})/",
+      "destination": "/problems/f:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/F:n(\\d{3}).md",
+      "destination": "/problems/f:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/I:n(\\d{3})",
+      "destination": "/problems/i:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/I:n(\\d{3})/",
+      "destination": "/problems/i:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/I:n(\\d{3}).md",
+      "destination": "/problems/i:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/L:n(\\d{3})",
+      "destination": "/problems/l:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/L:n(\\d{3})/",
+      "destination": "/problems/l:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/L:n(\\d{3}).md",
+      "destination": "/problems/l:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/M:n(\\d{3})",
+      "destination": "/problems/m:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/M:n(\\d{3})/",
+      "destination": "/problems/m:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/M:n(\\d{3}).md",
+      "destination": "/problems/m:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/P:n(\\d{3})",
+      "destination": "/problems/p:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/P:n(\\d{3})/",
+      "destination": "/problems/p:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/P:n(\\d{3}).md",
+      "destination": "/problems/p:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/Q:n(\\d{3})",
+      "destination": "/problems/q:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/Q:n(\\d{3})/",
+      "destination": "/problems/q:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/Q:n(\\d{3}).md",
+      "destination": "/problems/q:n.md",
+      "permanent": true
+    },
+    {
+      "source": "/problems/S:n(\\d{3})",
+      "destination": "/problems/s:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/S:n(\\d{3})/",
+      "destination": "/problems/s:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/S:n(\\d{3}).md",
+      "destination": "/problems/s:n.md",
+      "permanent": true
+    }
+  ]
+}

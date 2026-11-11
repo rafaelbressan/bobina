@@ -38,3 +38,4 @@ has the rules that tests enforce.
 | `src/bobina/cli/` | commands (`args.py` parser, `documents.py` print/check/preview, `device.py` printer/calibrate) |
 | `src/bobina/profiles/` | printer profiles (TOML) and their sources |
 | `evals/agent-eval.yaml` | agent tasks for cli-agent-eval (how well agents use this CLI) |
+| `site/` | the website bobina.md: Astro, the docs of the latest release, agent-ready (`site/README.md`) |

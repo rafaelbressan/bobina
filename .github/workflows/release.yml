@@ -127,13 +127,14 @@ jobs:
       - name: apt install the .deb and run it
         run: contrib/deb/test-in-container.sh "${{ matrix.image }}" deb/bobina_*_${{ matrix.arch }}.deb
 
-  homebrew:
-    # Formula/bobina.rb for this version, in homebrew.yml (which also runs by hand when this fails)
+  release-commit:
+    # Formula/bobina.rb and the site's captures for this version, committed to main by release-commit.yml (which
+    # also runs by hand when this fails); install-test has installed it from PyPI, so the captures can too
     needs: [build, install-test]
     if: needs.build.outputs.prerelease == 'false'
     permissions:
       contents: write  # only its last job, which builds nothing, gets to write
-    uses: ./.github/workflows/homebrew.yml
+    uses: ./.github/workflows/release-commit.yml
     with:
       version: ${{ needs.build.outputs.version }}
     secrets: inherit

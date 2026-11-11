@@ -1,0 +1,54 @@
+---
+import Base from './Base.astro';
+import Tools from '../components/Tools.astro';
+import { NAV, MORE, sectionOf } from '../lib/nav';
+import { mdUrl } from '../lib/site';
+
+interface Props {
+  title: string;
+  slug: string;
+  tokens: number;
+  source?: string | null;
+  sourceLabel?: string;
+  description?: string;
+  headings?: { depth: number; slug: string; text: string }[];
+}
+const { title, slug, tokens, source, sourceLabel, description, headings = [] } = Astro.props;
+const toc = headings.filter((h) => h.depth === 2);
+const section = sectionOf(slug);
+---
+
+<Base title={title} slug={slug} md={mdUrl(slug)} description={description}>
+  <div class:list={['page', 'has-side', { 'has-toc': toc.length > 2 }]}>
+    <nav class="side" aria-label="Docs">
+      <h2>Docs</h2>
+      <ul>
+        <li><a href="/">Home</a></li>
+        {NAV.map((n) => <li><a href={n.href} aria-current={section === n.slug ? 'page' : undefined}>{n.label}</a></li>)}
+      </ul>
+      <h2>More</h2>
+      <ul>
+        {MORE.map((n) => <li><a href={n.href} aria-current={slug === n.slug ? 'page' : undefined}>{n.label}</a></li>)}
+        <li><a href="/llms.txt">llms.txt</a></li>
+      </ul>
+    </nav>
+    <main id="main" class="sheet prose" data-pagefind-body>
+      <Tools md={mdUrl(slug)} tokens={tokens} source={source} sourceLabel={sourceLabel} />
+      <slot />
+    </main>
+    {
+      toc.length > 2 && (
+        <nav class="toc" aria-label="On this page">
+          <h2>On this page</h2>
+          <ul>
+            {toc.map((h) => (
+              <li>
+                <a href={`#${h.slug}`}>{h.text}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      )
+    }
+  </div>
+</Base>

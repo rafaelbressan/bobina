@@ -1,0 +1,26 @@
+---
+import Doc from '../layouts/Doc.astro';
+import { hubs } from '../lib/hubs';
+import { tokens } from '../lib/site';
+
+interface Props {
+  slug: string;
+}
+const hub = (await hubs()).find((h) => h.slug === Astro.props.slug)!;
+const inline = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/`([^`]+)`/g, '<code>$1</code>');
+---
+
+<Doc title={hub.title} slug={hub.slug} tokens={tokens(hub.markdown)} description={hub.intro.replace(/`/g, '')}>
+  <h1>{hub.title}</h1>
+  <p set:html={inline(hub.intro)} />
+  <ul>
+    {
+      hub.items.map((i) => (
+        <li>
+          <a href={i.href}>{i.title}</a>: <span set:html={inline(i.summary)} />
+        </li>
+      ))
+    }
+  </ul>
+  <slot />
+</Doc>

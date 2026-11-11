@@ -1,0 +1,44 @@
+---
+// Above every page: copy it for an AI (its .md twin), read the Markdown (works without JS), see the source.
+interface Props {
+  md: string;
+  tokens: number;
+  source?: string | null;
+  sourceLabel?: string;
+}
+const { md, tokens, source, sourceLabel } = Astro.props;
+---
+
+<div class="tools">
+  <button type="button" class="btn" data-copy-md={md} hidden>
+    Copy for AI <small>~{tokens.toLocaleString('en-US')} tokens</small>
+  </button>
+  <a class="btn" href={md} type="text/markdown">View as Markdown</a>
+  {source && <a class="btn" href={source}>{sourceLabel ?? 'Source'}</a>}
+  <output aria-live="polite"></output>
+</div>
+
+<script>
+  // Copy the page's Markdown twin. The fetch is handed to the clipboard as a promise, so Safari keeps the click.
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy-md]')) {
+    if (!navigator.clipboard) continue;
+    button.hidden = false;
+    const status = button.parentElement!.querySelector('output')!;
+    button.addEventListener('click', async () => {
+      const text = fetch(button.dataset.copyMd!).then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.text();
+      });
+      try {
+        if (window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then((t) => new Blob([t], { type: 'text/plain' })) })]);
+        } else {
+          await navigator.clipboard.writeText(await text);
+        }
+        status.textContent = 'Copied: paste it into your AI.';
+      } catch {
+        status.textContent = 'Could not copy: open “View as Markdown” instead.';
+      }
+    });
+  }
+</script>

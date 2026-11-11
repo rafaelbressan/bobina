@@ -1,0 +1,18 @@
+---
+// Pagefind (indexed after the build: `pagefind --site dist`). Its script loads only on this page.
+import HubPage from '../components/HubPage.astro';
+---
+
+<HubPage slug="search">
+  <div id="search" style="margin-top:1.5rem"></div>
+  <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+  <script is:inline src="/pagefind/pagefind-ui.js"></script>
+  <script is:inline>
+    (function () {
+      if (!window.PagefindUI) return;
+      var ui = new PagefindUI({ element: '#search', showSubResults: true, showImages: false, resetStyles: false });
+      var q = new URLSearchParams(location.search).get('q');
+      if (q) ui.triggerSearch(q);
+    })();
+  </script>
+</HubPage>

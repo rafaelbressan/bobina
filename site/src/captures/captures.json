@@ -1,0 +1,239 @@
+{
+ "about": "Written by site/capture/capture.py from real bobina runs; do not edit.",
+ "bobina": "0.1.1",
+ "release": "v0.1.1",
+ "now": "2026-11-05T09:49:00",
+ "files": {
+  "price-tag.bob.md": {
+   "path": "site/examples/price-tag.bob.md",
+   "text": "---\nfonts:\n  body: Atkinson Hyperlegible\n---\n# Linen shirt {.center}\n\n## € 49.00 {.center}\n\nMachine wash at 30 °C. Final sale. {size=12px}\n\n```qr {module=2}\nhttps://example.com/linen-shirt\n```\n"
+  },
+  "receipt.bob.md": {
+   "path": "site/examples/receipt.bob.md",
+   "text": "---\ntemplate: receipt\nlocale: en-IE\nshop: \"Corner Café\"\ncurrency: EUR\nitems:\n  - [Flat white, 2, 3.20]\n  - [Croissant, 1, 2.50]\n  - [Sourdough loaf, 1, 5.80]\npay_to: DE89370400440532013000\npay_scheme: epc\npay_name: Corner Cafe\nfooter: See you tomorrow!\n---\n"
+  },
+  "jar-label.bob.md": {
+   "path": "examples/batch/jar-label.bob.md",
+   "text": "---\n# A label for a pantry jar. Each {{ name }} below is filled from one row of the data file.\nfields:\n  product: { required: true, example: \"Brown rice\" }\n  packed:  { help: \"date the jar was filled (YYYY-MM-DD)\" }\n  best_before: { help: \"YYYY-MM-DD; leave empty if it does not expire\" }\n  shelf:   { example: \"A\" }\n---\n# {{ product }} {.center}\n\n--- {.dashed}\n\nPacked **{{ packed }}** {.center}\n{% if best_before %}\n\nBest before **{{ best_before }}** {.center}\n{% endif %}\n\nShelf {{ shelf }} {.center}\n"
+  },
+  "pantry.csv": {
+   "path": "examples/batch/pantry.csv",
+   "text": "product,packed,best_before,shelf,jars\nBrown rice,2026-11-07,2027-05-07,A,2\nBlack beans,2026-11-07,2027-11-07,A,1\nCoffee,2026-11-01,2027-02-01,B,1\nSalt,2026-10-20,,B,0\n"
+  },
+  "clothing-tag.bob.md": {
+   "path": "examples/templates/clothing-tag.bob.md",
+   "text": "---\ntemplate: clothing-tag\nlocale: pt-BR\nbrand: \"Atelier Sol\"\npiece: \"Camisa de linho\"\ngarment_size: \"M\"\ncolor: \"Branca\"\nprice: \"149.90\"\nsku: \"CAM-LIN-M-BR\"\n---\n"
+  },
+  "food-label.bob.md": {
+   "path": "examples/templates/food-label.bob.md",
+   "text": "---\ntemplate: food-label\nlocale: pt-BR\nproduct: \"Molho de tomate\"\nstorage: \"Refrigerado 0–4 °C\"\nby: \"Ana\"\nbatch: \"L0811\"\n---\n"
+  },
+  "jewelry-tag.bob.md": {
+   "path": "examples/templates/jewelry-tag.bob.md",
+   "text": "---\ntemplate: jewelry-tag\nlocale: pt-BR\npiece: \"Anel solitário\"\ncode: \"AN-0231\"\nmetal: \"Ouro 18k\"\nweight: \"2,4 g\"\nprice: \"1890.00\"\n---\n"
+  },
+  "pay-sign.bob.md": {
+   "path": "examples/templates/pay-sign.bob.md",
+   "text": "---\ntemplate: pay-sign\nlocale: pt-BR\nscheme: pix\nto: \"you@example.com\"\nname: \"Café Sol\"\ncity: Rio\n---\n"
+  },
+  "sale-price.bob.md": {
+   "path": "examples/templates/sale-price.bob.md",
+   "text": "---\ntemplate: sale-price\nlocale: pt-BR\nproduct: \"Café 500 g\"\nold: \"21.90\"\nnew: \"16.90\"\nuntil: \"15/11\"\n---\n"
+  },
+  "shelf-price.bob.md": {
+   "path": "examples/templates/shelf-price.bob.md",
+   "text": "---\ntemplate: shelf-price\nlocale: pt-BR\nproduct: \"Arroz tipo 1\"\nprice: \"24.90\"\nunit: \"5 kg\"\nper: \"R$ 4,98/kg\"\nean: \"7891234567895\"\n---\n"
+  },
+  "shipping-label.bob.md": {
+   "path": "examples/templates/shipping-label.bob.md",
+   "text": "---\ntemplate: shipping-label\nlocale: pt-BR\nto: \"Maria Silva\"\naddress: \"Rua das Flores, 123 - ap 4\"\ncity: \"Rio de Janeiro - RJ\"\nzip: \"20000-000\"\nfrom: \"Loja Exemplo · Rua A, 1 · São Paulo - SP\"\norder: \"#1042\"\ntracking: \"BR123456789BR\"\n---\n"
+  }
+ },
+ "casts": [
+  {
+   "id": "print",
+   "title": "Print, after the confirmation screen",
+   "steps": [
+    {
+     "cmd": "bobina print receipt.bob.md",
+     "exit": 0,
+     "text": "┌─ preview · mtp-ii-58 · 58 mm ──┐\n│                                │\n│     C o r n e r   C a f é      │\n│                                │\n│       05/11/2026, 09:49        │\n│⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│\n│Item                   Qty Price│\n│⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉│\n│Flat white               2 €6.40│\n│Croissant                1 €2.50│\n│Sourdough loaf           1 €5.80│\n│                    TOTAL €14.70│\n│                                │\n│          ⢸⢿⢽⠽⣊⡥⢬⣭⡘⡯⡿⡇          │\n│          ⢸⣟⡻⣿⡿⡥⢿⡧⣻⣯⡫⡇          │\n│          ⠰⡾⠸⣿⣽⠾⠛⣿⣶⣦⡫⡅          │\n│          ⠸⢿⣽⣯⢵⡼⣢⠼⡴⠾⡼⡆          │\n│          ⢸⣳⣺⣿⣺⡭⢻⣧⢼⣿⠿⡃          │\n│          ⠘⠛⠚⠛⠛⠛⠓⠚⠙⠋⠚           │\n│         SEPA · €14.70          │\n│       See you tomorrow!        │\n│┄┄┄┄┄┄┄┄┄┄┄┄┄┄ ⟶ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│\n└────────────────────────────────┘\n ~8.3 cm of paper · 10 native rows, 2 raster · 2.6 KB\n preview: exact dots; ink spread not calibrated yet\n paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n\n1 note — check them before printing\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (⚠ not tested in a payment app)\n            → scan a printed code with the app before using it\n\n [p] print   [e] edit again   [s] save as…   [q] quit\n> p\nprinted on test: ~8.3 cm",
+     "html": "<span class=\"d\">┌─ preview · mtp-ii-58 · 58 mm ──┐</span>\n<span class=\"d\">│</span>                                <span class=\"d\">│</span>\n<span class=\"d\">│</span>     <span class=\"b\">C</span> <span class=\"b\">o</span> <span class=\"b\">r</span> <span class=\"b\">n</span> <span class=\"b\">e</span> <span class=\"b\">r</span> <span class=\"b\"> </span> <span class=\"b\">C</span> <span class=\"b\">a</span> <span class=\"b\">f</span> <span class=\"b\">é</span>      <span class=\"d\">│</span>\n<span class=\"d\">│</span>                                <span class=\"d\">│</span>\n<span class=\"d\">│</span>       05/11/2026, 09:49        <span class=\"d\">│</span>\n<span class=\"d\">│</span>⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂<span class=\"d\">│</span>\n<span class=\"d\">│</span><span class=\"b\">I</span><span class=\"b\">t</span><span class=\"b\">e</span><span class=\"b\">m</span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\"> </span><span class=\"b\">Q</span><span class=\"b\">t</span><span class=\"b\">y</span><span class=\"b\"> </span><span class=\"b\">P</span><span class=\"b\">r</span><span class=\"b\">i</span><span class=\"b\">c</span><span class=\"b\">e</span><span class=\"d\">│</span>\n<span class=\"d\">│</span>⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉<span class=\"d\">│</span>\n<span class=\"d\">│</span>Flat white               2 €6.40<span class=\"d\">│</span>\n<span class=\"d\">│</span>Croissant                1 €2.50<span class=\"d\">│</span>\n<span class=\"d\">│</span>Sourdough loaf           1 €5.80<span class=\"d\">│</span>\n<span class=\"d\">│</span>                    <span class=\"b\">T</span><span class=\"b\">O</span><span class=\"b\">T</span><span class=\"b\">A</span><span class=\"b\">L</span><span class=\"b\"> </span><span class=\"b\">€</span><span class=\"b\">1</span><span class=\"b\">4</span><span class=\"b\">.</span><span class=\"b\">7</span><span class=\"b\">0</span><span class=\"d\">│</span>\n<span class=\"d\">│</span>                                <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⢸⢿⢽⠽⣊⡥⢬⣭⡘⡯⡿⡇          <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⢸⣟⡻⣿⡿⡥⢿⡧⣻⣯⡫⡇          <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⠰⡾⠸⣿⣽⠾⠛⣿⣶⣦⡫⡅          <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⠸⢿⣽⣯⢵⡼⣢⠼⡴⠾⡼⡆          <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⢸⣳⣺⣿⣺⡭⢻⣧⢼⣿⠿⡃          <span class=\"d\">│</span>\n<span class=\"d\">│</span>          ⠘⠛⠚⠛⠛⠛⠓⠚⠙⠋⠚           <span class=\"d\">│</span>\n<span class=\"d\">│</span>         SEPA · €14.70          <span class=\"d\">│</span>\n<span class=\"d\">│</span>       See you tomorrow!        <span class=\"d\">│</span>\n<span class=\"d\">│</span>┄┄┄┄┄┄┄┄┄┄┄┄┄┄ <span class=\"g\">⟶</span> ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄<span class=\"d\">│</span>\n<span class=\"d\">└────────────────────────────────┘</span>\n ~8.3 cm of paper · 10 native rows, 2 raster · 2.6 KB\n preview: exact dots; ink spread not calibrated yet\n paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n\n1 note — check them before printing\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (<span class=\"g\">⚠</span> not tested in a payment app)\n            → scan a printed code with the app before using it\n\n [p] print   [e] edit again   [s] save as…   [q] quit\n&gt; p\nprinted on test: ~8.3 cm"
+    }
+   ]
+  },
+  {
+   "id": "nudges",
+   "title": "Nudges, not blocks",
+   "steps": [
+    {
+     "cmd": "bobina check price-tag.bob.md",
+     "exit": 0,
+     "text": "2 warnings\n! warning [F201] line 9: font \"Atkinson Hyperlegible\" at 12px is below its tested minimum\n            → use ≥ 14px  (evidence: F2)\n! warning [Q101] line 11: QR module 2 in native mode\n            → use module=3  (evidence: N6, R5-05)\n~4.2 cm of paper · 3 native rows, 1 raster · 5.8 KB\npreview: exact dots; ink spread not calibrated yet",
+     "html": "2 warnings\n! warning [F201] line 9: font \"Atkinson Hyperlegible\" at 12px is below its tested minimum\n            → use ≥ 14px  (evidence: F2)\n! warning [Q101] line 11: QR module 2 in native mode\n            → use module=3  (evidence: N6, R5-05)\n~4.2 cm of paper · 3 native rows, 1 raster · 5.8 KB\npreview: exact dots; ink spread not calibrated yet"
+    }
+   ]
+  },
+  {
+   "id": "agents",
+   "title": "An agent without a terminal",
+   "steps": [
+    {
+     "cmd": "bobina print receipt.bob.md",
+     "exit": 7,
+     "text": "┌─ preview · mtp-ii-58 · 58 mm ──┐\n│                                │\n│     C o r n e r   C a f é      │\n│                                │\n│       05/11/2026, 09:49        │\n│⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│\n│Item                   Qty Price│\n│⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉│\n│Flat white               2 €6.40│\n│Croissant                1 €2.50│\n│Sourdough loaf           1 €5.80│\n│                    TOTAL €14.70│\n│                                │\n│          ⢸⢿⢽⠽⣊⡥⢬⣭⡘⡯⡿⡇          │\n│          ⢸⣟⡻⣿⡿⡥⢿⡧⣻⣯⡫⡇          │\n│          ⠰⡾⠸⣿⣽⠾⠛⣿⣶⣦⡫⡅          │\n│          ⠸⢿⣽⣯⢵⡼⣢⠼⡴⠾⡼⡆          │\n│          ⢸⣳⣺⣿⣺⡭⢻⣧⢼⣿⠿⡃          │\n│          ⠘⠛⠚⠛⠛⠛⠓⠚⠙⠋⠚           │\n│         SEPA · €14.70          │\n│       See you tomorrow!        │\n│┄┄┄┄┄┄┄┄┄┄┄┄┄┄ ⟶ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│\n└────────────────────────────────┘\n ~8.3 cm of paper · 10 native rows, 2 raster · 2.6 KB\n preview: exact dots; ink spread not calibrated yet\n paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n\n1 note — check them before printing\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (⚠ not tested in a payment app)\n            → scan a printed code with the app before using it\n1 error — nothing printed\n✗ error   [E107] confirmation required: no terminal attached. Re-run with --yes to print without it.",
+     "html": "┌─ preview · mtp-ii-58 · 58 mm ──┐\n│                                │\n│     C o r n e r   C a f é      │\n│                                │\n│       05/11/2026, 09:49        │\n│⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂⠂│\n│Item                   Qty Price│\n│⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉│\n│Flat white               2 €6.40│\n│Croissant                1 €2.50│\n│Sourdough loaf           1 €5.80│\n│                    TOTAL €14.70│\n│                                │\n│          ⢸⢿⢽⠽⣊⡥⢬⣭⡘⡯⡿⡇          │\n│          ⢸⣟⡻⣿⡿⡥⢿⡧⣻⣯⡫⡇          │\n│          ⠰⡾⠸⣿⣽⠾⠛⣿⣶⣦⡫⡅          │\n│          ⠸⢿⣽⣯⢵⡼⣢⠼⡴⠾⡼⡆          │\n│          ⢸⣳⣺⣿⣺⡭⢻⣧⢼⣿⠿⡃          │\n│          ⠘⠛⠚⠛⠛⠛⠓⠚⠙⠋⠚           │\n│         SEPA · €14.70          │\n│       See you tomorrow!        │\n│┄┄┄┄┄┄┄┄┄┄┄┄┄┄ <span class=\"g\">⟶</span> ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│\n└────────────────────────────────┘\n ~8.3 cm of paper · 10 native rows, 2 raster · 2.6 KB\n preview: exact dots; ink spread not calibrated yet\n paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n\n1 note — check them before printing\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (<span class=\"g\">⚠</span> not tested in a payment app)\n            → scan a printed code with the app before using it\n1 error — nothing printed\n✗ error   [E107] confirmation required: no terminal attached. Re-run with --yes to print without it."
+    },
+    {
+     "cmd": "bobina help E107",
+     "exit": 0,
+     "text": "E107  error · errors · stops the job: nothing prints\n  a terminal is needed (confirmation or --ask)\n\n  what to do: Add --yes (scripts, agents, ssh) or run in a terminal; instead of --ask, give the fields with --set.\n  docs: docs/problems/E107.md in the bobina repository",
+     "html": "E107  error · errors · stops the job: nothing prints\n  a terminal is needed (confirmation or --ask)\n\n  what to do: Add --yes (scripts, agents, ssh) or run in a terminal; instead of --ask, give the fields with --set.\n  docs: docs/problems/E107.md in the bobina repository"
+    },
+    {
+     "cmd": "bobina print receipt.bob.md --yes",
+     "exit": 0,
+     "text": "paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n1 note — printing anyway (--yes)\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (⚠ not tested in a payment app)\n            → scan a printed code with the app before using it\nprinted on test: ~8.3 cm",
+     "html": "paper: roll length unknown (bobina paper new 15m, or --diameter 40mm)\n1 note — printing anyway (--yes)\n· note    [P302] line 30: pay scheme=epc: nobody has scanned this code with a SEPA banking app yet (<span class=\"g\">⚠</span> not tested in a payment app)\n            → scan a printed code with the app before using it\nprinted on test: ~8.3 cm"
+    }
+   ]
+  },
+  {
+   "id": "batch",
+   "title": "One label per row",
+   "steps": [
+    {
+     "cmd": "bobina check jar-label.bob.md --data pantry.csv",
+     "exit": 0,
+     "text": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines ✂, 4 feeds to the tear bar ⟶ (the last at the end)\npreview: exact dots; ink spread not calibrated yet",
+     "html": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines <span class=\"g\">✂</span>, 4 feeds to the tear bar <span class=\"g\">⟶</span> (the last at the end)\npreview: exact dots; ink spread not calibrated yet"
+    },
+    {
+     "cmd": "bobina preview jar-label.bob.md --data pantry.csv -o 'labels/{product}.png'",
+     "exit": 0,
+     "text": "wrote 4 images: labels/Brown rice.png … labels/Salt.png (one per label)",
+     "html": "wrote 4 images: labels/Brown rice.png … labels/Salt.png (one per label)"
+    }
+   ]
+  }
+ ],
+ "tickets": [
+  {
+   "id": "receipt",
+   "group": "site",
+   "png": "/captures/receipt.png",
+   "width": 384,
+   "height": 664,
+   "file": "receipt.bob.md",
+   "label": "receipt.bob.md"
+  },
+  {
+   "id": "price-tag",
+   "group": "site",
+   "png": "/captures/price-tag.png",
+   "width": 384,
+   "height": 333,
+   "file": "price-tag.bob.md",
+   "label": "price-tag.bob.md"
+  },
+  {
+   "id": "clothing-tag",
+   "group": "gallery",
+   "png": "/captures/clothing-tag.png",
+   "width": 384,
+   "height": 590,
+   "file": "clothing-tag.bob.md",
+   "label": "clothing-tag.bob.md"
+  },
+  {
+   "id": "food-label",
+   "group": "gallery",
+   "png": "/captures/food-label.png",
+   "width": 384,
+   "height": 366,
+   "file": "food-label.bob.md",
+   "label": "food-label.bob.md"
+  },
+  {
+   "id": "jewelry-tag",
+   "group": "gallery",
+   "png": "/captures/jewelry-tag.png",
+   "width": 384,
+   "height": 226,
+   "file": "jewelry-tag.bob.md",
+   "label": "jewelry-tag.bob.md"
+  },
+  {
+   "id": "pay-sign",
+   "group": "gallery",
+   "png": "/captures/pay-sign.png",
+   "width": 384,
+   "height": 631,
+   "file": "pay-sign.bob.md",
+   "label": "pay-sign.bob.md"
+  },
+  {
+   "id": "sale-price",
+   "group": "gallery",
+   "png": "/captures/sale-price.png",
+   "width": 384,
+   "height": 414,
+   "file": "sale-price.bob.md",
+   "label": "sale-price.bob.md"
+  },
+  {
+   "id": "shelf-price",
+   "group": "gallery",
+   "png": "/captures/shelf-price.png",
+   "width": 384,
+   "height": 414,
+   "file": "shelf-price.bob.md",
+   "label": "shelf-price.bob.md"
+  },
+  {
+   "id": "shipping-label",
+   "group": "gallery",
+   "png": "/captures/shipping-label.png",
+   "width": 384,
+   "height": 622,
+   "file": "shipping-label.bob.md",
+   "label": "shipping-label.bob.md"
+  },
+  {
+   "id": "label-black-beans",
+   "group": "batch",
+   "png": "/captures/label-black-beans.png",
+   "width": 384,
+   "height": 318,
+   "file": "jar-label.bob.md",
+   "label": "labels/Black beans.png"
+  },
+  {
+   "id": "label-brown-rice",
+   "group": "batch",
+   "png": "/captures/label-brown-rice.png",
+   "width": 384,
+   "height": 318,
+   "file": "jar-label.bob.md",
+   "label": "labels/Brown rice.png"
+  },
+  {
+   "id": "label-coffee",
+   "group": "batch",
+   "png": "/captures/label-coffee.png",
+   "width": 384,
+   "height": 318,
+   "file": "jar-label.bob.md",
+   "label": "labels/Coffee.png"
+  },
+  {
+   "id": "label-salt",
+   "group": "batch",
+   "png": "/captures/label-salt.png",
+   "width": 384,
+   "height": 276,
+   "file": "jar-label.bob.md",
+   "label": "labels/Salt.png"
+  }
+ ]
+}
