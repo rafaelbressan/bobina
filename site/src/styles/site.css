@@ -856,3 +856,19 @@ hr {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Pagefind's search box, in ink and paper */
+#search {
+  --pagefind-ui-font: var(--body);
+  --pagefind-ui-primary: var(--ink);
+  --pagefind-ui-text: var(--ink);
+  --pagefind-ui-background: var(--paper);
+  --pagefind-ui-border: var(--ink);
+  --pagefind-ui-tag: var(--code-bg);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 0;
+}
+#search mark {
+  background: var(--ink);
+  color: var(--paper);
+}
