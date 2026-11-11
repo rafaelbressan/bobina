@@ -33,6 +33,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
 | `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
+| `init` | first run: printer, profile, locale, roll, a test strip with the calibration ([below](#first-run-init)) | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
 | `config locale [TAG]` | show or save the locale of documents without `locale:` ([FORMAT.md §7.1](FORMAT.md#71-dates-and-languages)) | — |
 | `profile list \| show \| use` | printer profiles | — |
@@ -42,6 +43,15 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](mcp.md) | — |
 
 Everyday use: `bobina print "buy bread"`, `bobina print list.bob.md`, `echo "hi" | bobina print --yes`.
+
+## First run (`init`)
+
+`bobina init` finds the printer (Bluetooth, USB `/dev/usb/lp*`, a file, ssh), confirms the profile its
+name suggests and the locale, asks the roll (as `paper new`), then offers one test strip: a sample, the feed test if
+the profile is unmeasured, the tear ruler last; it asks what the paper shows. Answers come from stdin; run again
+to change one part. `--yes` (or `BOBINA_NONINTERACTIVE`) asks and prints nothing: the first printer in a fixed
+order (USB, known model, printer-like name; `--printer ADDRESS` chooses), its profile, the locale. No roll: `P104`;
+no Bluetooth stack: `P401`; nothing found: `E406`. `--json`: `bobina.init/1`.
 
 ## Confirmation screen
 
@@ -450,23 +460,19 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 
 ## Implementation notes (v0.x, 2026-11-05)
 
-- Commands implemented: `print`, `check`, `preview` (`--realistic`), `view`, `edit` (`--template`), `status` (`--list`), `mode`, `send`, `printer scan|add|list|use|remove`, `profile list|show`, `fonts list`, `template list|show|new`, `seq list|set|reset`, `calibrate compare PHOTO FILE`, `help format|data|pay|nudges|aliases|COMMAND`.
 - `print` also takes `--data FILE` (one label per row, values literal; CSV, TSV/TXT with the delimiter detected,
   Excel `.xlsx` with `--sheet`, JSON list of objects), `--rows N-M` (data rows, 1 = first after the header),
   `--where COL=VAL|COL!=VAL|COL~=TEXT` (repeatable, case-insensitive), `--copies-from COL` (identical copies per
   row, 0 skips it; counters advance once per row), max 1000 labels per job, `--repeat N`, `--copies N`, `--set KEY=VALUE`, `-o FILE` (bytes to a file: not printing, no confirmation).
-- Printers: `transport = bluetooth` (RFCOMM; status checked on the same link before printing → exit 5 if cover open/paper out), `command` (bytes piped to a command, e.g. `ssh tower bobina send --yes -`), `file` (append to a file or device).
-- Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks; no terminal and no `--yes` → exit 7.
+- Printers: `transport = bluetooth` (status checked before printing: exit 5 if cover open/paper out), `command`, `file`.
+- Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks.
 - Exit code 8: security error (template sandbox, variable in a raw block or image path).
 - `bobina edit` drafts live in `~/.local/state/bobina/drafts/`; the last print in `~/.local/state/bobina/last/` (`--last` resends identical bytes, `--again` re-renders).
-- **A new printer, step by step:** `bobina calibrate tear` prints a ruler with no feed after it: tear at the serrated
-  edge and read the mm (`bobina calibrate tear 5`); jobs then end with that distance + 6 mm (`tear_margin_mm`).
-  `bobina calibrate feed` prints three lines, A–B 10 mm drawn as an image and B–C a 10 mm paper feed (ESC J) sent
-  right after B: if B and C touch, the printer ignores a feed right after an image (the MTP-II does) and
-  `bobina calibrate feed touching` keeps the safe mode; `apart` turns it off. **Safe by default** (08/11): a printer
-  nobody measured sends every feed that follows an image as white raster rows (48 bytes per dot row instead of 3
-  bytes per feed) and waits until the printer is idle before the end of an image job; both are per-printer keys in
-  `config.toml` (`blank_rows_after_raster`, `idle_before_tail`).
+- **Calibration** (also on the `init` strip): `bobina calibrate tear` prints a ruler with no feed after it; the mm at
+  the torn edge (`bobina calibrate tear 5`) + 6 mm (`tear_margin_mm`) ends every job. `bobina calibrate feed`: lines
+  A–B 10 mm drawn, B–C a 10 mm ESC J right after B; `touching` (the MTP-II) keeps the safe mode, `apart` turns it
+  off. **Safe by default**: an unmeasured printer sends feeds after images as white rows and waits until idle
+  before the end of an image job (per-printer keys `blank_rows_after_raster`, `idle_before_tail`).
 - **What a profile turns on** (`bobina profile show NAME` lists it). Three features follow the ESC/POS spec and are
   tested on the bytes only; a job that uses one gets the note `P301` (docs/TESTED.md):
   - Code pages: `encoding = "codepage"` and a `[codepages]` table (codec = `ESC t` number, in order of preference):

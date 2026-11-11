@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `bobina init`: the first run in one command. It finds the printer (a Bluetooth scan, USB printers on Linux with
+  their model), or takes a test file printer or one on another machine (ssh); suggests the profile from the name
+  the printer gives itself ("looks like a Goldensky MTP-II, 58 mm paper: right?"); shows the locale with a date and
+  an amount; records the roll as `paper new` does; and offers one test strip that carries the calibration (the
+  feed test when the profile was not measured, the tear ruler at the end), then asks what the paper shows. Run it
+  again to change one part; the rest stays.
+- `bobina init --yes` (and `BOBINA_NONINTERACTIVE`) asks nothing and prints nothing: the first printer in a fixed
+  order (USB, a known model, a printer-like name, never a headset; `--printer ADDRESS` chooses), its profile, the
+  locale; it says that the roll length is missing (`P104`, with the `bobina paper new` command). `--json` writes
+  `bobina.init/1`. New problems: `E406` (no printer found), `P401` (no Bluetooth stack, or no USB search here:
+  said, never waited for), `P402` (no profile matches the name), `P403` (a USB printer this user cannot write to).
+
 ## 0.1.2 — 2026-11-11
 
 - One locale per job, never mixed: a document's `locale:`, else the machine's (`locale` in config.toml), else

@@ -54,17 +54,15 @@ anything; bobina only warns, and tells you why (`warning[Q101] … (evidence: N6
 ```bash
 curl -LsSf https://raw.githubusercontent.com/rafaelbressan/bobina/main/get.sh | sh   # installs uv if missing
 # or: uv tool install bobina · pipx install bobina · a .deb or Homebrew: docs/INSTALL.md
-bobina printer scan           # find the Bluetooth address
-bobina printer add mtp AA:BB:CC:DD:EE:FF
-bobina status                 # paper, cover, errors
+bobina init                   # printer, profile, locale, roll, test strip
+bobina init --yes             # agents, scripts: no questions, no print
 ```
 
 Bluetooth printing needs Linux and the system Python (uv's and Homebrew's Pythons have no Bluetooth sockets;
-`get.sh` picks the right one). The .deb, pipx from apt, the Bluetooth boot service, extras and a checkout
+`get.sh` picks the right one). The .deb, pipx, the boot service, extras and a checkout
 (`./install.sh`): [docs/INSTALL.md](docs/INSTALL.md).
-Printer on another machine? `bobina printer add tower --command "ssh tower bobina send --yes -"`.
-No printer at hand? `bobina printer add test --path out.bin` appends every job's bytes to `out.bin` (a file
-printer: `status` and `paper` need Bluetooth; `bobina printer list` shows where each printer goes).
+Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
+`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
 
 ## The format in one screen
 
@@ -132,6 +130,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `edit [FILE] [--template NAME]` | write in your editor, confirm, print |
 | `template list \| show \| new` | receipt, label, todo, card, note, and a shop gallery: [guides/templates.md](docs/guides/templates.md) |
 | `seq list \| set \| reset` | persistent counters (`{{ seq.NAME }}`); `seq set ticket 100`: the next print uses 100 |
+| `init` | first run; again to change one part |
 | `printer scan \| add \| list \| use \| remove` | printers live in `~/.config/bobina/config.toml` |
 | `config locale [TAG]` | the locale of documents without `locale:` (first run: from the time zone, saved) |
 | `status`, `mode [esc\|tspl\|cpcl]` | printer state; command language |
@@ -252,6 +251,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
 | `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
+| `init` | first run: printer, profile, locale, roll, a test strip with the calibration ([below](#first-run-init)) | — |
 | `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
 | `config locale [TAG]` | show or save the locale of documents without `locale:` ([FORMAT.md §7.1](docs/FORMAT.md#71-dates-and-languages)) | — |
 | `profile list \| show \| use` | printer profiles | — |
@@ -261,6 +261,15 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](docs/mcp.md) | — |
 
 Everyday use: `bobina print "buy bread"`, `bobina print list.bob.md`, `echo "hi" | bobina print --yes`.
+
+## First run (`init`)
+
+`bobina init` finds the printer (Bluetooth, USB `/dev/usb/lp*`, a file, ssh), confirms the profile its
+name suggests and the locale, asks the roll (as `paper new`), then offers one test strip: a sample, the feed test if
+the profile is unmeasured, the tear ruler last; it asks what the paper shows. Answers come from stdin; run again
+to change one part. `--yes` (or `BOBINA_NONINTERACTIVE`) asks and prints nothing: the first printer in a fixed
+order (USB, known model, printer-like name; `--printer ADDRESS` chooses), its profile, the locale. No roll: `P104`;
+no Bluetooth stack: `P401`; nothing found: `E406`. `--json`: `bobina.init/1`.
 
 ## Confirmation screen
 
@@ -669,23 +678,19 @@ Agents and the files written for them: [agents.md](docs/agents.md); the MCP serv
 
 ## Implementation notes (v0.x, 2026-11-05)
 
-- Commands implemented: `print`, `check`, `preview` (`--realistic`), `view`, `edit` (`--template`), `status` (`--list`), `mode`, `send`, `printer scan|add|list|use|remove`, `profile list|show`, `fonts list`, `template list|show|new`, `seq list|set|reset`, `calibrate compare PHOTO FILE`, `help format|data|pay|nudges|aliases|COMMAND`.
 - `print` also takes `--data FILE` (one label per row, values literal; CSV, TSV/TXT with the delimiter detected,
   Excel `.xlsx` with `--sheet`, JSON list of objects), `--rows N-M` (data rows, 1 = first after the header),
   `--where COL=VAL|COL!=VAL|COL~=TEXT` (repeatable, case-insensitive), `--copies-from COL` (identical copies per
   row, 0 skips it; counters advance once per row), max 1000 labels per job, `--repeat N`, `--copies N`, `--set KEY=VALUE`, `-o FILE` (bytes to a file: not printing, no confirmation).
-- Printers: `transport = bluetooth` (RFCOMM; status checked on the same link before printing → exit 5 if cover open/paper out), `command` (bytes piped to a command, e.g. `ssh tower bobina send --yes -`), `file` (append to a file or device).
-- Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks; no terminal and no `--yes` → exit 7.
+- Printers: `transport = bluetooth` (status checked before printing: exit 5 if cover open/paper out), `command`, `file`.
+- Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks.
 - Exit code 8: security error (template sandbox, variable in a raw block or image path).
 - `bobina edit` drafts live in `~/.local/state/bobina/drafts/`; the last print in `~/.local/state/bobina/last/` (`--last` resends identical bytes, `--again` re-renders).
-- **A new printer, step by step:** `bobina calibrate tear` prints a ruler with no feed after it: tear at the serrated
-  edge and read the mm (`bobina calibrate tear 5`); jobs then end with that distance + 6 mm (`tear_margin_mm`).
-  `bobina calibrate feed` prints three lines, A–B 10 mm drawn as an image and B–C a 10 mm paper feed (ESC J) sent
-  right after B: if B and C touch, the printer ignores a feed right after an image (the MTP-II does) and
-  `bobina calibrate feed touching` keeps the safe mode; `apart` turns it off. **Safe by default** (08/11): a printer
-  nobody measured sends every feed that follows an image as white raster rows (48 bytes per dot row instead of 3
-  bytes per feed) and waits until the printer is idle before the end of an image job; both are per-printer keys in
-  `config.toml` (`blank_rows_after_raster`, `idle_before_tail`).
+- **Calibration** (also on the `init` strip): `bobina calibrate tear` prints a ruler with no feed after it; the mm at
+  the torn edge (`bobina calibrate tear 5`) + 6 mm (`tear_margin_mm`) ends every job. `bobina calibrate feed`: lines
+  A–B 10 mm drawn, B–C a 10 mm ESC J right after B; `touching` (the MTP-II) keeps the safe mode, `apart` turns it
+  off. **Safe by default**: an unmeasured printer sends feeds after images as white rows and waits until idle
+  before the end of an image job (per-printer keys `blank_rows_after_raster`, `idle_before_tail`).
 - **What a profile turns on** (`bobina profile show NAME` lists it). Three features follow the ESC/POS spec and are
   tested on the bytes only; a job that uses one gets the note `P301` (docs/TESTED.md):
   - Code pages: `encoding = "codepage"` and a `[codepages]` table (codec = `ESC t` number, in order of preference):
@@ -1147,6 +1152,7 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E403` | error | printer not ready (paper, cover, error) |
 | `E404` | error | operation not supported by this printer's transport |
 | `E405` | error | printer busy: another bobina job kept it too long |
+| `E406` | error | `bobina init` found no printer to set up |
 | `E501` | error | document error |
 
 Nudges:
@@ -1192,9 +1198,13 @@ Nudges:
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
+| `P104` | note | roll length not set: no paper estimate |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
+| `P401` | note | no Bluetooth or USB search here (says why) |
+| `P402` | note | no profile matches the printer's name (default taken) |
+| `P403` | warning | a USB printer this user cannot write to |
 | `M101` | warning | unknown attribute |
 | `M102` | note | unknown block type, printed as preformatted text |
 | `M103` | note | attribute not implemented yet (ignored) |
@@ -1642,7 +1652,7 @@ bobina needs Python 3.11 or newer. Pick one way:
 | Windows | `uv tool install bobina` or `pipx install bobina` (printer driver: `drivers/windows/`) |
 | A checkout, to change bobina | `./install.sh` (editable install, plus the Bluetooth service on Linux) |
 
-Then `bobina printer scan`, `bobina printer add NAME ADDRESS` and `bobina status`.
+Then `bobina init` (printer, profile, locale, roll, a test strip).
 
 ## Bluetooth needs the system Python
 

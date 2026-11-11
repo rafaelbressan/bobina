@@ -490,12 +490,12 @@ Nudges:
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
-| `P104` | note | roll length not set: no estimate of the paper left |
+| `P104` | note | roll length not set: no paper estimate |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
-| `P401` | note | Bluetooth or USB printers cannot be looked for here (says why) |
-| `P402` | note | no profile matches the printer's name: the default was taken |
+| `P401` | note | no Bluetooth or USB search here (says why) |
+| `P402` | note | no profile matches the printer's name (default taken) |
 | `P403` | warning | a USB printer this user cannot write to |
 | `M101` | warning | unknown attribute |
 | `M102` | note | unknown block type, printed as preformatted text |
