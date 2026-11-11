@@ -53,6 +53,14 @@ def atomic_write(
         raise
 
 
+def read_capped(path, limit: int) -> bytes | None:
+    """The file, or None when it holds more than `limit` bytes. Reads at most limit + 1 bytes: a pipe or a device
+    (/dev/zero, <(cmd)) has no size to check first."""
+    with open(path, "rb") as f:
+        data = f.read(limit + 1)
+    return None if len(data) > limit else data
+
+
 def _read_umask() -> int:
     mask = os.umask(0)
     os.umask(mask)

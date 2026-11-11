@@ -2,11 +2,14 @@
 
 Nothing here reaches the network (fake DNS, fake openers) or a printer (-o, check, preview, a file printer)."""
 
+import json
+import os
 import time
 
+import openpyxl
 import pytest
 
-from bobina import cli, templating
+from bobina import cli, datasource, fileio, library, sources, templating
 from bobina.engine import build
 from bobina.nudges import SecurityError
 from bobina.templating import Tainted
@@ -143,3 +146,86 @@ def test_template_symlink_out_of_the_document_folder_is_refused(tmp_path):
     docs.mkdir()
     (docs / "t.bob.md").symlink_to(outside)
     refused("---\ntemplate: t.bob.md\n---\n", "M315", base_dir=str(docs))
+
+
+# -- data files: size, unpacked size, rows ------------------------------------------------------------------
+
+DEV_ZERO = pytest.mark.skipif(not os.path.exists("/dev/zero"), reason="no /dev/zero here")
+
+
+def test_a_data_file_is_read_up_to_its_limit_only(tmp_path, monkeypatch):
+    (tmp_path / "d.csv").write_text("name\n" + "x\n" * 100)
+    monkeypatch.setattr(datasource, "MAX_FILE", 50)
+    with pytest.raises(datasource.DataError, match="larger than"):
+        datasource.read_rows(str(tmp_path / "d.csv"))
+    assert fileio.read_capped(tmp_path / "d.csv", 10) is None
+    assert fileio.read_capped(tmp_path / "d.csv", 1000).startswith(b"name\n")
+
+
+@DEV_ZERO
+def test_a_device_as_data_is_capped_not_read_forever(monkeypatch):
+    monkeypatch.setattr(datasource, "MAX_FILE", 1_000_000)  # /dev/zero (or a pipe) has no size to check first
+    with pytest.raises(datasource.DataError, match="larger than"):
+        datasource.read_rows("/dev/zero")
+
+
+def test_rows_beyond_max_read_are_not_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(datasource, "MAX_READ", 3)
+    (tmp_path / "d.csv").write_text("n\n" + "".join(f"{i}\n" for i in range(10)))
+    (tmp_path / "d.json").write_text(json.dumps([{"n": i} for i in range(10)]))
+    wb = openpyxl.Workbook()
+    wb.active.append(["n"])
+    for i in range(10):
+        wb.active.append([i])
+    wb.save(tmp_path / "d.xlsx")
+    for f in ("d.csv", "d.json", "d.xlsx"):
+        assert [r["n"] for r in datasource.read_rows(str(tmp_path / f))] == ["0", "1", "2"], f
+
+
+def test_a_spreadsheet_that_unpacks_too_large_is_refused(tmp_path, monkeypatch):
+    wb = openpyxl.Workbook()
+    wb.active.append(["n"])
+    wb.save(tmp_path / "s.xlsx")
+    monkeypatch.setattr(datasource, "MAX_UNPACKED", 1000)  # a zip bomb, in small
+    with pytest.raises(datasource.DataError, match="unpacks to more than"):
+        datasource.read_rows(str(tmp_path / "s.xlsx"))
+
+
+@pytest.mark.parametrize(
+    "name,content,why",
+    [
+        ("deep.json", "[" * 100_000 + "]" * 100_000, "nested too deeply"),
+        ("big.json", '[{"n": ' + "9" * 5000 + "}]", "invalid JSON"),
+        ("long.csv", "a,b\n" + "x" * 200_000 + ",y\n", "field larger"),
+    ],
+)
+def test_hostile_data_files_are_errors_not_crashes(tmp_path, name, content, why):
+    (tmp_path / name).write_text(content)
+    with pytest.raises(datasource.DataError, match=why):
+        datasource.read_rows(str(tmp_path / name))
+
+
+def test_library_names_are_names_not_paths():
+    for name in ("../x", "a/b", "..", ".hidden", "~x", "x.bob.md", "a\\b", ""):
+        with pytest.raises(library.LibraryError):
+            library.check_name(name)
+    with pytest.raises(library.LibraryError):
+        library.get("../config")
+
+
+# -- images from files: size cap, devices -------------------------------------------------------------------
+
+
+@DEV_ZERO
+def test_an_image_path_to_a_device_is_capped(monkeypatch):
+    monkeypatch.setattr(sources, "MAX_FILE_BYTES", 1_000_000)
+    with pytest.raises(sources.ImageError, match="larger than"):
+        sources.load("/dev/zero", "/")
+
+
+def test_image_files_over_the_limit_and_folders_are_refused(tmp_path, monkeypatch):
+    (tmp_path / "big.png").write_bytes(b"x" * 2000)
+    monkeypatch.setattr(sources, "MAX_FILE_BYTES", 1000)
+    for src in ("big.png", "."):
+        with pytest.raises(sources.ImageError):
+            sources.load(src, str(tmp_path))

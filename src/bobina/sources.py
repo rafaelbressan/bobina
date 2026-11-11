@@ -94,9 +94,14 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
         ) from None
     if p.is_dir():
         raise ImageError("I101", f"{src[:60]} is a folder, not an image")
-    if size > MAX_FILE_BYTES:
+    from .fileio import read_capped
+
+    try:
+        data = read_capped(p, MAX_FILE_BYTES) if size <= MAX_FILE_BYTES else None
+    except OSError as e:
+        raise ImageError("I101", f"{e.strerror or 'cannot read'}: {src[:60]}") from None
+    if data is None:  # also a device or a pipe (/dev/zero has no size)
         raise ImageError("I101", f"file larger than {MAX_FILE_BYTES // 1_000_000} MB")
-    data = p.read_bytes()
     return Source(data, sniff(data), "file")
 
 

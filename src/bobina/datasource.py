@@ -55,7 +55,14 @@ def read_rows(path: str, sheet: str | None = None, notes: list | None = None) ->
 
 
 def _text(p: Path) -> str:
-    raw = p.read_bytes()
+    from .fileio import read_capped
+
+    try:
+        raw = read_capped(p, MAX_FILE)
+    except OSError as e:
+        raise DataError(f"{p.name}: {e.strerror}") from None
+    if raw is None:  # a pipe or a device: no size to check before reading
+        raise DataError(f"{p.name}: larger than {MAX_FILE // 1_000_000} MB")
     for enc in ("utf-8-sig", "cp1252"):  # Excel on Windows saves CSV as cp1252
         try:
             return raw.decode(enc)
@@ -81,14 +88,17 @@ def _delimited(p: Path, delimiter: str | None, notes: list) -> list[dict[str, st
         except csv.Error:
             delimiter = ","
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    _header_notes(p.name, [str(h).strip() for h in (reader.fieldnames or [])], notes)
     out, extra = [], []
-    for i, r in enumerate(reader):
-        if i >= MAX_READ:
-            break
-        if r.get(None):
-            extra.append(i + 1)
-        out.append({str(k).strip(): (v or "").strip() for k, v in r.items() if k})
+    try:
+        _header_notes(p.name, [str(h).strip() for h in (reader.fieldnames or [])], notes)
+        for i, r in enumerate(reader):
+            if i >= MAX_READ:
+                break
+            if r.get(None):
+                extra.append(i + 1)
+            out.append({str(k).strip(): (v or "").strip() for k, v in r.items() if k})
+    except csv.Error as e:  # a value longer than 128 KB, a broken quote
+        raise DataError(f"{p.name}: line {reader.line_num}: {e}") from None
     if extra:
         rows = ", ".join(map(str, extra[:5])) + (f" and {len(extra) - 5} more" if len(extra) > 5 else "")
         which = f"row {rows} has" if len(extra) == 1 else f"rows {rows} have"
@@ -145,7 +155,7 @@ def _xlsx(p: Path, sheet: str | None, notes: list) -> list[dict[str, str]]:
         with zipfile.ZipFile(p) as z:
             if sum(i.file_size for i in z.infolist()) > MAX_UNPACKED:
                 raise DataError(f"{p.name}: unpacks to more than {MAX_UNPACKED // 1_000_000} MB")
-    except zipfile.BadZipFile:
+    except (zipfile.BadZipFile, OSError):  # OSError: a pipe cannot seek
         raise DataError(f"{p.name}: not a valid .xlsx file") from None
     try:
         wb = openpyxl.load_workbook(p, read_only=True, data_only=True)  # data_only: cached values, no formulas
@@ -215,8 +225,10 @@ def _formulas_without_value(p: Path, title: str, blanks: set[tuple[int, int]]) -
 def _json(p: Path) -> list[dict[str, str]]:
     try:
         data = json.loads(_text(p))
-    except ValueError as e:
-        raise DataError(f"{p.name}: invalid JSON ({e.msg})") from None
+    except RecursionError:
+        raise DataError(f"{p.name}: JSON nested too deeply") from None
+    except ValueError as e:  # also a number of more than 4300 digits
+        raise DataError(f"{p.name}: invalid JSON ({getattr(e, 'msg', e)})") from None
     if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
         raise DataError(f"{p.name}: expected a list of objects")
     return [{str(k): _cell(v) for k, v in r.items()} for r in data[:MAX_READ]]
