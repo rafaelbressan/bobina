@@ -247,5 +247,6 @@ from this list.
 | `P302` | note | a payment code nobody has scanned with its app yet |  |
 | `P201` | warning | raw bytes bypass every check and are not previewed |  |
 | `P401` | note | Bluetooth or USB printers cannot be looked for on this machine (the message says why) |  |
-| `P402` | note | no profile matches the printer's name: the default profile was taken |  |
+| `P402` | note | the printer's name does not settle the profile (no match, or several widths): one was taken |  |
 | `P403` | warning | a USB printer this user cannot write to |  |
+| `P404` | warning | a printer in config.toml names a profile bobina does not know |  |

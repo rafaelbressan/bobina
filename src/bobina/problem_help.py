@@ -99,7 +99,9 @@ FIX = {
     "P104": "When you know the roll: bobina paper new 30m (its length) or bobina paper new --diameter 40mm.",
     "P401": "Install or turn on what the message names, or set up another kind of printer: USB, a printer on"
     " another machine (ssh) or a file printer.",
-    "P402": "Check the profile: bobina profile list, then bobina init --profile ID (80 mm printers need another).",
+    "P402": "Check the profile and its paper width: bobina profile list, then bobina init --profile ID (the"
+    " message names the other one when the name fits two widths).",
+    "P404": "Choose a profile again: bobina init (or bobina init --yes --profile ID); bobina profile list shows them.",
     "P403": "Add the user to the lp group (sudo usermod -aG lp $USER), then log out and in again.",
     # M markup and data
     "M101": "Check the attribute name (bobina help format).",

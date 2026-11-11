@@ -79,7 +79,17 @@ def _slug(text: str, fallback: str) -> str:
 
 
 def _target(pr: dict) -> tuple:
-    return pr.get("transport", "bluetooth"), str(pr.get("address") or pr.get("path") or pr.get("command") or "")
+    """(transport, where), as one printer is recognised: a Bluetooth address in any case, a path however written."""
+    t = pr.get("transport", "bluetooth")
+    if t == "bluetooth":
+        return t, str(pr.get("address") or "").upper()
+    if t == "file":
+        path = str(pr.get("path") or "")
+        try:
+            return t, str(Path(path).expanduser().resolve()) if path else ""
+        except (OSError, RuntimeError):
+            return t, path
+    return t, str(pr.get("command") or "")
 
 
 def _name_for(cfg: dict, pr: dict, hint: str) -> str:
@@ -111,10 +121,44 @@ def _from_device(d: discover.Device) -> tuple[dict, str]:
     return {"transport": "file", "path": d.where}, _slug(d.name if d.name != d.where else "usb", "usb")
 
 
+SSH_VALUED = set("BbcDEeFIiJLlmOopQRSWw")  # ssh options followed by a value (-p 22, -i KEY, -o OPT, -J JUMP …)
+
+
+def ssh_host(words: list[str]) -> str:
+    """The host of an ssh command line: ssh -p 2222 -i key user@tower … → tower ("" when it is not ssh)."""
+    if not words or Path(words[0]).name != "ssh":
+        return ""
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w == "--":
+            i += 1
+            break
+        if not w.startswith("-") or w == "-":
+            break
+        for j, c in enumerate(w[1:], 1):
+            if c in SSH_VALUED:
+                i += j == len(w) - 1  # -p 22: the value is the next word; -p22: in this one
+                break
+        i += 1
+    if i >= len(words):
+        return ""
+    dest = words[i]
+    if dest.startswith("ssh://"):
+        dest = dest[6:].split("/")[0].rsplit(":", 1)[0] if dest.count(":") > 1 else dest[6:].split("/")[0]
+    return dest.split("@")[-1]
+
+
 def _command(cmd: str) -> tuple[dict, str]:
-    words = shlex.split(cmd) if cmd.strip() else []
-    host = next((w for w in words[1:] if not w.startswith("-")), "") if words[:1] == ["ssh"] else ""
-    return {"transport": "command", "command": cmd}, _slug(host.split("@")[-1], "remote")
+    try:
+        words = shlex.split(cmd)
+    except ValueError as e:
+        raise Fail(USAGE, f"--command {cmd!r}: {e} (a quote left open?)"
+                   "\n→ quote the whole command once: --command 'ssh tower bobina send --yes -'",
+                   problem="E304") from None  # fmt: skip
+    if not words:
+        raise Fail(USAGE, "--command is empty\n→ --command 'ssh tower bobina send --yes -'", problem="E304")
+    return {"transport": "command", "command": cmd}, _slug(ssh_host(words), "remote")
 
 
 def _file(path: str) -> tuple[dict, str]:
@@ -173,7 +217,9 @@ def _printer_option(args, st: Setup, value: str) -> None:
 
 
 def _auto_printer(args, st: Setup) -> None:
-    devices = [x for x in _look(args, st, None) if x.printer_like]
+    printers = [x for x in _look(args, st, None) if x.printer_like]
+    devices = [x for x in printers if x.writable]
+    skipped = [x for x in printers if not x.writable]
     if not devices:
         others = [x for x in st.found if not x.printer_like]
         seen = f" (found, not printers: {', '.join(f'{x.name} {x.where}' for x in others)})" if others else ""
@@ -184,17 +230,22 @@ def _auto_printer(args, st: Setup) -> None:
     pick = devices[0]
     pr, hint = _from_device(pick)
     _use(st, pr, hint, pick.name, pick.kind)
+    said = []
     if len(devices) > 1:
         rest = ", ".join(f"{x.name} ({x.where})" for x in devices[1:])
-        st.picked = f"took {pick.name} ({pick.where}), the first of {len(devices)} printers; also found: {rest}"
+        said.append(f"took {pick.name} ({pick.where}), the first of {len(devices)} printers; also found: {rest}")
+    if skipped:
+        said.append("skipped " + ", ".join(f"{x.name} ({x.where})" for x in skipped)
+                    + ": this user cannot write to it (P403)")  # fmt: skip
+    st.picked = "; ".join(said)
 
 
 def _ask_printer(args, st: Setup, d: Dialog) -> None:
     devices = _look(args, st, d)
     rows = []
     for x in devices:
-        what = profiles.load(x.profile).name if x.profile else ("" if x.printer_like else "not a printer?")
-        rows.append((x.name, f"{x.kind} {x.where}", what))
+        what = discover.catalog()[x.profile].name if x.profile else ("" if x.printer_like else "not a printer?")
+        rows.append((x.name, f"{x.kind} {x.where}", what + ("" if x.writable else " (no permission: P403)")))
     default = "1" if devices and devices[0].printer_like else ""
     if not devices:
         d.say("  no printer found.")
@@ -218,7 +269,11 @@ def _ask_printer(args, st: Setup, d: Dialog) -> None:
             host = d.ask("  the other machine: its ssh name (tower), or the whole command: ")
             if host:
                 cmd = host if " " in host else f"ssh {host} bobina send --yes -"
-                pr, hint = _command(cmd)
+                try:
+                    pr, hint = _command(cmd)
+                except Fail as e:
+                    d.say("  " + str(e).split("\n")[0])
+                    continue
                 _use(st, pr, hint, "", "command")
                 return
         elif a == "a":
@@ -235,65 +290,68 @@ def _ask_printer(args, st: Setup, d: Dialog) -> None:
 
 
 def _profile_line(pid: str) -> str:
-    p = profiles.load(pid)
-    measured = "measured on paper" if p.get("measured", True) is not False else "not measured on paper"
-    name = re.sub(r"\s*\(\d+ ?mm\)", "", p.name)  # Goldensky MTP-II (58 mm): the width is said next
-    return f"{name}, {p.get('paper_mm', 58):g} mm paper, {measured}"
+    e = discover.catalog().get(pid)
+    if e is None:
+        return f"{pid}: not a profile bobina knows (P404)"
+    measured = "measured on paper" if e.measured else "not measured on paper"
+    name = re.sub(r"\s*\(\d+ ?mm\)", "", e.name)  # Goldensky MTP-II (58 mm): the width is said next
+    return f"{name}, {e.paper_mm:g} mm paper, {measured}"
 
 
-def _all_profiles() -> list:
-    out = []
-    for pid in profiles.available():
-        try:
-            p = profiles.load(pid)
-        except (OSError, ValueError, KeyError):
-            continue
-        out.append((pid, p))
-    return out
-
-
-def _pick_profile(d: Dialog) -> str:
-    every = _all_profiles()
-    widths = sorted({float(p.get("paper_mm", 58)) for _, p in every})
+def _ask_width(d: Dialog, widths: list[float], default: float | None) -> float:
     shown = "/".join(f"{w:g}" for w in widths)
     while True:
-        a = d.ask(f"  paper width ({shown} mm) [58]: ") or "58"
+        a = d.ask(f"  paper width ({shown} mm)" + (f" [{default:g}]" if default else "") + ": ")
+        a = a or (f"{default:g}" if default else "")
         try:
             mm = paper.parse_width(a)
         except ValueError as e:
-            d.say(f"  {e}")
+            d.say(f"  {e}" if a else "  the width of the paper, in mm")
             continue
         near = [w for w in widths if paper.fits(mm, w)]
         if near:
-            break
+            return near[0]
         d.say(f"  no profile for {mm:g} mm paper: {shown} mm")
-    rows = sorted((p for p in every if float(p[1].get("paper_mm", 58)) == near[0]),
-                  key=lambda r: (r[0] != profiles.BUILTIN, r[1].get("measured", True) is False, r[1].name))  # fmt: skip
-    for i, (pid, p) in enumerate(rows, 1):
-        kind = "measured" if p.get("measured", True) is not False else "not measured"
-        d.say(f"  {i:2d}  {pid:24s} {p.name} · {kind}")
+
+
+def _pick_profile(d: Dialog) -> str:
+    every = discover.catalog()
+    widths = sorted({e.paper_mm for e in every.values()})
+    width = _ask_width(d, widths, 58.0)
+    rows = sorted((e for e in every.values() if e.paper_mm == width),
+                  key=lambda e: (e.id != profiles.BUILTIN, not e.measured, e.name))  # fmt: skip
+    for i, e in enumerate(rows, 1):
+        d.say(f"  {i:2d}  {e.id:24s} {e.name} · {'measured' if e.measured else 'not measured'}")
     while True:
         a = d.ask("  profile [1]: ") or "1"
         if a.isdigit() and 1 <= int(a) <= len(rows):
-            return rows[int(a) - 1][0]
-        if a in dict(every):
+            return rows[int(a) - 1].id
+        if a in every:
             return a
         d.say(f"  a number from 1 to {len(rows)}, or a profile id (bobina profile list)")
 
 
 def _choose_profile(args, st: Setup, d: Dialog | None) -> None:
     if args.profile:
-        try:
-            profiles.load(args.profile)
-        except KeyError as e:
-            raise Fail(USAGE, str(e).strip("'\""), problem="E207") from None
+        if args.profile not in discover.catalog():
+            raise Fail(USAGE, f"unknown profile '{args.profile}' (see: bobina profile list)", problem="E207")
         st.profile, st.profile_by = args.profile, "option"
         return
-    match = discover.match_profile(st.device) if st.device else None
+    cands = discover.match_profiles(st.device) if st.device else []
+    ws = discover.widths(cands)
+    cat = discover.catalog()
+    match = cands[0] if cands else None
     if d is None:
+        if match and len(ws) > 1:
+            if not cat[match].measured:  # the measured one, else the most common width
+                match = next(p for p in cands if cat[p].paper_mm == ws[0])
+            other = next(p for p in cands if cat[p].paper_mm != cat[match].paper_mm)
+            both = " and ".join(f"{w:g}" for w in sorted(ws))
+            _note(st, "P402", f"'{st.device}' fits profiles for {both} mm paper: {match} was taken"
+                  f" ({cat[match].paper_mm:g} mm)", f"the other: bobina init --yes --profile {other}")  # fmt: skip
         if match:
             st.profile, st.profile_by = match, "name"
-        elif st.pr and st.pr.get("profile") and st.found_by == "config":
+        elif st.pr and st.found_by == "config" and st.pr.get("profile") in cat:
             st.profile, st.profile_by = st.pr["profile"], "config"
         else:
             st.profile, st.profile_by = profiles.BUILTIN, "default"
@@ -301,6 +359,10 @@ def _choose_profile(args, st: Setup, d: Dialog | None) -> None:
             _note(st, "P402", f"{what}: {profiles.BUILTIN} was taken ({_profile_line(profiles.BUILTIN)})",
                   "another: bobina init --profile ID (bobina profile list)")  # fmt: skip
         return
+    if match and len(ws) > 1:
+        d.say(f"Profile: '{st.device}' fits profiles for {' and '.join(f'{w:g}' for w in sorted(ws))} mm paper.")
+        width = _ask_width(d, sorted(ws), None)
+        match = next(p for p in cands if cat[p].paper_mm == width)
     if match:
         if d.yes(f"Profile: looks like a {_profile_line(match)}: right?", True):
             st.profile, st.profile_by = match, "name"
@@ -330,9 +392,10 @@ def _locale(args, st: Setup, d: Dialog | None) -> dict:
             return facts(value, found.source)
         tag, notes = locales.Machine().get()  # saves an inferred one and says it (M203, M204)
         st.notes += [Nudge(c, m, None, h) for c, m, h in notes]
-        if tag:
+        saved = bool(tag) and config.load().get("locale") == tag  # not saved: M203 says why
+        if saved:
             st.changed.append("locale")
-        return facts(tag or locales.FALLBACK, "config" if tag else "default")
+        return facts(tag or locales.FALLBACK, "config" if saved else found.source)
     where = {"config": "config.toml", "default": "nothing else to go by"}.get(found.source, f"from {found.detail}")
     ex = " · ".join(facts(value, found.source)["example"].values())
     d.say(f"Locale (dates and money): {value} ({where}): {ex}")
@@ -401,6 +464,12 @@ def _roll_now(name: str | None) -> dict:
     return {"roll_mm": roll, "left_mm": left, "width_mm": cur.get("width_mm")}
 
 
+def _roll_note(st: Setup) -> None:
+    _note(st, "P104", f"the roll length of {st.name} is missing: without it bobina cannot estimate the paper left",
+          "when you know it: bobina paper new 30m (its length) or bobina paper new --diameter 40mm (its outer"
+          " diameter)")  # fmt: skip
+
+
 def _roll(args, st: Setup, d: Dialog | None, prof) -> dict:
     out = _roll_now(st.name)
     cur = out["roll_mm"]
@@ -410,21 +479,14 @@ def _roll(args, st: Setup, d: Dialog | None, prof) -> dict:
         return out
     if d is None:
         if not cur:
-            _note(st, "P104", f"the roll length of {st.name} is missing: without it bobina cannot estimate the"
-                  " paper left", "when you know it: bobina paper new 30m (its length) or bobina paper new"
-                  " --diameter 40mm (its outer diameter)")  # fmt: skip
+            _roll_note(st)
         return out
     d.say("Roll: the roll in the printer: its length (15m, 50ft), outer diameter (40mm) or package code (57x30)")
     while True:
         a = d.ask("  roll (Enter skips): ")
         if not a:
             if not cur:
-                _note(
-                    st,
-                    "P104",
-                    f"the roll length of {st.name} is missing: without it bobina cannot estimate the paper left",
-                    "when you know it: bobina paper new 30m or bobina paper new --diameter 40mm",
-                )
+                _roll_note(st)
             return out
         try:
             got = _roll_answer(d, a)
@@ -461,7 +523,7 @@ def _strip_bytes(st: Setup, prof, loc: dict) -> tuple[bytes, float, list[str]]:
     from . import device
 
     pr = st.pr or {}
-    over = {**common.printer_overrides(pr), "margins.feed_after_dots": 0}
+    over = {**common.printer_overrides(pr), "margins.feed_after_dots": 0, "cutter": "none"}  # one job: no cut
     ex = loc["example"]
     sample = engine.build(
         f"# bobina {{.center}}\n\nPrinter {st.name} · {prof.id}\n\n{prof.get('paper_mm', 58):g} mm paper, "
@@ -538,7 +600,9 @@ def _current(d: Dialog, name: str, pr: dict) -> set:
             r.get("roll_mm") else "not set" if common.counts_paper(pr) else "a file: none")  # fmt: skip
     d.say("bobina is set up here:")
     d.say(f"  1 printer   {name} ({_where(pr)})")
-    d.say(f"  2 profile   {_profile_line(pr.get('profile') or profiles.BUILTIN)}")
+    d.say(
+        f"  2 profile   {pr.get('profile') or profiles.BUILTIN}: {_profile_line(pr.get('profile') or profiles.BUILTIN)}"
+    )
     d.say(f"  3 locale    {found.value or locales.FALLBACK}: {' · '.join(_examples(loc).values())}")
     d.say(f"  4 roll      {roll}")
     d.say("  5 test strip")
@@ -588,6 +652,10 @@ def cmd_init(args):
         st.name, st.pr, st.found_by = cur_name, dict(cur_pr), "config"
         keep = {"locale", "roll"} | ({"profile"} if args.profile else set())  # --yes: the printer stays
         todo = _current(d, cur_name, cur_pr) if d else keep
+        if cur_pr.get("profile", profiles.BUILTIN) not in discover.catalog():  # chosen again, never a crash
+            _note(st, "P404", f"{cur_name} has profile = {cur_pr.get('profile')!r} in config.toml, which is not a"
+                  " profile bobina knows", "a profile is chosen now; bobina profile list shows them")  # fmt: skip
+            todo.add("profile")
     elif d:
         d.say("bobina init: a printer, its profile, the locale, the roll, and a test strip. Ctrl-C stops.\n")
     if "printer" in todo:
@@ -607,12 +675,13 @@ def cmd_init(args):
     else:
         st.profile, st.profile_by = (st.pr or {}).get("profile") or profiles.BUILTIN, "config"
     if {"printer", "profile"} & todo:
-        if (st.pr or {}).get("profile") != st.profile or st.found_by != "config":
-            st.changed += [s for s in ("printer", "profile") if s in todo]
+        old = (cfg.get("printers") or {}).get(st.name)
+        if "printer" in todo and (st.name != cur_name or old is None or _target(old) != _target(st.pr)):
+            st.changed.append("printer")  # a new printer, or another one as the default
+        if (old or {}).get("profile") != st.profile:
+            st.changed.append("profile")
         if not args.dry_run:
             _save_printer(st)
-        elif st.name is None:
-            st.name = _name_for(config.load(), st.pr, "printer")
     prof = engine.apply_overrides(profiles.load(st.profile), common.printer_overrides(st.pr))
     from .settings import _examples
 

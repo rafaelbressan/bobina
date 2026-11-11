@@ -12,7 +12,8 @@
   order (USB, a known model, a printer-like name, never a headset; `--printer ADDRESS` chooses), its profile, the
   locale; it says that the roll length is missing (`P104`, with the `bobina paper new` command). `--json` writes
   `bobina.init/1`. New problems: `E406` (no printer found), `P401` (no Bluetooth stack, or no USB search here:
-  said, never waited for), `P402` (no profile matches the name), `P403` (a USB printer this user cannot write to).
+  said, never waited for), `P402` (the name does not settle the profile: no match, or it fits two paper widths),
+  `P403` (a USB printer this user cannot write to, never taken by `--yes`), `P404` (an unknown profile in config.toml).
 
 ## 0.1.2 — 2026-11-11
 

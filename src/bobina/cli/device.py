@@ -414,8 +414,8 @@ FEED_INTRO = (
 
 
 def feed_strip(prof_name, prof, pr, intro: str = FEED_INTRO, tail: bool = True) -> tuple[bytes, float]:
-    """(bytes, length in mm) of the feed test: lines A, B, C. tail=False: nothing after C (bobina init prints the
-    tear ruler right after it)."""
+    """(bytes, length in mm) of the feed test: lines A, B, C, one piece of paper (a cutter cuts only at its end).
+    tail=False: nothing after C, no cut (bobina init prints the tear ruler right after it)."""
     from PIL import Image
 
     from .. import escpos
@@ -423,7 +423,7 @@ def feed_strip(prof_name, prof, pr, intro: str = FEED_INTRO, tail: bool = True) 
     head = engine.build(
         "# FEED TEST {.center}\n\n" + intro,
         profile_name=prof_name,
-        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0},
+        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0, "cutter": "none"},
     )
     W, mm = prof.width_dots, prof.dpi / 25.4
     gap, top = round(10 * mm), round(3 * mm)
@@ -432,7 +432,7 @@ def feed_strip(prof_name, prof, pr, intro: str = FEED_INTRO, tail: bool = True) 
     data = (
         head.data + escpos.blank_rows(W, top) + line + escpos.blank_rows(W, gap, band=gap) + line  # A, 10 mm, B
         + escpos.feed(gap) + line  # ESC J of 10 mm right after B, then C
-        + (escpos.blank_rows(W, end) if end else b"")  # out past the tear bar whatever the answer
+        + (escpos.blank_rows(W, end) + escpos.cut(prof) if end else b"")  # past the tear bar whatever the answer
     )  # fmt: skip
     return data, head.length_mm + (top + 3 + gap + 3 + gap + 3 + end) / mm
 
@@ -444,16 +444,17 @@ TEAR_INTRO = (
 
 
 def tear_strip(prof_name, prof, pr, intro: str = TEAR_INTRO):
-    """(bytes, length in mm, ruler image) of the tear test: a ruler at the very end of the paper, no feed after it."""
+    """(bytes, length in mm, ruler image) of the tear test: a ruler at the very end of the paper, no feed after it;
+    a cutter cuts there, once (the text above it is not cut off)."""
     from .. import escpos
 
     head = engine.build(
         "# TEAR TEST {.center}\n\n" + intro,
         profile_name=prof_name,
-        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0},  # build loads by name
+        overrides={**common.printer_overrides(pr), "margins.feed_after_dots": 0, "cutter": "none"},  # by name
     )
     ruler = tear_ruler(prof)
-    data = head.data + escpos.raster(ruler, int(prof.get("transport.band_rows", 64)))
+    data = head.data + escpos.raster(ruler, int(prof.get("transport.band_rows", 64))) + escpos.cut(prof)
     return data, head.length_mm + ruler.height / (prof.dpi / 25.4), ruler
 
 

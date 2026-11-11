@@ -3,6 +3,7 @@ a printer's name suggests. Nothing here waits on a missing Bluetooth stack: what
 
 from __future__ import annotations
 
+import functools
 import glob
 import os
 import re
@@ -10,11 +11,12 @@ import shutil
 import socket
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import paths, transport
 from . import profile as profiles
-from . import transport
 
 USB_GLOB = "/dev/usb/lp*"  # module values, so tests can point them elsewhere
 USB_SYSFS = "/sys/class/usbmisc"
@@ -35,17 +37,29 @@ class Device:
     where: str  # Bluetooth address or device path
     profile: str | None = None  # the profile its name suggests
     printer_like: bool = False
+    writable: bool = True  # False: a USB device this user cannot write to (P403)
 
     def as_dict(self) -> dict:
         return {"kind": self.kind, "name": self.name, "where": self.where, "profile": self.profile,
-                "printer_like": self.printer_like}  # fmt: skip
+                "printer_like": self.printer_like, "writable": self.writable}  # fmt: skip
+
+
+@dataclass(frozen=True)
+class Entry:
+    """What bobina init needs of a profile (read once per run: catalog())."""
+
+    id: str
+    name: str
+    paper_mm: float
+    measured: bool
+    keys: tuple
 
 
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-def _keys(prof) -> list[str]:
+def _keys(prof) -> tuple:
     """The model names a profile answers to: its name without the brand and the notes in brackets (Epson TM-T20II
     → tmt20ii), the id, and match_names in the profile (MTP-II, PT-210)."""
     name = re.sub(r"\(.*?\)", "", prof.name).strip()
@@ -53,30 +67,69 @@ def _keys(prof) -> list[str]:
     model = " ".join(words[1:]) if len(words) > 1 else name
     keys = {_norm(model), _norm(prof.id)} | {_norm(n) for n in prof.get("match_names", []) or []}
     keys |= {_norm(w) for w in words[1:] if re.search(r"\d", w)}  # ZJ-5870 of "Zijiang ZJ-5870 Thermal Printer"
-    return [k for k in keys if len(k) >= 4]
+    return tuple(sorted(k for k in keys if len(k) >= 4))
+
+
+def _user_profiles() -> tuple:
+    d = paths.config_dir() / "profiles"
+    try:
+        return tuple(sorted((f.name, f.stat().st_mtime_ns) for f in d.glob("*.toml")))
+    except OSError:
+        return ()
+
+
+def catalog() -> dict[str, Entry]:
+    """Every readable profile, loaded once (until a user profile is added or changed); a broken user profile is
+    left out here (bobina profile list shows it)."""
+    return _catalog(str(paths.config_dir()), _user_profiles())
+
+
+@functools.lru_cache(maxsize=4)
+def _catalog(config_dir: str, user: tuple) -> dict[str, Entry]:
+    out = {}
+    for pid in profiles.available():
+        try:
+            p = profiles.load(pid)
+        except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError):
+            continue
+        out[pid] = Entry(pid, p.name, float(p.get("paper_mm", 58)), p.get("measured", True) is not False, _keys(p))
+    return out
+
+
+def match_profiles(name: str) -> list[str]:
+    """The profiles whose model name is in NAME, all with the longest match (TM-T20III is not a TM-T20II), best
+    first: measured, then the shortest id (epson-tm-p80, not its 42-column mode). Several widths among them
+    (Seiko RP-F10: 58 and 80 mm) mean the name does not settle the paper."""
+    n = _norm(name)
+    if len(n) < 4:
+        return []
+    scored = []
+    for e in catalog().values():
+        hits = [k for k in e.keys if k in n]
+        if hits:
+            scored.append((-max(map(len, hits)), not e.measured, len(e.id), e.id))
+    if not scored:
+        return []
+    top = min(scored)[0]
+    return [pid for length, *_, pid in sorted(scored) if length == top]
 
 
 def match_profile(name: str) -> str | None:
-    """The profile whose model name is in NAME (the longest match: TM-T20III is not a TM-T20II); a measured profile
-    first, then the shortest id (epson-tm-p80, not its 42-column mode)."""
-    n = _norm(name)
-    if len(n) < 4:
-        return None
-    best = []
-    for pid in profiles.available():
-        try:
-            prof = profiles.load(pid)
-        except (OSError, ValueError, KeyError):  # a broken user profile is listed by profile list, not matched
-            continue
-        hits = [k for k in _keys(prof) if k in n]
-        if hits:
-            best.append((-max(map(len, hits)), prof.get("measured", True) is False, len(pid), pid))
-    return min(best)[3] if best else None
+    best = match_profiles(name)
+    return best[0] if best else None
 
 
-def _device(kind: str, name: str, where: str) -> Device:
+def widths(pids: list[str]) -> list[float]:
+    """The paper widths of these profiles, most common first (then the narrower)."""
+    cat = catalog()
+    ws = [cat[p].paper_mm for p in pids if p in cat]
+    return sorted(set(ws), key=lambda w: (-ws.count(w), w))
+
+
+def _device(kind: str, name: str, where: str, writable: bool = True) -> Device:
     pid = match_profile(name)
-    return Device(kind, name, where, pid, bool(pid) or bool(PRINTER_WORDS.search(name)) or kind == "usb")
+    like = bool(pid) or bool(PRINTER_WORDS.search(name)) or kind == "usb"
+    return Device(kind, name, where, pid, like, writable)
 
 
 def _usb_model(dev: str) -> str:
@@ -104,8 +157,9 @@ def usb() -> tuple[list[Device], list[tuple[str, str, str]]]:
     if sys.platform.startswith("linux"):
         found, notes = [], []
         for dev in sorted(glob.glob(USB_GLOB)):
-            found.append(_device("usb", _usb_model(dev) or dev, dev))
-            if not os.access(dev, os.W_OK):
+            ok = os.access(dev, os.W_OK)
+            found.append(_device("usb", _usb_model(dev) or dev, dev, ok))
+            if not ok:
                 notes.append(("P403", f"{dev} is a USB printer this user cannot write to",
                               "sudo usermod -aG lp $USER, then log out and in again"))  # fmt: skip
         return found, notes

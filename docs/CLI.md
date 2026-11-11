@@ -466,13 +466,12 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
   row, 0 skips it; counters advance once per row), max 1000 labels per job, `--repeat N`, `--copies N`, `--set KEY=VALUE`, `-o FILE` (bytes to a file: not printing, no confirmation).
 - Printers: `transport = bluetooth` (status checked before printing: exit 5 if cover open/paper out), `command`, `file`.
 - Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks.
-- Exit code 8: security error (template sandbox, variable in a raw block or image path).
 - `bobina edit` drafts live in `~/.local/state/bobina/drafts/`; the last print in `~/.local/state/bobina/last/` (`--last` resends identical bytes, `--again` re-renders).
 - **Calibration** (also on the `init` strip): `bobina calibrate tear` prints a ruler with no feed after it; the mm at
   the torn edge (`bobina calibrate tear 5`) + 6 mm (`tear_margin_mm`) ends every job. `bobina calibrate feed`: lines
   A–B 10 mm drawn, B–C a 10 mm ESC J right after B; `touching` (the MTP-II) keeps the safe mode, `apart` turns it
-  off. **Safe by default**: an unmeasured printer sends feeds after images as white rows and waits until idle
-  before the end of an image job (per-printer keys `blank_rows_after_raster`, `idle_before_tail`).
+  off. **Safe by default**: an unmeasured printer sends feeds after images as white rows, waits until idle
+  at the end (per-printer keys `blank_rows_after_raster`, `idle_before_tail`).
 - **What a profile turns on** (`bobina profile show NAME` lists it). Three features follow the ESC/POS spec and are
   tested on the bytes only; a job that uses one gets the note `P301` (docs/TESTED.md):
   - Code pages: `encoding = "codepage"` and a `[codepages]` table (codec = `ESC t` number, in order of preference):

@@ -495,8 +495,9 @@ Nudges:
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
 | `P401` | note | no Bluetooth or USB search here (says why) |
-| `P402` | note | no profile matches the printer's name (default taken) |
+| `P402` | note | the name does not settle the profile: one was taken |
 | `P403` | warning | a USB printer this user cannot write to |
+| `P404` | warning | config.toml names a profile bobina does not know |
 | `M101` | warning | unknown attribute |
 | `M102` | note | unknown block type, printed as preformatted text |
 | `M103` | note | attribute not implemented yet (ignored) |

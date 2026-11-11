@@ -209,3 +209,153 @@ def test_bluetooth_missing_is_said_not_waited_for(monkeypatch):
 
 def test_counts_paper_is_the_rule_for_the_roll_step():
     assert not common.counts_paper({"transport": "file", "path": "out.bin"})
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def test_the_strip_is_one_job_on_a_printer_with_a_cutter(no_bt, tmp_path, monkeypatch, capsys):
+    out = tmp_path / "strip.bin"
+    answers(monkeypatch, "t", str(out), "", "y")  # the profile is given: no profile question
+    assert run("--profile", "epson-tm-t70") == cli.OK  # cutter = "partial", not measured: feed test too
+    data = out.read_bytes()
+    assert b"\x1bJ" in data  # the feed test is on it
+    assert data.count(b"\x1dV") == 1 and data.endswith(b"\x1dV\x01")  # cut once, at the end
+
+
+def test_calibrate_strips_are_cut_once_at_their_end(tmp_path):
+    sink = tmp_path / "p.bin"
+    assert cli.main(["printer", "add", "t70", "--path", str(sink), "--profile", "epson-tm-t70"]) == cli.OK
+    for what in ("feed", "tear"):
+        sink.write_bytes(b"")
+        assert cli.main(["calibrate", what, "--yes"]) == cli.OK
+        data = sink.read_bytes()
+        assert data.count(b"\x1dV") == 1 and data.endswith(b"\x1dV\x01"), what
+
+
+def test_an_address_in_lower_case_is_the_same_printer(bt, capsys):
+    assert cli.main(["printer", "add", "loja", MTP.lower()]) == cli.OK
+    config.update(lambda cfg: cfg["printers"]["loja"].__setitem__("tear_mm", 7.0))
+    assert run("--yes", "--printer", MTP) == cli.OK
+    pr = config.load()["printers"]
+    assert list(pr) == ["loja"] and pr["loja"]["tear_mm"] == 7.0
+
+
+def test_a_path_written_another_way_is_the_same_printer(no_bt, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["printer", "add", "loja", "--path", "out.bin"]) == cli.OK
+    assert run("--yes", "--printer", str(tmp_path / "out.bin")) == cli.OK
+    assert list(config.load()["printers"]) == ["loja"]
+
+
+def test_yes_skips_a_usb_printer_it_cannot_write_to(monkeypatch, tmp_path, no_bt, capsys):
+    usb = tmp_path / "usb"
+    usb.mkdir()
+    for n in ("lp0", "lp1"):
+        (usb / n).write_bytes(b"")
+    monkeypatch.setattr(discover, "USB_GLOB", str(usb / "lp*"))
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(discover.os, "access", lambda path, mode: not str(path).endswith("lp0"))
+    assert run("--yes") == cli.OK
+    pr = config.load()["printers"]
+    assert [p["path"] for p in pr.values()] == [str(usb / "lp1")]
+    out, e = capsys.readouterr()
+    assert f"skipped {usb / 'lp0'}" in out and "cannot write to it (P403)" in out and "P403" in e
+
+
+def test_yes_with_only_an_unwritable_usb_printer_is_e406(monkeypatch, tmp_path, no_bt, capsys):
+    (tmp_path / "lp0").write_bytes(b"")
+    monkeypatch.setattr(discover, "USB_GLOB", str(tmp_path / "lp*"))
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(discover.os, "access", lambda path, mode: False)
+    assert run("--yes") == cli.UNREACHABLE
+    e = capsys.readouterr().err
+    assert "E406" in e and "P403" in e
+
+
+@pytest.mark.parametrize(
+    "cmd,host",
+    [("ssh tower bobina send --yes -", "tower"), ("ssh -p 2222 -i ~/.ssh/key me@tower bobina send --yes -", "tower"),
+     ("ssh -o BatchMode=yes -J jump tower bobina send", "tower"), ("ssh -vp22 tower x", "tower"),
+     ("ssh ssh://me@tower:2222 x", "tower"), ("/usr/bin/ssh -l me shop cat", "shop"), ("sh -c 'cat > x'", "")],
+)  # fmt: skip
+def test_the_ssh_host_of_a_command(cmd, host):
+    import shlex
+
+    from bobina.cli.init import ssh_host
+
+    assert ssh_host(shlex.split(cmd)) == host
+
+
+def test_a_command_with_a_quote_left_open_is_a_problem_not_a_traceback(no_bt, capsys):
+    assert run("--yes", "--command", "ssh 'tower bobina send") == cli.USAGE
+    e = capsys.readouterr().err
+    assert "E304" in e and "quote" in e and "Traceback" not in e
+
+
+def test_a_name_that_fits_two_widths_is_said_with_yes(bt, capsys):
+    bt[:] = [(MTP, "RP-F10")]
+    assert run("--yes") == cli.OK
+    assert config.load()["printers"]["rp-f10"]["profile"] == "seiko-rp-f10-58mm"
+    e = capsys.readouterr().err
+    assert "P402" in e and "58 and 80 mm" in e and "--profile seiko-rp-f10-80mm" in e
+
+
+def test_a_name_that_fits_two_widths_asks_the_width(bt, monkeypatch, capsys):
+    bt[:] = [(MTP, "RP-F10")]
+    answers(monkeypatch, "1", "80", "", "", "", "")  # printer 1 · width 80 · right · locale · roll · no strip
+    assert run() == cli.OK
+    assert "fits profiles for 58 and 80 mm paper" in capsys.readouterr().out
+    assert config.load()["printers"]["rp-f10"]["profile"] == "seiko-rp-f10-80mm"
+
+
+def test_an_unknown_profile_in_config_is_said_and_chosen_again(no_bt, tmp_path, monkeypatch, capsys):
+    assert cli.main(["printer", "add", "loja", "--path", str(tmp_path / "l.bin")]) == cli.OK
+    config.update(lambda cfg: cfg["printers"]["loja"].__setitem__("profile", "no-such-printer"))
+    capsys.readouterr()
+    assert run("--yes") == cli.OK
+    assert config.load()["printers"]["loja"]["profile"] == "mtp-ii-58"
+    assert "P404" in capsys.readouterr().err
+    config.update(lambda cfg: cfg["printers"]["loja"].__setitem__("profile", "no-such-printer"))
+    answers(monkeypatch, "", "", "1")  # nothing else to change · width 58 · the first profile
+    assert run() == cli.OK
+    assert "not a profile bobina knows (P404)" in capsys.readouterr().out
+    assert config.load()["printers"]["loja"]["profile"] == "mtp-ii-58"
+
+
+def test_switching_the_default_printer_is_a_change(no_bt, tmp_path, capsys):
+    for n in ("a", "b"):
+        assert cli.main(["printer", "add", n, "--path", str(tmp_path / f"{n}.bin")]) == cli.OK
+    capsys.readouterr()
+    assert run("--yes", "--printer", "b", "--json") == cli.OK
+    assert json.loads(capsys.readouterr().out)["changed"] == ["printer"]
+    assert config.load()["default_printer"] == "b"
+
+
+def test_a_locale_that_could_not_be_saved_is_not_a_change(bt, monkeypatch, capsys):
+    from bobina import locales
+
+    config.path().write_text("")  # no locale yet: the time zone's is inferred
+    monkeypatch.setattr(locales, "_save", lambda tag: "the file is read-only")
+    assert run("--yes", "--json") == cli.OK
+    doc = json.loads(capsys.readouterr().out)
+    assert "locale" not in doc["changed"] and doc["locale"]["source"] == "time zone"
+    assert "not saved" in json.dumps(doc["problems"])
+
+
+def test_a_saved_locale_is_a_change(bt, capsys):
+    config.path().write_text("")
+    assert run("--yes", "--json") == cli.OK
+    doc = json.loads(capsys.readouterr().out)
+    assert "locale" in doc["changed"] and config.load()["locale"] == "pt-BR"
+
+
+def test_profiles_are_read_once_per_run(bt, monkeypatch, capsys):
+    from bobina import profile as profiles
+
+    real, seen = profiles.load, []
+    monkeypatch.setattr(profiles, "load", lambda name=None: (seen.append(name), real(name))[1])
+    discover._catalog.cache_clear()
+    assert run("--yes") == cli.OK
+    ids = [n for n in seen if n != "mtp-ii-58"]
+    assert len(ids) == len(set(ids))  # each other profile once, whatever the number of devices and lookups
