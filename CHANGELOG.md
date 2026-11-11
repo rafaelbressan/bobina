@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-11-11
 
 - One locale per job, never mixed: a document's `locale:`, else the machine's (`locale` in config.toml), else
   English. A label without `locale:` on a machine in Brazil with `LANG=en_US` now prints "USE BY 09/11/2026" and
