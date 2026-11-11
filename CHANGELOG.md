@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- `bobina chat`: talk to an AI in the terminal; each answer also prints on the roll ([docs/chat.md](docs/chat.md)).
+  Short is a guardrail: every turn the AI is told the paper width, the limit per answer (about 10 cm, `--limit`
+  or `chat_limit`), the paper used so far and the roll left; a longer answer is rewritten once, then cut with "…"
+  (said in the terminal). A note in the terminal at each metre of paper. Two layouts (`--layout`, `chat_layout`,
+  `/strip` and `/tickets` in the chat): one strip with the AI on top once and dashed lines between answers, or one
+  ticket per answer fed to the tear bar. `--questions` prints your messages too, on the right; `--manual` (or
+  `/manual`) prints only on `p`. A printer out of reach never stops the chat.
+- `bobina ai list | use NAME [--model MODEL]`: the AIs this machine has, best first: Claude Code, Codex and Gemini
+  CLI with their own login, a local Ollama, then `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (their SDKs are the extra
+  `bobina[ai]`). The choice is saved in config.toml; the first `bobina chat` asks. None found: `E601` says what to
+  install or set.
+- `--model` is no longer a typing hint for `--profile` (it is the AI's model in `bobina chat`).
+
 ## 0.1.2 — 2026-11-11
 
 - One locale per job, never mixed: a document's `locale:`, else the machine's (`locale` in config.toml), else
