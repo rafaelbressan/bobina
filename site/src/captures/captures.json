@@ -1,7 +1,7 @@
 {
  "about": "Written by site/capture/capture.py from real bobina runs; do not edit.",
- "bobina": "0.1.2",
- "release": "v0.1.2",
+ "bobina": "0.1.3",
+ "release": "v0.1.3",
  "now": "2026-11-05T09:49:00",
  "files": {
   "price-tag.bob.md": {
@@ -105,8 +105,8 @@
     {
      "cmd": "bobina check jar-label.bob.md --data pantry.csv",
      "exit": 0,
-     "text": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines ✂, 4 feeds to the tear bar ⟶ (the last at the end)\npreview: exact dots; ink spread not calibrated yet",
-     "html": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines <span class=\"g\">✂</span>, 4 feeds to the tear bar <span class=\"g\">⟶</span> (the last at the end)\npreview: exact dots; ink spread not calibrated yet"
+     "text": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines ✂, 4 feeds to the tear bar ⟶ (the last at the end)\npreview: exact dots; ink spread not calibrated yet\ndata columns (pantry.csv): product, packed, best_before, shelf, jars",
+     "html": "~15.4 cm of paper · 4 native rows, 1 raster · 5.6 KB\n4 labels in one job: 0 cut lines <span class=\"g\">✂</span>, 4 feeds to the tear bar <span class=\"g\">⟶</span> (the last at the end)\npreview: exact dots; ink spread not calibrated yet\ndata columns (pantry.csv): product, packed, best_before, shelf, jars"
     },
     {
      "cmd": "bobina preview jar-label.bob.md --data pantry.csv -o 'labels/{product}.png'",
