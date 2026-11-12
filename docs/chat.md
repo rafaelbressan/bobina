@@ -22,8 +22,9 @@ echo "a haiku about paper" | bobina chat --json --dry-run
 | `--printer NAME` | where answers print (shown in the welcome block and the status line) | `default_printer` |
 | `--layout strip\|tickets` | one strip (default), or one ticket per answer fed to the tear bar | `chat_layout` |
 | `--style STYLE` | how the two speakers look on paper (below); default `labels` | `chat_style` |
+| `--name NAME` | your name over your messages, on paper and on screen (default "you") | `chat_name` |
 | `--questions` | print your messages too, on the right (about 3 lines at most; never cut: a longer one is not sent) | `chat_questions` |
-| `--limit LENGTH` | paper per answer, with its unit: `10cm` (default), `100mm`, `4in`; 1.5 cm to 1 m | `chat_limit` |
+| `--limit LENGTH` | paper per answer: `10cm` (default), `100mm`, `4in` (a bare number is cm); 1.5 cm to 1 m | `chat_limit` |
 | `--manual` | the chat: print only on `/print` (`p`) | |
 | `--dry-run` | never print; show the paper each answer would take | |
 | `--yes` | one question: print the answer | |
@@ -67,10 +68,14 @@ a `.bob.md` document (no templates, raw bytes, images or files).
 - `tickets`: each answer is its own ticket, with the AI, the model and the time on top, fed to the tear bar (with
   the tear mark when `marks` is on) to tear off. One question is always one ticket.
 
-Styles: `labels` ("you" and a person icon over your message, ✦ and the AI's name over the answer), and with rules:
-`labels-ruled` (a rule over each name), `labels-underlined` (a rule under each message), `labels-exchange` (a
-double rule between exchanges, a dashed one inside); `labels-bubble` (your message white on black across the paper, a dotted rule between exchanges);
-`bubbles`, `boxes`, `plain` (no icons). Icons: Lucide (ISC license).
+Styles keep the conversation reading as one: marks are short and sit by their speaker (right for you, left
+for the AI), never across the paper. The `labels` family puts your name and a person icon over your message and ✦
+and the AI's name over the answer; then: `labels-underline` (a short solid mark under each name),
+`labels-dashes` (a short dashed one), `labels-dots` (no marks; a small "· · ·" in the middle between exchanges),
+`labels-outline` (your message in a framed bubble under your name), `labels-filled` (a black bubble, the AI's name
+with a short dotted mark), `labels-hook` (a short mark with a hook under each name, "— ✦ —" between exchanges).
+Earlier looks stay available: `labels`, `labels-ruled`, `labels-underlined`, `labels-exchange`, `labels-bubble`,
+`bubbles`, `boxes`, `plain`. Icons: Lucide (ISC license).
 
 ## The chat screen
 

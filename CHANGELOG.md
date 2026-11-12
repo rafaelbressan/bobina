@@ -14,9 +14,10 @@
   then cut with "…" (said in the terminal). A note at each metre of paper. The ticket's problems and the roll
   check (P101/P102) are said before printing.
 - Layouts (`--layout`, `chat_layout`, `/strip`, `/tickets`): one strip, or one ticket per answer fed to the tear
-  bar. Styles (`--style`, `chat_style`; default `labels`): "you" and ✦ with the AI's name over each message, with
-  rules (`labels-ruled`, `labels-underlined`, `labels-exchange`) or a bubble (`labels-bubble`, `bubbles`), `boxes`,
-  `plain`. `--questions` (`chat_questions`) prints your messages too, on the right, about 3 lines at most: a longer
+  bar. Styles (`--style`, `chat_style`; default `labels`): your name (`--name`, `chat_name`; "you") and ✦ with
+  the AI's name over each message, with short marks by each speaker (`labels-underline`, `labels-dashes`,
+  `labels-hook`), a small mark between exchanges (`labels-dots`), or a bubble (`labels-outline`, `labels-filled`);
+  earlier looks too (`labels-ruled`, `labels-exchange`, `bubbles`, `boxes`, `plain`…). `--questions` (`chat_questions`) prints your messages too, on the right, about 3 lines at most: a longer
   one is not sent, never cut. Icons are bundled as 1-bit bitmaps (Lucide, ISC; `tools/gen_icons.py`,
   `bobina.icons`), the start of a reusable icon set.
 - `bobina ai list | use NAME [--model MODEL]`: the AIs this machine has, best first: Claude Code, Codex and Gemini
