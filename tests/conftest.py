@@ -7,6 +7,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("BOBINA_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("BOBINA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("BOBINA_NOW", "2026-11-05T09:49:00")
+    monkeypatch.setenv("BOBINA_MEMORY_LIMIT", "0")  # --sandbox's ceiling would stay on the test process itself
     monkeypatch.setenv("TZ", "America/Sao_Paulo")
     monkeypatch.setenv("LANG", "en_US.UTF-8")
     monkeypatch.delenv("LC_ALL", raising=False)

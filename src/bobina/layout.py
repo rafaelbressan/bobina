@@ -1063,10 +1063,6 @@ class Layout:
         if self.r is not None and self.r.tainted_in(src):
             raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
         src = self.text(src)
-        if self.image_dirs is not None:
-            src = self.confined(src, line)
-            if src is None:
-                return []
         width = attrs.kv.get("width")
         if width and str(width).endswith("%"):
             w = int(self.W * float(str(width)[:-1]) / 100)
@@ -1082,14 +1078,17 @@ class Layout:
         except ValueError:
             page = 1
         settings = tuple(self.p.get(k) for k in ("image.dither", "image.gamma", "image.gamma_atkinson"))
-        key = _image_key(src, self.doc.base_dir, attrs, (w, page, self.W, self.net, repr(self.img), settings))
+        extra = (w, page, self.W, self.net, self.image_dirs, repr(self.img), settings)  # --sandbox: its own entry
+        key = _image_key(src, self.doc.base_dir, attrs, extra)
         if key is not None and key in _IMAGES:  # a batch of 1000 labels with the same logo decodes it once
             host, row_im = _IMAGES[key]
             if host:
                 self.n.add("I104", f"fetched {host}", line, "that server can see when you print")
             return [BitmapRow(row_im, line, "image")]
         try:
-            im = imaging.open_image(src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net)
+            im = imaging.open_image(
+                src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
+            )
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []
@@ -1111,30 +1110,6 @@ class Layout:
         if key is not None:
             _remember(key, (im.info.get("bobina.host"), placed))
         return [BitmapRow(placed, line, "image")]
-
-    def confined(self, src: str, line: int) -> str | None:
-        """--sandbox: a local image is read only from the document's folder or image_dirs (config.toml), wherever
-        its path or a symlink points; else it is left out with I108. Returns the path to read (resolved), or the
-        source as it is for data: and https URLs (those have their own rules)."""
-        from pathlib import Path
-
-        if re.match(r"(?i)^[a-z][a-z0-9+.-]+:", src):  # a scheme (not C:, one letter)
-            return src  # data: URIs hold their bytes; https needs --allow-net; other schemes are refused anyway
-        p = Path(src).expanduser()
-        try:
-            real = (p if p.is_absolute() else Path(self.doc.base_dir) / p).resolve()
-        except (OSError, RuntimeError):  # a symlink loop
-            real = None
-        if real is not None and any(real.is_relative_to(d) for d in self.image_dirs):
-            return str(real)
-        folder = str(real.parent) if real is not None else src
-        self.n.add(
-            "I108",
-            f"image '{src[:60]}' is outside the document folder and image_dirs: not read (--sandbox)",
-            line,
-            f'trust that folder? add it to config.toml: image_dirs = ["{folder}"]',
-        )
-        return None
 
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font."""

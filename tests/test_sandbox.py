@@ -176,3 +176,86 @@ def test_mcp_server_passes_sandbox_to_every_document_tool(monkeypatch):
         anyio.run(lambda t=tool: t(text="x"))
     assert [argv[0] for argv in runs] == ["check", "preview", "print"]
     assert all("--sandbox" in argv for argv in runs)
+
+
+@pytest.mark.parametrize("scheme", ["ſſ", "KK"])  # ſ and the Kelvin sign: letters only to (?i)
+def test_a_unicode_lookalike_of_a_scheme_is_a_path_and_stays_confined(place, scheme):
+    from bobina import sources
+
+    (place / "docs" / f"{scheme}:").mkdir()  # shipped in the shared folder, so the path resolves
+    src = f"{scheme}:/../../elsewhere/secret.png"
+    res = build(f"![]({src})", base_dir=str(place / "docs"), image_dirs=(str(place / "docs"),))
+    assert not images(res) and "I108" in codes(res)
+    with pytest.raises(sources.ImageError) as e:  # the check is where files are read, for any caller
+        sources.load(src, str(place / "docs"), confine=((place / "docs").resolve(),))
+    assert e.value.code == "I108"
+
+
+def test_the_i108_hint_is_valid_toml_with_forward_slashes(place):
+    import tomllib
+
+    res = build("![](../elsewhere/secret.png)", base_dir=str(place / "docs"), image_dirs=(str(place / "docs"),))
+    hint = next(n for n in res.nudges if n.code == "I108").suggestion
+    line = hint[hint.index("image_dirs") :]
+    assert tomllib.loads(line)["image_dirs"] == [(place / "elsewhere").resolve().as_posix()]
+
+
+def test_sandbox_given_in_any_part_covers_the_whole_job(place, capsys):
+    secret = place / "elsewhere" / "secret.png"
+    first, second = doc(place, f"![]({secret})"), str(place / "docs" / "e.bob.md")
+    (place / "docs" / "e.bob.md").write_text(f"![]({secret})\n")
+    for argv in ([first, "--then", second, "--sandbox"], [first, "--sandbox", "--then", second]):
+        cli.main(["check", *argv, "--json"])
+        out = json.loads(capsys.readouterr().out)
+        assert [p["code"] for p in out["problems"]].count("I108") == 2, argv
+
+
+def test_relative_image_dirs_are_relative_to_config_toml(place, capsys, monkeypatch):
+    pics = place / "config" / "pics"
+    pics.mkdir()
+    Image.new("L", (8, 8), 0).save(pics / "logo.png")
+    image_dirs(place, "pics")
+    monkeypatch.chdir(place / "elsewhere")  # not where config.toml is
+    d = doc(place, f"![]({pics / 'logo.png'})")
+    assert "I108" not in check([d, "--sandbox"], capsys)[1]
+
+
+@pytest.mark.parametrize("value", ['"~/Pictures"', "[1, 2]", '[""]', "true"])
+def test_image_dirs_that_is_not_a_list_of_folders_is_a_clear_error(place, capsys, value):
+    cfg = place / "config" / "config.toml"
+    cfg.write_text(cfg.read_text() + f"image_dirs = {value}\n")
+    assert cli.main(["check", doc(place, "hi"), "--sandbox"]) == cli.USAGE
+    e = capsys.readouterr().err
+    assert "image_dirs" in e and "E101" in e and "list of folders" in e
+
+
+@pytest.mark.skipif(not __import__("sys").platform.startswith("linux"), reason="RLIMIT_AS is enforced on Linux")
+def test_a_sandboxed_run_has_a_memory_ceiling(place):
+    import os
+    import subprocess
+    import sys
+
+    d = doc(place, "hi")
+    code = (
+        "import resource, sys; from bobina.cli import main; main(['check', sys.argv[1], '--sandbox', '-q']);"
+        " print(resource.getrlimit(resource.RLIMIT_AS)[0])"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "BOBINA_MEMORY_LIMIT"}
+    out = subprocess.run([sys.executable, "-c", code, d], capture_output=True, text=True, env=env, timeout=60)
+    assert int(out.stdout.split()[-1]) == 2 * 1024**3, out.stderr
+    plain = subprocess.run(
+        [sys.executable, "-c", code.replace(", '--sandbox'", ""), d], capture_output=True, text=True, env=env
+    )
+    assert int(plain.stdout.split()[-1]) != 2 * 1024**3  # without --sandbox, no ceiling of bobina's
+
+
+def test_running_out_of_memory_is_m313_not_a_traceback(place, capsys, monkeypatch):
+    from bobina import engine
+
+    def huge(*a, **k):
+        raise MemoryError
+
+    monkeypatch.setattr(engine, "build_batch", huge)
+    assert cli.main(["check", doc(place, "hi"), "--sandbox"]) == cli.SECURITY
+    e = capsys.readouterr().err
+    assert "M313" in e and "nothing was printed" in e

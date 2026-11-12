@@ -120,6 +120,17 @@ def test_macros_cannot_run_forever(src):
         '{{ "%.*f" % (10000000000, 1.0) }}',
         '{{ "{:{w}}".format(1, w=10000000000) }}',
         '{{ "{:{w}}".format_map({"w": 10000000000}) }}',
+        # review round 3: lazy joins, widths from strings, floats, items and rows, translate, expandtabs, replace
+        '{{ ("b" * 1000000) | map("upper") | join("a" * 1000) }}',
+        '{{ ("a" * 1000).join(("b" * 1000000) | map("upper")) }}',
+        '{{ ("a" * 1000).join(("b" * 1000000) | select) }}',
+        '{{ "{:{w}}".format(1, w="10000000000") }}',
+        '{{ "{:{w}}".format(1, w=10000000000.0) }}',
+        '{{ "{0:{1[0]}}".format(1, ["10000000000"]) }}',
+        '{{ "{a:{w}}".format_map({"a": 1, "w": "10000000000"}) }}',
+        '{{ ("a" * 1000000).translate({97: "b" * 1000}) }}',
+        '{{ ("\\t" * 1000000).expandtabs(1000) }}',
+        '{{ (["a"] * 100000) | replace("a", "b" * 1000) }}',
     ],
 )
 def test_no_value_grows_beyond_the_output_limit(src):
@@ -212,6 +223,16 @@ def test_a_data_file_is_read_up_to_its_limit_only(tmp_path, monkeypatch):
     assert fileio.read_capped(tmp_path / "d.csv", 1000).startswith(b"name\n")
 
 
+def test_reading_a_regular_file_never_changes_its_blocking_mode(tmp_path, monkeypatch):
+    def refuse(fd, blocking):  # Windows has no blocking mode for files: it must never be asked
+        raise AssertionError("set_blocking called on a regular file")
+
+    monkeypatch.setattr(fileio.os, "set_blocking", refuse, raising=False)
+    (tmp_path / "a.png").write_bytes(b"png")
+    assert fileio.read_capped(tmp_path / "a.png", 10) == b"png"
+    assert fileio.read_capped(tmp_path / "a.png", 10, pipes=True) == b"png"
+
+
 @DEV_ZERO
 def test_a_device_as_data_is_refused_before_it_is_read(tmp_path):
     for dev in ("/dev/zero", "/dev/tty", str(tmp_path)):  # endless, waits for a person, a folder
@@ -221,15 +242,23 @@ def test_a_device_as_data_is_refused_before_it_is_read(tmp_path):
 
 
 @FIFO
-def test_a_pipe_as_data_is_read_up_to_the_limit_and_never_waits(tmp_path):
+def test_a_pipe_named_with_data_waits_for_its_writer_as_before(tmp_path, monkeypatch):
     fifo = tmp_path / "rows.csv"
     os.mkfifo(fifo)
-    with pytest.raises(datasource.DataError, match="no rows"):  # nobody writes: empty at once, no wait
-        datasource.read_rows(str(fifo))
-    writer = threading.Thread(target=lambda: fifo.write_text("name\nRice\n"))
+
+    def write_later():
+        time.sleep(0.3)  # the reader is already waiting: --data opens a FIFO in blocking mode
+        fifo.write_text("name\nRice\n")
+
+    writer = threading.Thread(target=write_later)
     writer.start()
-    time.sleep(0.2)  # the writer is there before the read (as with --data <(command))
     assert datasource.read_rows(str(fifo)) == [{"name": "Rice"}]
+    writer.join(5)
+    monkeypatch.setattr(datasource, "MAX_FILE", 10)
+    writer = threading.Thread(target=lambda: fifo.write_text("name\n" + "x\n" * 100))
+    writer.start()
+    with pytest.raises(datasource.DataError, match="larger than"):  # and it is still read up to the limit
+        datasource.read_rows(str(fifo))
     writer.join(5)
     os.mkfifo(tmp_path / "s.xlsx")
     with pytest.raises(datasource.DataError, match="not a regular file"):  # a zip needs a file it can seek

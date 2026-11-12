@@ -58,25 +58,61 @@ class NotAFile(OSError):
 
 
 def read_capped(path, limit: int, pipes: bool = False) -> bytes | None:
-    """The file, or None when it holds more than `limit` bytes (reads at most limit + 1). Only a regular file, or
-    with pipes=True also a pipe (<(cmd), a FIFO): a device like /dev/tty or /dev/zero is refused, and opening
-    never waits (O_NONBLOCK; the type is checked on the open file, so it cannot change in between)."""
+    """The file, or None when it holds more than `limit` bytes (reads at most limit + 1). The type is checked on
+    the open file, so a path swapped after a stat() cannot get past it.
+    - pipes=False (an image a document names): a regular file only, opened without waiting (O_NONBLOCK, POSIX),
+      so /dev/tty, /dev/zero or a FIFO is refused at once instead of hanging or never ending;
+    - pipes=True (--data, named by the caller): a FIFO or <(command) too, opened as usual (it waits for its
+      writer); devices are still refused."""
     import stat
 
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | (0 if pipes else getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(path, flags)
     try:
         mode = os.fstat(fd).st_mode
         if not (stat.S_ISREG(mode) or (pipes and stat.S_ISFIFO(mode))):
             raise NotAFile(0, "not a regular file", str(path))
-        if hasattr(os, "set_blocking"):
-            os.set_blocking(fd, True)  # a pipe without a writer reads as empty
-        f = os.fdopen(fd, "rb")
+        f = os.fdopen(fd, "rb")  # a regular file reads the same with O_NONBLOCK
     except BaseException:
         os.close(fd)
         raise
     with f:
         data = f.read(limit + 1)
     return None if len(data) > limit else data
+
+
+MEMORY_CEILING = 2 * 1024**3  # a 1000-label batch with photos and a PDF page peaks near 200 MB (11/11)
+
+
+def memory_limit() -> int:
+    """The ceiling for runs on untrusted input (bytes; 0: none). BOBINA_MEMORY_LIMIT overrides it (0 turns it
+    off; the test suite does, its own process must not inherit it)."""
+    v = os.environ.get("BOBINA_MEMORY_LIMIT", "").strip()
+    return int(v) if v.isdigit() else MEMORY_CEILING
+
+
+def limit_memory() -> bool:
+    """A hard memory ceiling for this process (--sandbox, the MCP server's document tools): what bobina's own
+    size checks miss ends as MemoryError (reported as M313), not as a machine out of memory. Address space on
+    Linux, data size elsewhere (macOS may ignore it); none on Windows. True when a ceiling is in place."""
+    n = memory_limit()
+    try:
+        import resource
+    except ImportError:  # Windows
+        return False
+    which = resource.RLIMIT_AS if sys.platform.startswith("linux") else getattr(resource, "RLIMIT_DATA", None)
+    if not n or which is None:
+        return False
+    soft, hard = resource.getrlimit(which)
+    if hard != resource.RLIM_INFINITY:
+        n = min(n, hard)
+    if soft != resource.RLIM_INFINITY and soft <= n:
+        return True  # already as low or lower
+    try:
+        resource.setrlimit(which, (n, hard))
+    except (ValueError, OSError):
+        return False
+    return True
 
 
 def _read_umask() -> int:

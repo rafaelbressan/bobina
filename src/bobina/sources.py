@@ -64,7 +64,9 @@ def sniff(data: bytes) -> str:
     return "raster"
 
 
-def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
+def load(src: str, base_dir: str, *, allow_net: bool = False, confine=None) -> Source:
+    """confine: folders (resolved Paths) a local file must be in, wherever its path or symlinks point
+    (--sandbox, MCP); None: anywhere. Decided here, with the same scheme test that picks a file at all."""
     if src.startswith("data:"):
         head, _, payload = src.partition(",")
         if ";base64" not in head:
@@ -87,6 +89,8 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
     p = Path(src).expanduser()
     if not p.is_absolute():
         p = Path(base_dir) / p
+    if confine is not None:
+        p = _confined(p, src, confine)
     try:
         st = p.stat()
     except OSError as e:
@@ -107,6 +111,23 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
     if data is None:  # also a device or a pipe (/dev/zero has no size)
         raise ImageError("I101", f"file larger than {MAX_FILE_BYTES // 1_000_000} MB")
     return Source(data, sniff(data), "file")
+
+
+def _confined(p: Path, src: str, folders) -> Path:
+    try:
+        real = p.resolve()
+    except (OSError, RuntimeError):  # a symlink loop
+        real = None
+    if real is not None and any(real.is_relative_to(d) for d in folders):
+        return real  # read what was checked
+    import json
+
+    folder = (real.parent if real is not None else p.parent).as_posix()  # forward slashes: valid TOML on Windows
+    raise ImageError(
+        "I108",
+        "outside the document folder and image_dirs: not read (--sandbox)",
+        f"trust that folder? add it to config.toml: image_dirs = [{json.dumps(folder)}]",
+    )
 
 
 # -- network -----------------------------------------------------------------------------------------

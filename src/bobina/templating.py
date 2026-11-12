@@ -26,8 +26,9 @@ from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, Undefined
 from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
 from jinja2.runtime import LoopContext, Macro
-from jinja2.sandbox import ImmutableSandboxedEnvironment
+from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedFormatter
 from jinja2.utils import Namespace
+from markupsafe import Markup
 
 from . import paths
 from .nudges import Nudges, SecurityError
@@ -466,7 +467,7 @@ def _strlen(v) -> int:
     return len(v) if isinstance(v, str) else 0
 
 
-_WIDTH_METHODS = {"center", "ljust", "rjust", "zfill", "expandtabs"}
+_WIDTH_METHODS = {"center", "ljust", "rjust", "zfill"}
 _PRINTF_SIZES = re.compile(r"%(?:\([^)]*\))?[-+ #0]*(\d+|\*)?(?:\.(\d+|\*))?")
 _FORMAT_SPECS = re.compile(r"\{[^{}]*:([^{}]*)\}")
 _NESTED_SPEC = re.compile(r"\{[^{}]*:[^{}]*\{")
@@ -489,20 +490,57 @@ def check_widths(args) -> None:
         raise SecurityError("M313", f"a width beyond {MAX_OUTPUT // 1_000_000} MB")
 
 
+def _textlen(x) -> int:
+    """The length str(x) will have, for the items a join puts together (numbers too: range(10**6) | join)."""
+    if isinstance(x, str):
+        return len(x)
+    return len(str(x)) if isinstance(x, (int, float)) else 0
+
+
 def join_size(sep, items) -> int:
-    """The length of sep.join(items), from what is already there (a generator: 0, checked afterwards)."""
-    if not hasattr(items, "__len__") or isinstance(items, (str, SafeRange)):
-        return len(items) * _strlen(sep) if isinstance(items, str) else 0
-    return _strlen(sep) * max(0, len(items) - 1) + sum(_strlen(x) for x in items)
+    """The length of sep.join(items). items must be sized: lazy inputs are drawn first (Sandbox.materialized)."""
+    sep = sep if isinstance(sep, str) else str(sep or "")
+    if isinstance(items, str):
+        return len(items) * (len(sep) + 1)
+    if isinstance(items, SafeRange):  # its items are numbers: sep between them and their digits
+        return len(sep) * max(0, len(items) - 1) + len(items) * len(str(max(abs(items._r.start), abs(items._r.stop))))
+    if not hasattr(items, "__len__"):
+        return 0
+    return len(sep) * max(0, len(items) - 1) + sum(_textlen(x) for x in items)
 
 
 def replace_size(s, old, new, count=-1) -> int:
-    if not (isinstance(s, str) and isinstance(old, str) and isinstance(new, str)):
+    """The length of str(s).replace(old, new, count): the filter turns any value into text first."""
+    if not (isinstance(old, str) and isinstance(new, str)):
         return 0
+    s = s if isinstance(s, str) else str(s)
     n = s.count(old) if old else len(s) + 1
     if isinstance(count, int) and count >= 0:
         n = min(n, count)
     return len(s) + n * max(0, len(new) - len(old))
+
+
+def translate_size(s: str, table) -> int:
+    """str.translate: each character may become the longest string the table maps to."""
+    if not isinstance(table, dict):
+        return len(s)
+    longest = max([1, *(len(v) for v in table.values() if isinstance(v, str))])
+    return len(s) * longest
+
+
+def expandtabs_size(s: str, tabsize=8) -> int:
+    tab = tabsize if isinstance(tabsize, int) and tabsize > 0 else 8
+    return len(s) + s.count("\t") * tab
+
+
+class _BoundedFormatter(SandboxedFormatter):
+    """str.format and format_map in templates: each field's spec is checked after Python put the nested
+    arguments into it ('{:{w}}' with w = '999999999', 9.9e8, row['w']), so no width comes from anywhere unseen."""
+
+    def format_field(self, value, format_spec):
+        if any(int(n) > MAX_OUTPUT for n in re.findall(r"\d+", format_spec)):
+            raise SecurityError("M313", f"a format asks for a field wider than {MAX_OUTPUT // 1_000_000} MB")
+        return check_size(super().format_field(value, format_spec))
 
 
 def _lines(s) -> int:
@@ -561,13 +599,11 @@ class Sandbox(ImmutableSandboxedEnvironment):
             yield x
 
     def bobina_value(self, value):
-        """{% set x = value %}"""
-        self.loops.tick()
-        return check_size(value)
+        """{% set x = value %}: reached through call(), which ticks the deadline and checks the size."""
+        return value
 
     def bobina_join(self, parts):
-        """a ~ b ~ c: as Jinja's str_join, with its size known before it is joined."""
-        self.loops.tick()
+        """a ~ b ~ c: as Jinja's str_join, with its size known before it is joined (call() ticks)."""
         texts = [str(p) for p in parts]
         check_estimate(sum(len(t) for t in texts))
         return "".join(texts)
@@ -622,10 +658,46 @@ class Sandbox(ImmutableSandboxedEnvironment):
             elif name == "format_map" and args and isinstance(args[0], dict):
                 check_format(owner, (), args[0])
             elif name == "join" and args:
+                args = (__self.materialized(args[0]), *args[1:])
                 check_estimate(join_size(owner, args[0]))
             elif name == "replace" and len(args) >= 2:
                 check_estimate(replace_size(owner, *args[:3]))
+            elif name == "translate" and args:
+                check_estimate(translate_size(owner, args[0]))
+            elif name == "expandtabs":
+                check_estimate(expandtabs_size(owner, (*args, *kwargs.values(), 8)[0]))
         return check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
+
+    def materialized(self, items):
+        """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
+        MAX_OUTPUT items, so its size can be estimated before anything is built from it."""
+        if isinstance(items, (str, list, tuple, dict, SafeRange)) or not hasattr(items, "__iter__"):
+            return items
+        return list(self._bounded(iter(items)))
+
+    def wrap_str_format(self, value):
+        """As Jinja's, with a formatter that checks each field's final spec (_BoundedFormatter)."""
+        import types
+        from functools import update_wrapper
+
+        if not isinstance(value, (types.MethodType, types.BuiltinMethodType)) or value.__name__ not in (
+            "format",
+            "format_map",
+        ):
+            return None
+        owner = value.__self__
+        if not isinstance(owner, str) or isinstance(owner, Markup):
+            return super().wrap_str_format(value)
+        formatter, is_map = _BoundedFormatter(self), value.__name__ == "format_map"
+
+        def wrapper(*args, **kwargs):
+            if is_map:
+                if kwargs or len(args) != 1:
+                    raise TypeError("format_map() takes a single mapping")
+                args, kwargs = (), args[0]
+            return type(owner)(formatter.vformat(owner, args, kwargs))
+
+        return update_wrapper(wrapper, value)
 
     def _bounded(self, result):
         """A lazy result (a generator from map, batch, slice …) is drawn with the deadline ticking and stops at
@@ -662,6 +734,9 @@ def _size_guard(name: str, f, env: Sandbox):
         elif name == "format" and isinstance(v, str):
             check_format(v, rest, k)
         elif name == "join":
+            if v is not None and not isinstance(v, (str, list, tuple, dict, SafeRange)):
+                v = env.materialized(v)  # a generator (map, select …): drawn, bounded, then estimated
+                a = (*a[: len(a) - len(values)], v, *rest)
             check_estimate(join_size(rest[0] if rest else k.get("d", ""), v))
         elif name == "replace" and len(rest) >= 2:
             check_estimate(replace_size(v, *rest[:3], **({"count": k["count"]} if "count" in k else {})))
