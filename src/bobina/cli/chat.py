@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import os
 import re
 import sys
 
 from .. import ai, config, engine
 from .. import profile as profiles
 from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
+from . import chat_theme
+from .chat_theme import THEMES
+from .chat_theme import WORDS as THEME_WORDS
 from .common import (
     CONFIRM,
     OK,
@@ -48,6 +52,11 @@ COMMANDS = {  # slash command -> what it does (completion and /help)
     "/questions on": "print your messages too, on the right",
     "/questions off": "print only the answers",
     "/say": "/say TEXT sends TEXT as it is (the letter p, or a line that starts with /)",
+    "/theme": "the colours of this screen: /theme lists them, /theme NAME switches",
+    "/theme dark": "light text on a dark terminal",
+    "/theme light": "dark text on a light terminal",
+    "/theme mono": "no colours (bold and dim stay)",
+    "/theme contrast": "high contrast",
     "/help": "this list",
     "/quit": "end the chat (also Ctrl-D)",
 }
@@ -130,6 +139,13 @@ def register(sub, cmd) -> None:
     )
     p.add_argument("--name", metavar="NAME", help='your name over your messages, on paper and on screen (default'
                    ' "you"; chat_name in config.toml)')  # fmt: skip
+    p.add_argument(
+        "--theme",
+        type=_value("theme", THEMES, THEME_WORDS),
+        choices=THEMES,
+        help="the chat screen's colours: dark, light, mono, contrast (default: the terminal's, else dark;"
+        " chat_theme and [chat.colors] in config.toml)",
+    )
     p.add_argument("--manual", action="store_true", help="the chat screen: print an answer only on /print (p)")
     p = cmd(
         sub,
@@ -438,6 +454,9 @@ class Session:
             ui.note(f"your messages print too, at most {self.question_limit} characters" if self.questions
                     else "only the answers print")  # fmt: skip
             return True
+        if words[0] == "/theme":
+            self.theme(words[1] if len(words) > 1 else "")
+            return True
         if line in ("/help", "/?"):
             ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()))
             return True
@@ -445,6 +464,24 @@ class Session:
             ui.note(f"unknown command {words[0]}; /help lists them (/say TEXT sends a line that starts with /)")
             return True
         return False
+
+    def theme(self, wanted: str) -> None:
+        """/theme: the themes, the one in use marked; /theme NAME: switch (one's own [chat.colors] stay on top)."""
+        current = getattr(getattr(self.ui, "theme", None), "name", "")
+        if not wanted:
+            self.ui.note("themes: " + ", ".join(f"{t} (in use)" if t == current else t for t in THEMES)
+                         + " · /theme NAME switches; chat_theme in config.toml keeps one")  # fmt: skip
+            return
+        name = chat_theme.name_of(wanted)
+        if not name:
+            self.ui.note(f"no theme '{wanted}': {', '.join(THEMES)}")
+            return
+        theme = chat_theme.pick(name, config.load())
+        self.ui.set_theme(theme)
+        for n in theme.notes:
+            self.ui.note(n)
+        no_color = "" if theme.color or name == "mono" else " (NO_COLOR is set: no colours)"
+        self.ui.note(f"theme {name}{no_color}")
 
     def turn(self, question: str) -> None:
         conv, ui = self.conv, self.ui
@@ -593,10 +630,15 @@ def terminal() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty() and not noninteractive()
 
 
-def _ui(args):
+def _ui(args, cfg):
+    """The chat screen, with its theme (--no-color as NO_COLOR); notes about the theme first."""
     from .chat_tui import TerminalUI
 
-    return TerminalUI(color=not args.no_color)
+    env = {**os.environ, **({"NO_COLOR": "1"} if args.no_color else {})}
+    theme = chat_theme.pick(args.theme, cfg, env)
+    for n in theme.notes:
+        err(f"note: {n}")
+    return TerminalUI(theme)
 
 
 def _stdin_waiting() -> bool:
@@ -662,7 +704,7 @@ def cmd_chat(args):
     if not one and args.json:
         err('note: --json does nothing in the chat screen; for JSON ask one question: bobina chat "QUESTION" --json')
         args.json = False
-    ui = None if one else _ui(args)
+    ui = None if one else _ui(args, cfg)
     name, model = _choose(args, ui)
     backend = ai.backend(name, model)
     printer, pr = config.printer(cfg, args.printer)
@@ -693,6 +735,8 @@ def one_question(args, conv, printer, pr, question: str, qlimit: int, questions:
     """bobina chat "QUESTION": asks once, writes the answer, exits. It prints only with --yes (as print)."""
     if args.manual:
         err("note: --manual does nothing with one question: it prints only with --yes")
+    if args.theme:
+        err("note: --theme does nothing with one question: it is the chat screen's")
     if args.dry_run and args.yes:
         err("note: --dry-run wins over --yes: nothing prints")
     if args.layout == "strip":

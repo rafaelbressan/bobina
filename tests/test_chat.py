@@ -79,7 +79,7 @@ def run_chat(monkeypatch, capsys, fake, lines, *argv):
     capsys.readouterr()
     fake_ai(monkeypatch, fake)
     monkeypatch.setattr(cli_chat, "terminal", lambda: True)
-    monkeypatch.setattr(cli_chat, "_ui", lambda args: LinesUI())
+    monkeypatch.setattr(cli_chat, "_ui", lambda args, cfg: LinesUI())
     monkeypatch.setattr(sys, "stdin", io.StringIO("".join(line + "\n" for line in lines)))
     code = main(["chat", *argv])
     return code, capsys.readouterr()

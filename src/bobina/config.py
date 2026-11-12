@@ -48,19 +48,33 @@ def _toml_value(v) -> str:
         return "true" if v else "false"
     if isinstance(v, (int, float)):
         return repr(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
     return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _key(k: str) -> str:
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else _toml_value(k)
+
+
+def _table(lines: list[str], name: str, table: dict) -> None:
+    """[name] with its values, then its own tables ([printers.mtp], [chat.colors]): every table is kept."""
+    values = {k: v for k, v in table.items() if not isinstance(v, dict)}
+    if values or not any(isinstance(v, dict) for v in table.values()):
+        lines += ["", f"[{name}]"] + [f"{_key(k)} = {_toml_value(v)}" for k, v in values.items()]
+    for k, v in table.items():
+        if isinstance(v, dict):
+            _table(lines, f"{name}.{_key(k)}", v)
 
 
 def _write(cfg: dict) -> None:
     lines = ["# bobina configuration (written by bobina; comments are not preserved)"]
     for k, v in cfg.items():
         if not isinstance(v, dict):
-            lines.append(f"{k} = {_toml_value(v)}")
-    for name, pr in (cfg.get("printers") or {}).items():
-        lines.append("")
-        lines.append(f"[printers.{name}]")
-        for k, v in pr.items():
-            lines.append(f"{k} = {_toml_value(v)}")
+            lines.append(f"{_key(k)} = {_toml_value(v)}")
+    for k, v in cfg.items():
+        if isinstance(v, dict):
+            _table(lines, _key(k), v)
     fileio.atomic_write(path(), "\n".join(lines) + "\n")  # a reader never sees half a config
 
 

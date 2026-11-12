@@ -25,6 +25,7 @@ echo "a haiku about paper" | bobina chat --json --dry-run
 | `--name NAME` | your name over your messages, on paper and on screen (default "you") | `chat_name` |
 | `--questions` | print your messages too, on the right (about 3 lines at most; never cut: a longer one is not sent) | `chat_questions` |
 | `--limit LENGTH` | paper per answer: `10cm` (default), `100mm`, `4in` (a bare number is cm); 1.5 cm to 1 m | `chat_limit` |
+| `--theme NAME` | the screen's colours: `dark`, `light`, `mono`, `contrast` (default: the terminal's, else dark) | `chat_theme` |
 | `--manual` | the chat: print only on `/print` (`p`) | |
 | `--dry-run` | never print; show the paper each answer would take | |
 | `--yes` | one question: print the answer | |
@@ -82,7 +83,9 @@ Earlier looks stay available: `labels`, `labels-ruled`, `labels-underlined`, `la
 It opens with a welcome block, keeps the terminal's scrollback, and keeps a framed input box under the last message
 with a status line: the AI, the printer, the layout, auto or manual, the paper of this chat and the roll (`roll
 7.4 m left`, or `roll ?` until `bobina paper new 30m` says its length). Your messages show on the right, the AI's
-under ✦ and its name, what each answer took on paper in a dim line. `NO_COLOR` turns colours off. The screen needs
+under ✦ and its name, what each answer took on paper in a dim line. Your own colours go over the theme's:
+`[chat.colors]` in config.toml with `you`, `ai`, `dim`, `frame`, `status`, `warning`, `error` (`you = "#ff8700"`;
+a wrong one is a note). `NO_COLOR` wins: no colours, bold and dim stay. The screen needs
 a terminal: without one (or with `BOBINA_NONINTERACTIVE`), ask one question instead (`E107` says so).
 
 | Type | Does |
@@ -91,6 +94,7 @@ a terminal: without one (or with `BOBINA_NONINTERACTIVE`), ask one question inst
 | `/again` | print another copy of the last answer |
 | `/manual`, `/auto` | print only on `/print`, or every answer right away (the default) |
 | `/strip`, `/tickets`, `/questions on\|off` | switch the layout; print your messages too, or not |
+| `/theme`, `/theme NAME` | list the themes; switch to one |
 | `/say TEXT` | send TEXT as it is: the single letter p, or a line that starts with / |
 | `/help`, `/quit` | the commands (Tab completes them); end (also Ctrl-D) |
 | Esc or Ctrl-C | stop the answer being written; the chat goes on |

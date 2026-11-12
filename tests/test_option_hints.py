@@ -101,6 +101,8 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("chat", "--modle", "--model"),
     ("chat", "--limt", "--limit"),
     ("chat", "--estilo", "--style"),
+    ("chat", "--tema", "--theme"),
+    ("chat", "--colors", "--theme"),
     ("chat", "--nome", "--name"),
     ("chat", "--username", "--name"),
     ("ai", "--modelo-ia", "--model"),
