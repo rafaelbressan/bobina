@@ -1,13 +1,11 @@
 # Security model
 
 Status: threat model and defenses for v0.x; red teams in `tests/test_security*.py`.
-Method: guidance mode of [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
-(vendored in `.claude/skills/security-audit/`, MIT).
 
 ## What bobina is
 
 A local CLI. It reads a document, renders it, and — after a confirmation — sends bytes to a printer.
-There is no server yet; a print server and a chat bot are planned, and they change the model (below).
+`bobina mcp` runs every document in `--sandbox`; a print server is planned (below).
 
 ## Trust boundaries
 
