@@ -60,20 +60,47 @@ def paragraphs(text: str) -> list[Block]:
     return [Paragraph(runs=runs(p)) for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
-# how the two speakers look on paper (docs/chat.md); labels-* are labels with rules, labels-bubble with the bubble
-STYLES = ("plain", "bubbles", "boxes", "labels", "labels-ruled", "labels-underlined", "labels-exchange",
-          "labels-bubble")  # fmt: skip
-BETWEEN = {
-    "plain": "dashed",
-    "boxes": "dashed",
-    "labels": "dashed",
-    "labels-exchange": "double",
-    "labels-bubble": "dotted",
-}  # between answers
-IN_BUBBLE = ("bubbles", "boxes", "labels-bubble")  # the person's message inside a bubble or a box
+@dataclass(frozen=True)
+class Look:
+    """How the two speakers look on paper (a --style)."""
+
+    person: str = "label"  # label: name line, then the text on the right · text: the text only · bubble: a black
+    # bubble with the icon by it · box: a framed bubble with the icon · named-bubble / named-box: the name line,
+    # then the bubble or box (fitted to the text, on the right)
+    full: bool = False  # the bubble across the paper (the text still on its right)
+    ai_label: bool = True  # "✦ Claude" over the answer
+    ai_icon: str = "sparkles"
+    under_person: str = ""  # a short mark under the person's name: solid, dashed, dotted, hook
+    under_ai: str = ""  # the same under the AI's name
+    between: str = ""  # between exchanges: dashed-full, double, dotted-full (rules across), dots, ornament (short)
+    inside: str = ""  # between the person's message and the answer: a dashed rule across
+    above_names: bool = False  # a rule across over each name line
+    under_messages: bool = False  # a rule across under each message
+
+
+LOOKS = {
+    # the D set (11/11): one continuous conversation; short marks only, by the speaker they belong to
+    "labels-underline": Look(under_person="solid", under_ai="solid"),  # D1
+    "labels-dashes": Look(under_person="dashed", under_ai="dashed"),  # D2
+    "labels-dots": Look(between="dots"),  # D3
+    "labels-outline": Look(person="named-box"),  # D4
+    "labels-filled": Look(person="named-bubble", under_ai="dotted"),  # D5
+    "labels-hook": Look(under_person="hook", under_ai="hook", between="ornament"),  # D6
+    # earlier ones, kept behind --style
+    "labels": Look(between="dashed-full"),
+    "labels-ruled": Look(above_names=True),
+    "labels-underlined": Look(under_messages=True),
+    "labels-exchange": Look(between="double", inside="dashed"),
+    "labels-bubble": Look(person="bubble", full=True, between="dotted-full"),
+    "bubbles": Look(person="bubble", full=True),
+    "boxes": Look(person="box", ai_icon="bot", between="dashed-full"),
+    "plain": Look(person="text", ai_label=False, between="dashed-full"),
+}
+STYLES = tuple(LOOKS)
 SPEAKER_ICON = {"ai": "sparkles", "person": "user-round", "ai-boxes": "bot"}
 ICON_PX = 24  # one line of native text
 PAD = 6  # dots inside a bubble or box
+MARK_GAP = 3  # dots between a name and the short mark under it
 
 
 def _narrow(profile, width: int):
@@ -102,9 +129,26 @@ def text_image(profile, text: str, width: int, *, bold: bool = False, align: str
     return im.crop((0 if align == "left" else box[0], 0, box[2] if align == "left" else width, box[3]))
 
 
-def speaker_row(profile, icon: str, label: str, side: str = "left"):
-    """One line: a small icon and a name ("✦ Claude" on the left, "you 👤" on the right), as an image row."""
-    from PIL import Image
+def _short_mark(d, x0: int, x1: int, y: int, kind: str, side: str) -> None:
+    """A short mark from x0 to x1 (2 dots thick): solid, dashed (- - -), dotted (· · ·) or a hook bending down
+    on the side of the text that follows (left speaker: at its end; right speaker: at its start)."""
+    if kind == "dashed":
+        for x in range(x0, x1, 10):
+            d.rectangle((x, y, min(x + 5, x1), y + 1), fill=0)
+    elif kind == "dotted":
+        for x in range(x0, x1, 6):
+            d.rectangle((x, y, x + 1, y + 1), fill=0)
+    else:
+        d.rectangle((x0, y, x1, y + 1), fill=0)
+        if kind == "hook":
+            hx = x1 - 1 if side == "left" else x0
+            d.rectangle((hx, y, hx + 1, y + 6), fill=0)
+
+
+def speaker_row(profile, icon: str, label: str, side: str = "left", under: str = ""):
+    """One line: a small icon and a name ("✦ Claude" on the left, "Rafael 👤" on the right), as an image row;
+    under: a short mark under them (only as wide as icon and name)."""
+    from PIL import Image, ImageDraw
 
     from . import icons
     from .rows import BitmapRow
@@ -113,13 +157,19 @@ def speaker_row(profile, icon: str, label: str, side: str = "left"):
     mark = icons.load(icon, ICON_PX)
     name = text_image(profile, label, w - ICON_PX - 8, bold=True, align="left")
     h = max(ICON_PX, name.height)
-    out = Image.new("1", (w, h), 1)
+    extra = (MARK_GAP + 2 + (6 if under == "hook" else 0)) if under else 0
+    out = Image.new("1", (w, h + extra), 1)
+    span = ICON_PX + 8 + name.width
     if side == "left":
         out.paste(mark, (0, (h - ICON_PX) // 2))
         out.paste(name, (ICON_PX + 8, (h - name.height) // 2))
+        x0, x1 = 0, span
     else:
         out.paste(mark, (w - ICON_PX, (h - ICON_PX) // 2))
         out.paste(name, (w - ICON_PX - 8 - name.width, (h - name.height) // 2))
+        x0, x1 = w - span, w - 1
+    if under:
+        _short_mark(ImageDraw.Draw(out), x0, x1, h + MARK_GAP, under, side)
     return BitmapRow(out, 0, "chat")
 
 
@@ -131,22 +181,49 @@ def rule_row(profile, style: str = "solid"):
     return BitmapRow(imaging.divider(profile.width_dots, style, 2, pad=2), 0, "divider")
 
 
-def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: str = "user-round"):
+def ornament_row(profile, kind: str):
+    """A small mark in the middle between two exchanges: "·  ·  ·" (dots) or "— ✦ —" (ornament); short, so the
+    conversation still reads as one."""
+    from PIL import Image, ImageDraw
+
+    from . import icons
+    from .rows import BitmapRow
+
+    w = profile.width_dots
+    if kind == "dots":
+        out = Image.new("1", (w, 8), 1)
+        d = ImageDraw.Draw(out)
+        for i in (-1, 0, 1):
+            x = w // 2 + i * 16
+            d.rectangle((x - 1, 3, x + 1, 5), fill=0)
+        return BitmapRow(out, 0, "divider")
+    star = icons.load("sparkles", ICON_PX)
+    out = Image.new("1", (w, ICON_PX), 1)
+    d = ImageDraw.Draw(out)
+    mid, y = w // 2, ICON_PX // 2 - 1
+    d.rectangle((mid - ICON_PX // 2 - 8 - 36, y, mid - ICON_PX // 2 - 8, y + 1), fill=0)
+    d.rectangle((mid + ICON_PX // 2 + 8, y, mid + ICON_PX // 2 + 8 + 36, y + 1), fill=0)
+    out.paste(star, (mid - ICON_PX // 2, 0))
+    return BitmapRow(out, 0, "divider")
+
+
+def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: str | None = "user-round"):
     """The person's message on the right, like a chat app: wrapped inside a rounded bubble (white on black when
-    inverted, else a 2-dot frame), the person icon next to its top. full: the bubble spans the paper, the text
-    still on its right."""
+    inverted, else a 2-dot frame), the person icon next to its top (icon=None: no icon, the bubble to the edge).
+    full: the bubble spans the paper, the text still on its right."""
     from PIL import Image, ImageDraw, ImageOps
 
     from . import icons
     from .rows import BitmapRow
 
     w = profile.width_dots
-    inner = w - ICON_PX - 6 - 2 * PAD - 4
+    side = ICON_PX + 6 if icon else 0
+    inner = w - side - 2 * PAD - 4
     words = text_image(profile, text, inner, align="right" if full else "left")
-    bw = (w - ICON_PX - 6) if full else words.width + 2 * PAD
+    bw = (w - side) if full else words.width + 2 * PAD
     bh = words.height + 2 * PAD
     out = Image.new("1", (w, bh), 1)
-    x0 = w - ICON_PX - 6 - bw
+    x0 = w - side - bw
     tx = x0 + bw - PAD - words.width  # the text against the bubble's right side
     d = ImageDraw.Draw(out)
     if inverted:
@@ -156,17 +233,23 @@ def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: 
     else:
         d.rounded_rectangle((x0, 0, x0 + bw - 1, bh - 1), radius=8, outline=0, width=2)
         out.paste(words, (tx, PAD))
-    out.paste(icons.load(icon, ICON_PX), (w - ICON_PX, 0))
+    if icon:
+        out.paste(icons.load(icon, ICON_PX), (w - ICON_PX, 0))
     return BitmapRow(out, 0, "chat")
 
 
 @dataclass
 class Ticket:
-    """Lays out and measures answers on one printer profile, in one of the STYLES."""
+    """Lays out and measures answers on one printer profile, in one of the STYLES; name: the person ("you")."""
 
     profile: object
     style: str = "plain"
+    name: str = "you"
     _base: float | None = None
+
+    @property
+    def look(self) -> Look:
+        return LOOKS[self.style]
 
     def job(self, parts: list, top: bool = True, feed: bool = True) -> engine.Result:
         """A job of these parts (lists of blocks laid out by bobina, or image rows), a block gap between them;
@@ -211,7 +294,8 @@ class Ticket:
 
     def question_chars(self, lines: int = 3) -> int:
         """The longest message of the person that prints in about `lines` lines (inside a bubble when there is one)."""
-        cols = self.profile.columns - (3 if self.style in IN_BUBBLE else 0)
+        in_bubble = self.look.person in ("bubble", "box", "named-bubble", "named-box")
+        cols = self.profile.columns - (3 if in_bubble else 0)
         return max(20, int(cols * lines * 0.9))
 
     def cut(self, text: str, limit_mm: float) -> str:
@@ -233,36 +317,44 @@ class Ticket:
     def ticket(self, answer: str, *, header: list[str] | None = None, question: str | None = None,
                separator: bool = False, top: bool = True, feed: bool = True,
                who: str = "AI") -> engine.Result:  # fmt: skip
-        """One answer as it prints: a rule between answers (by style), the header, the person's message on the
+        """One answer as it prints: a mark between exchanges (by style), the header, the person's message on the
         right, the AI's answer on the left (under its icon and name, but in plain)."""
-        st, p = self.style, self.profile
+        look, p = self.look, self.profile
         parts: list = []
-        if separator and st in BETWEEN:
-            between = BETWEEN[st]
-            parts.append([Divider(attrs=Attrs({between}))] if between == "dashed" else rule_row(p, between))
+        if separator and look.between:
+            if look.between == "dashed-full":
+                parts.append([Divider(attrs=Attrs({"dashed"}))])
+            elif look.between in ("dots", "ornament"):
+                parts.append(ornament_row(p, look.between))
+            else:
+                parts.append(rule_row(p, look.between.removesuffix("-full")))
         if header:
             head = [Paragraph(attrs=Attrs({"center"}), runs=[Run(header[0], bold=True)])]
             parts.append(head + [Paragraph(attrs=Attrs({"center"}), runs=[Run(line)]) for line in header[1:]])
         if question:
             text = "\n\n".join(paragraphs_text(question))
-            if st in IN_BUBBLE:
-                parts.append(bubble_row(p, text, inverted=st != "boxes", full=st != "boxes"))
-            else:  # wrapped first, then each line aligned right (never stretched)
-                if st == "labels-ruled":
+            if look.person in ("bubble", "box"):
+                parts.append(bubble_row(p, text, inverted=look.person == "bubble", full=look.full))
+            else:
+                if look.above_names:
                     parts.append(rule_row(p))
-                if st.startswith("labels"):
-                    parts.append(speaker_row(p, SPEAKER_ICON["person"], "you", side="right"))
-                parts.append([Paragraph(attrs=Attrs({"right"}), runs=[Run(q)]) for q in paragraphs_text(question)])
-                if st == "labels-underlined":
+                if look.person != "text":
+                    parts.append(speaker_row(p, SPEAKER_ICON["person"], self.name, "right", look.under_person))
+                if look.person in ("named-bubble", "named-box"):
+                    parts.append(bubble_row(p, text, inverted=look.person == "named-bubble", icon=None))
+                else:  # wrapped first, then each line aligned right (never stretched)
+                    parts.append([Paragraph(attrs=Attrs({"right"}), runs=[Run(q)])
+                                  for q in paragraphs_text(question)])  # fmt: skip
+                if look.under_messages:
                     parts.append(rule_row(p))
-                if st == "labels-exchange":  # inside one exchange: a dashed rule; between exchanges: a double one
-                    parts.append(rule_row(p, "dashed"))
-        if st != "plain":
-            if st == "labels-ruled":
+                if look.inside:
+                    parts.append(rule_row(p, look.inside))
+        if look.ai_label:
+            if look.above_names:
                 parts.append(rule_row(p))
-            parts.append(speaker_row(p, SPEAKER_ICON["ai-boxes" if st == "boxes" else "ai"], who))
+            parts.append(speaker_row(p, look.ai_icon, who, "left", look.under_ai))
         parts.append(paragraphs(answer))
-        if st == "labels-underlined":
+        if look.under_messages:
             parts.append(rule_row(p))
         return self.job(parts, top, feed)
 

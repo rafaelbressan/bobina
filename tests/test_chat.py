@@ -39,6 +39,34 @@ def printer(tmp_path):
     return out
 
 
+class LinesUI:
+    """A test double of the chat screen: lines on stdin and stdout (each line read is echoed after "you> ")."""
+
+    def welcome(self, lines):
+        print("\n".join(lines) + "\n", flush=True)
+
+    def read(self, session):
+        line = sys.stdin.readline()
+        if not line:
+            return None
+        print("you> " + line.rstrip("\n"), flush=True)
+        return line.rstrip("\n")
+
+    def answer(self, who, text):
+        print(f"{who}:\n{chat.BOLD.sub(lambda m: m.group(1), text)}\n", flush=True)
+
+    def note(self, text):
+        print(f"  {text}", flush=True)
+
+    dim = note
+
+    def wait(self, label, fn):
+        return fn()
+
+    def choose_ai(self, ready):
+        return ready[0]
+
+
 def fake_ai(monkeypatch, fake):
     monkeypatch.setattr(ai, "backend", lambda name, model=None: fake)
     monkeypatch.setattr(ai, "detect", lambda: [ai.Found("claude", "Claude Code", True, "/bin/claude")])
@@ -51,7 +79,7 @@ def run_chat(monkeypatch, capsys, fake, lines, *argv):
     capsys.readouterr()
     fake_ai(monkeypatch, fake)
     monkeypatch.setattr(cli_chat, "terminal", lambda: True)
-    monkeypatch.setattr(cli_chat, "_ui", lambda args: cli_chat.PlainUI())
+    monkeypatch.setattr(cli_chat, "_ui", lambda args: LinesUI())
     monkeypatch.setattr(sys, "stdin", io.StringIO("".join(line + "\n" for line in lines)))
     code = main(["chat", *argv])
     return code, capsys.readouterr()
@@ -617,7 +645,7 @@ def _session(lines, answers, **kw):
     pr = {"transport": "command", "command": "true"}  # a printer whose roll is counted
     config.update(lambda c: c.setdefault("printers", {}).update(test=pr))
     args = type("A", (), {"manual": False, "questions": False, "dry_run": False, "argv": ["chat"], "printer": "test",
-                          **kw})()  # fmt: skip
+                          "strict": False, "quiet": False, **kw})()  # fmt: skip
     conv = chat.Conversation(Fake(answers), ticket(), paper_left=lambda: 2500.0)
     ui = Screen(lines)
     return cli_chat.Session(args, conv, "test", pr, ui, 80), ui
@@ -841,7 +869,7 @@ def test_limit_units(value, mm):
 
 @pytest.mark.parametrize(
     "value,said",
-    [("10", "give it a unit"), ("0", "more than 0"), ("0cm", "more than 0"), ("-5cm", "more than 0"), ("1km", "use 15m"),
+    [("0", "more than 0"), ("0cm", "more than 0"), ("-5cm", "more than 0"), ("1km", "use 15m"),
      ("1cm", "at least 1.5cm"), ("ten cm", "use 15m")],
 )  # fmt: skip
 def test_limit_mistakes_are_refused_clearly(value, said):
@@ -863,9 +891,16 @@ def test_a_huge_limit_is_capped_and_the_roll_is_said(capsys):
     assert "the roll has ~30 cm left" in capsys.readouterr().err
 
 
-def test_limit_from_the_command_line(monkeypatch, capsys, printer):
+def test_a_bare_number_is_centimetres_with_a_note(monkeypatch, capsys, printer):
     code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--limit", "10")
-    assert code == 1 and "--limit 10: give it a unit" in o.err
+    assert code == 0 and "--limit 10: read as 10cm; give a unit to be sure" in o.err
+    from bobina.cli import chat as cli_chat
+
+    assert cli_chat._limit(type("A", (), {"limit": None})(), {"chat_limit": 6}, None) == 60  # a TOML number
+    assert "chat_limit = 6 in config.toml: read as 6cm" in capsys.readouterr().err
+
+
+def test_limit_from_the_command_line(monkeypatch, capsys, printer):
     code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--limit=-5cm")
     assert code == 1 and "more than 0" in o.err
 
@@ -875,7 +910,7 @@ def test_limit_from_the_command_line(monkeypatch, capsys, printer):
     [(["--layout", "ticket"], None), (["--layout", "continuous"], None), (["--style", "c1"], None),
      (["--style", "bubble"], None), (["--layout", "tickts"], "did you mean tickets?"),
      (["--style", "lables"], "did you mean labels?"), (["--layout", "xyz"], "strip, tickets"),
-     (["--style", "zzz"], "plain, bubbles, boxes, labels")],
+     (["--style", "zzz"], "labels-underline, labels-dashes, labels-dots")],
 )  # fmt: skip
 def test_layout_and_style_values(monkeypatch, capsys, argv, want):
     if want is None:
@@ -933,3 +968,131 @@ def test_p_retries_a_failed_print(monkeypatch, capsys, tmp_path):
     code, o = run_chat(monkeypatch, capsys, Fake(["One."]), ["a?", "p"])
     assert "not printed:" in o.out and "p tries this answer again" in o.out and "printed on flaky" in o.out
     assert out.read_bytes()
+
+
+# ------------------------------------------------------------------------------------------------- review fixes
+
+
+def test_the_api_version_is_the_documented_one():
+    """The claude-api skill (curl/examples.md, "Basic Message Request") documents the raw HTTP header as
+    -H "anthropic-version: 2026-10-21" for POST /v1/messages; this is that value, written out here on purpose."""
+    assert ai.ANTHROPIC_VERSION == "2026-10-21"
+
+
+def test_one_question_reports_problems_as_print(monkeypatch, capsys, printer):
+    arrows = "Go → there, ← back."  # F301: printed as an image (a note)
+    long_word = "Antidisestablishmentarianism" * 2  # L101: a word longer than the line (a warning)
+    code, o = ask_once(monkeypatch, capsys, Fake([long_word]), "q?", "--yes", "--strict")
+    assert code == 3 and "nothing printed (--strict)" in o.err and not printer.exists()
+    code, o = ask_once(monkeypatch, capsys, Fake([arrows]), "q?", "--yes", "--problems", "jsonl")
+    lines = [json.loads(x) for x in o.err.splitlines() if x.startswith("{")]
+    assert code == 0 and lines and lines[0]["code"] == "F301" and lines[0]["outcome"] == "printing anyway (--yes)"
+    code, o = ask_once(monkeypatch, capsys, Fake([arrows]), "q?", "--yes", "-q")
+    assert code == 0 and o.err == "" and o.out.startswith("Go")
+
+
+def test_the_chat_screen_reports_problems_with_the_shared_renderer(monkeypatch, capsys, printer):
+    code, o = run_chat(monkeypatch, capsys, Fake(["Go → there."]), ["a?"])
+    assert "1 note — printing anyway" in o.out and "· note    [F301]" in o.out
+    code, o = run_chat(monkeypatch, capsys, Fake(["Antidisestablishmentarianism" * 2]), ["a?"], "--strict")
+    assert "not printed (--strict)" in o.out and o.out.count("printed on test") == 0
+
+
+def test_a_pipe_that_never_brings_a_question(monkeypatch, capsys):
+    import os
+
+    from bobina.cli import chat as cli_chat
+
+    fake_ai(monkeypatch, Fake([]))
+    monkeypatch.setattr(cli_chat, "STDIN_WAIT_S", 0.1)
+    r, w = os.pipe()  # the writer stays open: nothing comes, nothing ends
+    monkeypatch.setattr(sys, "stdin", open(r, encoding="utf-8"))  # noqa: SIM115
+    try:
+        assert main(["chat"]) == 7
+    finally:
+        os.close(w)
+    assert "E107" in capsys.readouterr().err
+
+
+def test_stdin_is_looked_at_without_reading_it(monkeypatch, capsys):
+    import os
+
+    from bobina.cli import chat as cli_chat
+
+    r, w = os.pipe()
+    os.write(w, b"other question")
+    monkeypatch.setattr(sys, "stdin", open(r, encoding="utf-8"))  # noqa: SIM115
+    assert cli_chat._stdin_waiting()
+    assert sys.stdin.read(5) == "other"  # nothing was taken from it
+    os.close(w)
+
+
+def test_one_question_says_strip_means_nothing(monkeypatch, capsys):
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--layout", "strip")
+    assert code == 0 and "a single answer is always one ticket" in o.err
+
+
+def test_say_alone_says_what_it_is(monkeypatch, capsys, printer):
+    fake = Fake([])
+    code, o = run_chat(monkeypatch, capsys, fake, ["/say", "/say   "])
+    assert o.out.count("/say TEXT sends TEXT to the AI as it is") == 2 and not fake.calls
+
+
+# ---------------------------------------------------------------------------------- the D set and the name
+
+
+def test_the_name_replaces_you_on_paper(monkeypatch, capsys, printer):
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "q?", "--questions", "--yes", "--name", "Rafael")
+    assert code == 0
+    config.set_value("chat_name", "Ana Maria")
+    from bobina.cli import chat as cli_chat
+
+    args = type("A", (), {"name": None})()
+    assert cli_chat._name(args, config.load()) == "Ana Maria"
+    assert cli_chat._name(type("A", (), {"name": "  "})(), {}) == "you"
+    assert cli_chat._name(type("A", (), {"name": "x" * 30})(), {}) == "x" * 20
+    assert "is long for one line" in capsys.readouterr().err
+
+
+def _ink_box(im):
+    from PIL import ImageOps
+
+    return ImageOps.invert(im.convert("L")).getbbox()
+
+
+@pytest.mark.parametrize("style", ["labels-underline", "labels-dashes", "labels-hook"])
+def test_short_marks_stay_by_their_speaker(style):
+    """Never a rule across the paper: the mark under a name is about as wide as the icon and the name."""
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style=style, name="Rafael")
+    res = t.ticket("Ok.", question="hi?", who="Claude")
+    person, ai_line = [r.image for r in res.rows if isinstance(r, BitmapRow) and r.kind == "chat"]
+    w = person.width
+    x0, _, x1, _ = _ink_box(person.crop((0, 26, w, person.height)))  # below the icon and the name
+    assert x1 >= w - 2 and x1 - x0 < w // 2  # on the right, short
+    x0, _, x1, _ = _ink_box(ai_line.crop((0, 26, w, ai_line.height)))
+    assert x0 <= 1 and x1 - x0 < w // 2  # on the left, short
+
+
+@pytest.mark.parametrize("style", ["labels-dots", "labels-hook"])
+def test_between_exchanges_a_small_mark_in_the_middle(style):
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style=style)
+    res = t.ticket("Ok.", question="and then?", who="Claude", separator=True)
+    mark = next(r.image for r in res.rows if isinstance(r, BitmapRow) and r.kind == "divider")
+    x0, _, x1, _ = _ink_box(mark)
+    assert x0 > mark.width // 4 and x1 < mark.width * 3 // 4  # centred, short
+
+
+def test_the_outlined_bubble_has_the_name_above_it():
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style="labels-outline", name="Rafael")
+    res = t.ticket("Ok.", question="hello there", who="Claude")
+    name_line, bubble, _ai = [r.image for r in res.rows if isinstance(r, BitmapRow) and r.kind == "chat"]
+    ink = bubble.convert("L").histogram()[0] / (bubble.width * bubble.height)
+    assert ink < 0.25  # a thin frame, white inside
+    x0, _, x1, _ = _ink_box(bubble)
+    assert x1 >= bubble.width - 2 and x0 > bubble.width // 3  # fitted to the text, on the right

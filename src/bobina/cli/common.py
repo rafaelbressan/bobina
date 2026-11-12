@@ -979,7 +979,7 @@ def report_nudges(res, args) -> int:
         cmd = getattr(args, "command", "print")
         if strict:
             outcome = f"{stopped() or 'stopped'} (--strict)"
-        elif cmd not in ("print", "edit"):
+        elif cmd not in ("print", "edit", "chat"):
             outcome = ""  # check, view, preview: the warnings are the answer, nothing was meant to print
         elif getattr(args, "dry_run", False):
             outcome = "nothing printed (dry run)"

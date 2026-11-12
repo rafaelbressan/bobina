@@ -30,7 +30,7 @@ from prompt_toolkit.validation import ValidationError, Validator
 
 from .. import ai
 from ..chat import BOLD
-from .chat import COMMANDS, Cancelled, PlainUI
+from .chat import COMMANDS, Cancelled
 
 STYLE = Style.from_dict({
     "frame": "#5f87af",
@@ -93,14 +93,34 @@ class Limit(Validator):
             raise ValidationError(message=why, cursor_position=len(document.text))
 
 
-class TerminalUI(PlainUI):
+class TerminalUI:
+    """The chat screen: what Session shows and reads (welcome, read, answer, note, dim, wait, choose_ai)."""
+
     def __init__(self, color: bool = True):
-        super().__init__()
         self.color = color and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
         self.depth = None if self.color else ColorDepth.DEPTH_1_BIT
         self.app: Application | None = None
         self.buffer: Buffer | None = None
         self.error = ""
+
+    def choose_ai(self, ready: list):
+        """The first chat with several AIs on this machine: which one (saved for next time)."""
+        from prompt_toolkit import prompt
+
+        self.out([("class:title", "Which AI should answer? "), ("class:dim", "(saved; bobina ai use NAME changes it)")])
+        for i, f in enumerate(ready, 1):
+            self.out([("class:ai", f"  {i}. {f.name:9s} "), ("", f"{f.label}: {f.detail}")])
+        while True:
+            try:
+                a = prompt(f"number or name [1 {ready[0].name}]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                a = ""
+            if not a:
+                return ready[0]
+            hit = [f for i, f in enumerate(ready, 1) if a in (str(i), f.name)]
+            if hit:
+                return hit[0]
+            self.note(f"1 to {len(ready)}, or a name above")
 
     def out(self, parts: list[tuple[str, str]]) -> None:
         print_formatted_text(FormattedText(parts), style=STYLE, color_depth=self.depth)
@@ -206,12 +226,12 @@ class TerminalUI(PlainUI):
         elif text.startswith("/") or text == "p":
             text = ""
         if text:
-            self.user(text)
+            self.user(text, session.conv.ticket.name)
         return line
 
-    def user(self, text: str) -> None:
+    def user(self, text: str, name: str = "you") -> None:
         cols = width()
-        rows = [("class:you", "you ‹".rjust(cols - 1) + "\n")]
+        rows = [("class:you", f"{name} ‹".rjust(cols - 1) + "\n")]
         rows += [("class:you-text", line + "\n") for line in right_aligned(text, cols)]
         self.out(rows)
 

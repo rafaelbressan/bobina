@@ -359,6 +359,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--layout": ["--layout-chat", "--tickets", "--ticket", "--strip-layout", "--leiaute"],
     "--manual": ["--on-demand", "--no-auto-print", "--imprimir-manual"],
     "--style": ["--estilo", "--look", "--theme", "--tema", "--bubbles"],
+    "--name": ["--nome", "--my-name", "--username", "--usuario", "--user-name", "--apelido"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
