@@ -301,3 +301,46 @@ def test_tracking_widths_accept_one_number():
     odd = Profile("x", "x", 384, 203, {"native": {"tracking_unscaled_at": "2"}})
     assert one.tracking_gap(4, 2) == 4 and one.tracking_gap(4, 3) == 12
     assert odd.tracking_gap(4, 2) == 8  # not a width: the spec
+
+
+LONG = "a quoted line that keeps going well past the edge of the paper roll, word after word"
+
+
+def test_quote_wraps_inside_its_bar():
+    rows = [line_text(r) for r in text_rows(build(f"> {LONG}"))]
+    assert len(rows) > 1 and all(len(t) <= 32 for t in rows)
+    assert all(t.startswith("│ ") for t in rows)
+    assert " ".join(t[2:] for t in rows) == LONG
+
+
+def test_nested_quote_and_quote_in_list_keep_to_the_paper():
+    rows = [line_text(r) for r in text_rows(build(f"> > {LONG}\n\n- item\n  > {LONG}"))]
+    nested = [t for t in rows if t.startswith("│ │ ")]
+    in_list = [t for t in rows if t.startswith("  │ ")]
+    assert len(nested) > 1 and len(in_list) > 1
+    assert all(len(t) <= 32 for t in rows)
+    assert " ".join(t[4:] for t in nested) == " ".join(t[4:] for t in in_list) == LONG
+
+
+def test_quote_on_a_wider_paper_uses_its_columns():
+    res = build(f"> {LONG} {LONG}", profile_name="epson-tm-t20iii")  # 48 columns
+    rows = [line_text(r) for r in text_rows(res)]
+    assert all(len(t) <= 48 for t in rows) and max(len(t) for t in rows) > 40
+
+
+def test_quote_in_a_raster_font_has_its_bar_drawn():
+    res = build(f"> {LONG} {{font=Atkinson}}\n\n> > nested {{font=Atkinson}}")
+    outer, nested = [r for r in res.rows if isinstance(r, BitmapRow)]
+    px = outer.image.load()
+    assert all(px[x, y] == 0 for y in range(outer.image.height) for x in (5, 6))  # the bar, as │ prints
+    assert all(px[x, y] for y in range(outer.image.height) for x in range(8, 24))  # the gap before the words
+    assert all(line_text(v).startswith("│ ") for v in outer.text_rows)
+    npx = nested.image.load()
+    assert all(npx[5, y] == 0 and npx[29, y] == 0 for y in range(nested.image.height))
+    assert [line_text(v) for v in nested.text_rows] == ["│ │ nested"]
+
+
+def test_inverted_quote_gets_a_white_bar():
+    (band,) = [r for r in build("> inverted {.invert}").rows if isinstance(r, BitmapRow)]
+    px = band.image.load()
+    assert all(px[5, y] and px[6, y] and not px[2, y] for y in range(band.image.height))

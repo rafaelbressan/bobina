@@ -41,6 +41,9 @@
   CLI with their own login and no tools, a local Ollama, then `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (their HTTP
   APIs, with no SDK: every AI works with a plain install). The choice is saved in config.toml; the first chat
   takes the best one. No AI: `E601` says what to install or set; no answer: `E602`.
+- Fixed: `>` quotes wrap inside their bar `│ `, nested quotes and quotes in a list item too: before, each line was
+  wrapped to the full paper width and the bar pushed its end past the edge. A quote in a raster font now has its
+  bar too (drawn; white across an inverted band).
 
 ## 0.1.2 — 2026-11-11
 

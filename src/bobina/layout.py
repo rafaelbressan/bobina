@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from . import imaging, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
@@ -65,6 +65,17 @@ def _remember(key, value) -> None:
     if len(_IMAGES) >= _IMAGES_MAX:
         _IMAGES.pop(next(iter(_IMAGES)))
     _IMAGES[key] = value
+
+
+def _with_bar(cells: list[Cell], col: int, pad: int = 0) -> list[Cell]:
+    """The cells with the quote bar │ in column `col`, in place of the blank lead the layout left for it. Without
+    that lead (a code's centred caption): unchanged, or, with `pad`, the bar put in front and the line cut at
+    `pad` columns (the view rows of text printed as an image, which carry no lead)."""
+    if len(cells) >= col + 2 and all(c.ch == " " for c in cells[: col + 2]):
+        return [*cells[:col], Cell("│"), *cells[col + 1 :]]
+    if not pad:
+        return cells
+    return [*[Cell(" ")] * col, Cell("│"), Cell(" "), *cells][:pad]
 
 
 class Layout:
@@ -673,14 +684,8 @@ class Layout:
             return self.text_block(b.runs, line=b.line, attrs=b.attrs, indent=indent)
         if isinstance(b, ListBlock):
             return self.list_block(b, indent)
-        if isinstance(b, Quote):
-            rows = []
-            for c in b.children:
-                for r in self.block(c, indent):
-                    if isinstance(r, TextRow) and r.scale == (1, 1):
-                        r.cells = [Cell("│"), Cell(" ")] + r.cells
-                    rows.append(r)
-            return rows
+        if isinstance(b, Quote):  # the children wrap 2 columns in; the bar goes in the first of them
+            return [self.quote_bar(r, indent) for c in b.children for r in self.block(c, indent + 2)]
         if isinstance(b, Divider):
             return [self.divider(b)]
         if isinstance(b, Fence):
@@ -690,6 +695,23 @@ class Layout:
         if isinstance(b, Table):
             return self.table(b, indent)
         return []
+
+    def quote_bar(self, r, col: int):
+        """A row of a quote laid out 2 columns in -> the same row with the quote's bar in column `col`: in the
+        row's own blank lead for text, drawn into the bitmap for text printed as an image (a white bar across an
+        inverted band). Images, codes and dividers keep the full width, without a bar."""
+        if isinstance(r, TextRow):
+            r.cells = _with_bar(r.cells, col)
+        elif isinstance(r, BitmapRow) and r.kind in ("text", "band"):
+            cw = self.p.cell[0]
+            x = col * cw + cw // 2 - 1  # where the printer font draws │ in its cell
+            stroke = max(2, int(self.p.get("raster.min_stroke_dots", 2)))
+            im = r.image.copy()
+            ImageDraw.Draw(im).rectangle((x, 0, x + stroke - 1, im.height - 1), fill=255 if r.kind == "band" else 0)
+            r.image = im
+            for v in r.text_rows or []:  # what the views show: the bar in front of the words
+                v.cells = _with_bar(v.cells, col, pad=self.cols)
+        return r
 
     def list_block(self, b: ListBlock, indent: int) -> list:
         rows = []
