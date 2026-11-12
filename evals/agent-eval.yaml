@@ -1,0 +1,144 @@
+# Agent eval of bobina (cli-agent-eval). Fresh agents get only the task and the docs.
+# Prove every task is solvable and every check right before a run:  cae verify evals/agent-eval.yaml
+name: bobina
+cli: bobina
+install: "{python} -m pip install -q --index-url https://pypi.org/simple {repo}/..[xlsx]"
+docs:
+  serve: [../README.md, ../llms.txt, ../llms-full.txt, ../docs, ../examples, ../skills]
+  entry: /README.md
+env:
+  BOBINA_NONINTERACTIVE: "1"
+  BOBINA_STATE_DIR: "{sandbox}/state"
+  BOBINA_CONFIG_DIR: "{sandbox}/config"
+  NO_COLOR: "1"
+setup:
+  - "mkdir -p {sandbox}/config {sandbox}/state"
+  - "printf 'default_printer = \"loja\"\\n[printers.loja]\\ntransport = \"file\"\\npath = \"{sandbox}/printer.bin\"\\nprofile = \"mtp-ii-58\"\\n' > {sandbox}/config/config.toml"
+fixtures:
+  - ../examples/batch/jar-label.bob.md
+  - ../examples/batch/pantry.csv
+  - ../examples/batch/shelf-tag.bob.md
+  - ../examples/batch/prices.xlsx
+  - ../examples/batch/catalog.json
+  - fixtures/broken.bob.md
+  - fixtures/warn.bob.md
+  - fixtures/estoque.xlsx
+patterns:
+  error_code: "\\[([EMFILPQB]\\d{3})\\]"
+  unknown_option: "unrecognized arguments"
+safety:
+  - id: no-history-wipe
+    forbid: "^history clear"
+    why: "deletes the user's print history"
+  - id: no-counter-reset
+    forbid: "^seq (reset|set)"
+    why: "changes the numbering of real labels"
+  - id: no-input-overwrite
+    forbid: "-o +(pantry\\.csv|jar-label\\.bob\\.md|prices\\.xlsx)"
+    why: "writing over an input file"
+tasks:
+  - id: hello-preview
+    prompt: "Make a PNG preview of a label that says 'Oi mundo'."
+    ideal: 1
+    solution: ["bobina preview 'Oi mundo' -o oi.png"]
+    checks:
+      - {file: "*.png", min_bytes: 100}
+      - {invoked: "^preview", exit: 0}
+
+  - id: print-note
+    prompt: "Print a note that says 'Comprar pão' on the printer that is already configured."
+    ideal: 1
+    solution: ["bobina print 'Comprar pão' --yes"]
+    checks:
+      - {shell: "grep -qa 'Comprar p' \"$BOBINA_STATE_DIR/../printer.bin\""}
+
+  - id: batch-shelf-a
+    prompt: "Using jar-label.bob.md and pantry.csv, print one label per jar, only for the jars on shelf A."
+    ideal: 1
+    solution: ["bobina print jar-label.bob.md --data pantry.csv --where shelf=A --copies-from jars --yes"]
+    checks:
+      - {shell: "python3 -c \"import os,sys; d=open(os.environ['BOBINA_STATE_DIR']+'/../printer.bin','rb').read(); sys.exit(not (d.count(b'Brown rice')==2 and d.count(b'Black beans')==1 and b'Coffee' not in d))\""}
+
+  - id: paper-estimate
+    prompt: "How much paper would printing the labels for every row of pantry.csv (design jar-label.bob.md) use? Find out without printing anything."
+    ideal: 1
+    solution: ["bobina print jar-label.bob.md --data pantry.csv --dry-run"]
+    checks:
+      - {invoked: "(--dry-run|-n\\b|^check|^preview|^view).*--data|--data.*(--dry-run|-n\\b)|^(check|preview|view) .*pantry", exit: 0}
+      - {shell: "test ! -s \"$BOBINA_STATE_DIR/../printer.bin\""}
+
+  - id: numbered-tickets
+    prompt: "Print three queue tickets numbered 100, 101 and 102 ('Senha 100' …), so that the next print continues at 103."
+    ideal: 1
+    allow: [no-counter-reset]  # bobina seq set NAME 100 is a fair way to start at 100
+    solution:
+      - "printf -- '---\\ncounters:\\n  senha: {start: 100}\\n---\\n# Senha {{ seq.senha }}\\n' > senha.bob.md"
+      - "bobina print senha.bob.md --repeat 3 --yes"
+    checks:
+      # raster-safe: the text when it printed native, else the counter values the history recorded for printed jobs
+      - {shell: "python3 -c \"import glob,json,os,re,sys; s=os.environ['BOBINA_STATE_DIR']; d=open(s+'/../printer.bin','rb').read(); h=[json.loads(l) for l in open(s+'/history.jsonl')]; v={int(n) for r in h if r['outcome']=='printed' for xs in r.get('counters',{}).values() for x in xs for n in re.findall(r'[0-9]+',str(x))}; src=''.join(open(f,encoding='utf-8').read() for f in glob.glob(s+'/last/*/source.bob.md')); sys.exit(not (all(b'Senha '+n in d for n in (b'100',b'101',b'102')) or ({100,101,102}<=v and 'SENHA' in src.upper())))\""}
+      - {shell: "python3 -c \"import json,os,sys; c=json.load(open(os.environ['BOBINA_STATE_DIR']+'/counters.json')); sys.exit(103 not in c.values())\""}
+
+  - id: join-shelf-tags
+    prompt: "Print a shelf tag (shelf-tag.bob.md) for each product in prices.xlsx, with its category and id from catalog.json."
+    ideal: 1
+    solution: ["bobina print shelf-tag.bob.md --data a=prices.xlsx --join b=catalog.json --on name --yes"]
+    checks:
+      - {shell: "grep -qa 'grocery' \"$BOBINA_STATE_DIR/../printer.bin\" && grep -qa 'id 101' \"$BOBINA_STATE_DIR/../printer.bin\""}
+
+  - id: fix-broken
+    prompt: "broken.bob.md does not print. Fix the document and print it for the product 'Feijão' with validade 2027-01-31."
+    ideal: 2  # one call that shows the error (with its line), one that prints
+    solution:
+      - "printf '{%% endif %%}\\n' >> broken.bob.md"
+      - "bobina print broken.bob.md --set produto=Feijão --set validade=2027-01-31 --yes"
+    checks:
+      - {shell: "grep -qa 'Feij' \"$BOBINA_STATE_DIR/../printer.bin\" && grep -qa '2027-01-31' \"$BOBINA_STATE_DIR/../printer.bin\""}
+
+  - id: sheet
+    prompt: "Print a label with the product name for each row of the 'Estoque' sheet of estoque.xlsx."
+    ideal: 1
+    solution: ["bobina print '{{ produto }}' --data estoque.xlsx --sheet Estoque --yes"]
+    checks:
+      - {shell: "grep -qa 'Arroz' \"$BOBINA_STATE_DIR/../printer.bin\" && grep -qa 'Sal' \"$BOBINA_STATE_DIR/../printer.bin\""}
+
+  - id: export-pngs
+    prompt: "Save one PNG image per label of jar-label.bob.md with pantry.csv into a folder called labels, each file named after its product."
+    ideal: 1
+    solution: ["bobina preview jar-label.bob.md --data pantry.csv -o 'labels/{product}.png'"]
+    checks:
+      - {shell: "test $(ls labels/*.png | wc -l) -eq 4 && ls labels | grep -qi rice"}
+
+  - id: copies
+    prompt: "Print 3 identical copies of a label that says 'FRAGIL'."
+    ideal: 1
+    solution: ["bobina print FRAGIL --copies 3 --yes"]
+    checks:
+      # raster-safe: a template title or an inverted heading prints FRAGIL as an image, so count the labels in the
+      # history and read the text in the source of the last job
+      - {shell: "python3 -c \"import glob,json,os,sys; s=os.environ['BOBINA_STATE_DIR']; h=[json.loads(l) for l in open(s+'/history.jsonl')]; n=sum(r.get('labels',0) for r in h if r['outcome'] in ('printed','reprinted')); src=''.join(open(f,encoding='utf-8').read() for f in glob.glob(s+'/last/*/source.bob.md')); sys.exit(not (n==3 and 'FRAGIL' in src.upper()))\""}
+
+  - id: reprint-last
+    prompt: "Something was printed a moment ago. Print exactly the same thing again."
+    setup: ["bobina print 'Pedido 42' --yes"]
+    ideal: 1
+    solution: ["bobina print --last --yes"]
+    checks:
+      - {shell: "python3 -c \"import os,sys; d=open(os.environ['BOBINA_STATE_DIR']+'/../printer.bin','rb').read(); sys.exit(d.count(b'Pedido 42')!=2)\""}
+
+  - id: problems-json
+    prompt: "List the problems bobina finds in warn.bob.md as JSON in a file called problems.json."
+    ideal: 1
+    solution: ["bobina check warn.bob.md --problems json 2> problems.json"]
+    checks:
+      - {shell: "python3 -c \"import json,sys; d=json.load(open('problems.json')); sys.exit(not any(p['code']=='M130' for p in d['problems']))\""}
+
+  - id: init-file-printer
+    prompt: "Set bobina up, without it asking any questions, for a new test printer that writes to test.bin in this folder; make it the default printer, then print 'Teste' on it."
+    ideal: 2
+    solution:
+      - "bobina init --yes --printer ./test.bin"
+      - "bobina print 'Teste' --yes"
+    checks:
+      - {shell: "grep -qa 'Teste' test.bin"}
+      - {shell: "python3 -c \"import os,sys,tomllib; c=tomllib.load(open(os.environ['BOBINA_CONFIG_DIR']+'/config.toml','rb')); p=c['printers'][c['default_printer']]; sys.exit(not str(p.get('path','')).endswith('test.bin'))\""}
