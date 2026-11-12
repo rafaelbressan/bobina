@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 — 2026-11-12
 
 - Two names that say what they change: the paper style (how the answers look on paper: `--paper-style`,
   `chat_paper_style`, `/paper-style`) and the screen colours (the chat screen: `--screen-colors`,
