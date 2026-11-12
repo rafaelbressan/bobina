@@ -5,6 +5,10 @@
 - an item
   > a quote in the item, wrapped inside its bar
 
-> A quote in a raster font that wraps onto a second line {font=Atkinson}
+> A quote in a raster font that wraps onto a second line {font="Atkinson Hyperlegible"}
 
 > inverted inside a quote {.invert}
+
+> # Heading
+> > # Nested
+> > text beside it, centred {.center}
