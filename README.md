@@ -101,10 +101,10 @@ columns fill the blanks. Step by step: [docs/guides/batch-printing.md](docs/guid
 in the terminal: `bobina help data`.
 
 ```bash
-bobina check jar-label.bob.md --data pantry.csv                 # paper length and problems, nothing printed
-bobina print jar-label.bob.md --data pantry.csv --where shelf=A --copies-from jars --yes
+bobina check jar-label.bob.md --data pantry.csv                 # paper length, problems, the columns: no print
+bobina print jar-label.bob.md --data pantry.csv --where shelf=A --copies-from jars --yes  # jars=0: no label
 bobina print tag.bob.md --data stock.xlsx --sheet Estoque --yes  # a sheet other than the first
-bobina print shelf-tag.bob.md --data a=prices.xlsx --join b=catalog.json --on name --yes
+bobina print shelf-tag.bob.md --data a=prices.xlsx --join b=catalog.json --on name --yes  # {{ a.price }} {{ b.id }}
 bobina print note.bob.md --set produto=Feijão --set validade=2027-01-31 --yes   # one value, no table
 bobina preview jar-label.bob.md --data pantry.csv -o 'labels/{product}.png'    # one PNG per label
 ```

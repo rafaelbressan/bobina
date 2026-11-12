@@ -673,7 +673,15 @@ def _build(args, source, base_dir, counters=None, machine=None):
                 continue  # (the job may use the header itself or its alias: Categoria -> categoria)
         b.first.nudges.add(code, msg, None, hint)
     b.source_text = source
+    from ..templating import given_names
+
+    # what {{ }} can use (a.price for a named source; a header with spaces only as row['Unit Price']): bobina check
+    names = (n for r in data_rows or [] for n in given_names(r))
+    b.data_columns = [n for n in dict.fromkeys(names) if IDENT_PATH.fullmatch(n)]
     return b
+
+
+IDENT_PATH = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)?")
 
 
 JOB_FLAGS = (

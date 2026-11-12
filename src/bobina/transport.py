@@ -87,6 +87,12 @@ SSH_REFUSALS = [  # what ssh said when it exits 255 -> what to try ({m}: the mac
 ]  # fmt: skip
 
 
+def remote_bobina(remote: list[str]) -> str:
+    """The bobina that a command run over ssh calls, as written (~/.local/bin/bobina), or ''."""
+    words = " ".join(remote).split()  # ssh h bobina send, or ssh h 'bobina send'
+    return next((w for w in words if os.path.basename(w) == "bobina"), "")
+
+
 def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
     """A printer command that exited with an error -> what failed (its exit code and the end of its stderr) and
     what to try. ssh is read: 255 is ssh itself (what it said tells why), anything else came from the other side.
@@ -109,8 +115,7 @@ def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
     if ssh:
         host, reach, remote = ssh
         m = host.rpartition("@")[2]
-        words = " ".join(remote).split()  # ssh h bobina send, or ssh h 'bobina send'
-        bobina = next((w for w in words if os.path.basename(w) == "bobina"), "")  # as given: ~/.local/bin/bobina
+        bobina = remote_bobina(remote)
         if code == 255:
             hint = next(
                 (h for pat, h in SSH_REFUSALS if re.search(pat, said, re.I)),

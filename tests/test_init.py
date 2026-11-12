@@ -360,3 +360,23 @@ def test_profiles_are_read_once_per_run(bt, monkeypatch, capsys):
     assert run("--yes") == cli.OK
     ids = [n for n in seen if n != "mtp-ii-58"]
     assert len(ids) == len(set(ids))  # each other profile once, whatever the number of devices and lookups
+
+
+def test_a_test_file_printer_takes_the_default_profile_without_a_p402(no_bt, tmp_path, capsys):
+    """An agent read 'no printer name to go by' (P402) as a mistake: a test file has no model, the summary says so."""
+    assert run("--yes", "--printer", str(tmp_path / "test.bin")) == cli.OK
+    out, e = capsys.readouterr()
+    assert "P402" not in e and "the default: a test or command printer has no model; --profile ID changes it" in out
+    assert run("--yes", "--printer", str(tmp_path / "test.bin"), "--json") == cli.OK
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["profile"]["by"] == "default" and "P402" not in [p["code"] for p in doc["problems"]]
+
+
+def test_init_help_lists_every_form_of_printer():
+    from bobina.cli import args
+
+    text = " ".join(args.COMMANDS["init"].format_help().split())
+    for form in ("bobina printer list", "AA:BB:CC:DD:EE:FF", "/dev/usb/lp0", "./test.bin", "gives itself"):
+        assert form in text
+    other = " ".join(args.COMMANDS["print"].format_help().split())
+    assert "printer name from config, or a Bluetooth address" in other and "./test.bin" not in other

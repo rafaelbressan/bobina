@@ -10,11 +10,29 @@ def run(*argv):
 
 
 def test_status_on_a_file_printer_says_where_the_bytes_go(tmp_path, capsys):
+    """Agents read E404 here as a broken printer: a file printer simply has no live status (exit 0, no problem)."""
     sink = tmp_path / "printer.bin"
     run("printer", "add", "loja", "--path", str(sink))
-    assert run("status") == cli.USAGE
-    e = capsys.readouterr().err
-    assert "E404" in e and str(sink) in e
+    capsys.readouterr()
+    assert run("status") == cli.OK
+    o = capsys.readouterr()
+    assert "no live status" in o.out and "printing works the same" in o.out and str(sink) in o.out
+    assert o.err == "" and "E404" not in o.out
+
+
+def test_status_of_a_command_printer_says_how_to_ask_the_printer_over_there(capsys):
+    import json
+
+    run("printer", "add", "tower", "--command", "ssh -p 2222 tower ~/.local/bin/bobina send --yes -")
+    capsys.readouterr()
+    assert run("status", "--json") == cli.OK
+    out = json.loads(capsys.readouterr().out)
+    assert out["live_status"] is False and out["transport"] == "command"
+    assert out["status_there"] == "ssh -p 2222 tower ~/.local/bin/bobina status"
+    run("printer", "add", "lp", "--command", "lp -d label")
+    assert run("status", "--printer", "lp") == cli.OK
+    o = capsys.readouterr().out
+    assert "a command printer: no live status" in o and "runs lp -d label" in o and "other machine" not in o
 
 
 def test_help_data_is_a_topic(capsys):
@@ -73,9 +91,10 @@ def test_a_device_path_printer_still_counts_paper(tmp_path, monkeypatch):
 def test_status_on_a_device_printer_does_not_call_it_a_file(tmp_path, capsys):
 
     run("printer", "add", "usb", "--path", "/dev/usb/lp9")
-    assert run("status") == cli.USAGE
-    e = capsys.readouterr().err
-    assert "appended" not in e and "/dev/usb/lp9" in e
+    capsys.readouterr()
+    assert run("status") == cli.OK
+    o = capsys.readouterr().out
+    assert o.startswith("usb: a device printer: no live status") and "file printer" not in o and "/dev/usb/lp9" in o
 
 
 def test_the_end_of_a_label_clears_the_tear_bar_with_room_to_spare():
@@ -98,3 +117,46 @@ def test_a_real_column_called_row_is_listed_by_m130(tmp_path, capsys):
     assert run("check", "# {{ rwo }}", "--data", str(rows)) == cli.OK
     e = capsys.readouterr().err
     assert "row" in e.split("give:")[-1] and "item" in e
+
+
+def test_problems_help_says_they_go_to_stderr():
+    """An agent sent stdout to a file and got the summary, not the problems."""
+    from bobina.cli import args
+
+    assert args.COMMANDS
+    for name, p in args.COMMANDS.items():
+        text = " ".join(p.format_help().split())
+        if "--problems" in text:
+            assert "always to stderr (stdout keeps the command's own output" in text, name
+
+
+def test_check_lists_the_data_columns_usable_in_braces(tmp_path, capsys):
+    import json
+
+    prices, catalog = tmp_path / "prices.csv", tmp_path / "catalog.json"
+    prices.write_text("name,Unit Price\nRice,5\n")
+    catalog.write_text('[{"name": "Rice", "id": "7"}]')
+    assert run("check", "x", "--data", str(prices)) == cli.OK
+    assert "data columns: name, unit_price" in capsys.readouterr().out  # 'Unit Price' only as row['Unit Price']
+    assert run("check", "x", "--data", f"a={prices}", "--join", f"b={catalog}", "--on", "name", "--json") == cli.OK
+    cols = json.loads(capsys.readouterr().out)["data_columns"]
+    assert {"a.name", "b.id", "unit_price"} <= set(cols) and not any(" " in c for c in cols)
+    assert run("check", "x") == cli.OK and "data columns" not in capsys.readouterr().out
+
+
+def test_an_unclosed_block_is_placed_where_it_opens(capsys):
+    doc = "---\nx: 1\n---\n# Title\n{% set y %}a{% endset %}{% set z = 1 %}\n{% if x %}\n{% for i in [1] %}{{ i }}{% endfor %}\nend\n"
+    assert run("check", doc) == cli.DOC
+    e = capsys.readouterr().err
+    assert "[E501] line 6: {% if %} is not closed: add {% endif %} where the block ends" in e
+    assert run("check", "a\n{% for i in [1] %}\n{% if i %}x{% endif %}\nb") == cli.DOC
+    assert "line 2: {% for %} is not closed" in capsys.readouterr().err
+
+
+def test_an_unclosed_block_that_cannot_be_placed_says_to_look_for_it(monkeypatch, capsys):
+    from bobina import templating
+
+    monkeypatch.setattr(templating, "unclosed_block", lambda env, body, tag: None)
+    assert run("check", "a\n{% if x %}\nb") == cli.DOC
+    e = capsys.readouterr().err
+    assert "an {% if %} opened earlier is not closed (look for the {% if %} without {% endif %})" in e

@@ -71,7 +71,7 @@ bobina help data — one label per row (guide: docs/guides/batch-printing.md)
   … --rows 2-5                                           data rows 2 to 5 (1 = first after the header)
   … --data a=prices.xlsx --join b=catalog.json --on name   two sources: {{ a.price }} {{ b.id }}
   … --set unit=kg                                        one value for every label
-  bobina check label.bob.md --data rows.csv              paper length and problems, nothing printed
+  bobina check label.bob.md --data rows.csv              paper length, problems and the data columns
   bobina preview label.bob.md --data rows.csv -o 'labels/{column}.png'   one PNG per label ({n} {i} too)
 
 Files: CSV, TSV, JSON (a list of objects), Excel .xlsx. Column names are the header row; a {{ name }}
@@ -231,6 +231,22 @@ COMMANDS: dict[str, argparse.ArgumentParser] = {}
 PARSER: argparse.ArgumentParser
 
 
+def _own_help(p: argparse.ArgumentParser, option: str, text: str) -> None:
+    """One command's own help for a global option: the option's action is shared by every command (parents), so
+    this command gets a copy with `text`."""
+    import copy
+
+    old = p._option_string_actions[option]
+    new = copy.copy(old)
+    new.help = text
+    for s in old.option_strings:
+        p._option_string_actions[s] = new
+    p._actions[p._actions.index(old)] = new
+    for g in p._action_groups:
+        if old in g._group_actions:
+            g._group_actions[g._group_actions.index(old)] = new
+
+
 def _common(printing: bool = True):
     """Options every command takes. printing=False (check, preview, view): without --yes, --dry-run and --editor,
     which mean nothing there (they never print and never edit)."""
@@ -257,7 +273,8 @@ def _common(printing: bool = True):
     g.add_argument(
         "--problems",
         choices=["pretty", "plain", "json", "jsonl"],
-        help="how errors and warnings are written (default pretty; also BOBINA_PROBLEMS)",
+        help="how errors and warnings are written, always to stderr (stdout keeps the command's own output;"
+        " 2> problems.json saves them); default pretty; also BOBINA_PROBLEMS",
     )
     return c
 
@@ -710,6 +727,13 @@ def make_parser():
     )
     p.add_argument("--command", dest="command", help="a printer on another machine: pipe the bytes to this command")
     p.add_argument("--seconds", type=int, default=8, help="Bluetooth scan duration")
+    _own_help(
+        p,
+        "--printer",
+        "the printer to set up: a name from bobina printer list, a Bluetooth address (AA:BB:CC:DD:EE:FF), a device"
+        " (/dev/usb/lp0), a file for a test printer (./test.bin: the bytes go there), or the name a printer nearby"
+        " gives itself",
+    )
     p = _cmd(
         sub,
         "config",

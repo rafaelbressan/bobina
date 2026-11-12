@@ -1,6 +1,6 @@
 # bobina — CLI conventions (draft v0.4)
 
-Status: **implemented in v0.x** (see Implementation notes). Language: **English everywhere** (messages, help, docs, spec).
+Language: **English everywhere** (messages, help, docs, spec).
 
 ## Principles
 
@@ -28,7 +28,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `preview FILE -o OUT.png` | exact bitmap, or `--realistic` (calibrated dot gain) | `pv` |
 | `view FILE` | preview in the terminal (block/braille characters) | `v` |
 | `edit [FILE] [--template NAME]` | write in your editor → confirmation screen → print | `e` |
-| `status` | paper / cover / error / language mode; `--list` explains every state | `s` |
+| `status` | paper / cover / error / language mode; `--list` explains every state; file and command printers: none (exit 0) | `s` |
 | `mode [esc \| tspl \| cpcl]` | show or switch the printer command language | `m` |
 | `send FILE.bin` | send raw bytes untouched (escape hatch) | — |
 | `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
@@ -50,7 +50,9 @@ Everyday use: `bobina print "buy bread"`, `bobina print list.bob.md`, `echo "hi"
 `bobina init` finds the printer (Bluetooth, USB, a file, ssh), confirms its profile and the locale, asks the
 roll (as `paper new`), then offers one test strip with the calibration and asks what the paper shows. Run again to
 change one part. `--yes` (or `BOBINA_NONINTERACTIVE`) asks and prints nothing: the first printer found
-(`--printer ADDRESS` chooses), its profile, the locale; the roll stays unset (`P104`). `--json`: `bobina.init/1`.
+(`--printer` chooses), its profile, the locale; the roll stays unset (`P104`). `--json`: `bobina.init/1`.
+`--printer` takes a name from `bobina printer list`, a Bluetooth address, a device (`/dev/usb/lp0`), a file for a
+test printer (`--printer ./test.bin`) or the name a printer nearby gives itself.
 
 ## Confirmation screen
 
@@ -459,13 +461,11 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 
 ## Implementation notes (v0.x, 2026-11-05)
 
-- `print` also takes `--data FILE` (one label per row, values literal; CSV, TSV/TXT with the delimiter detected,
-  Excel `.xlsx` with `--sheet`, JSON list of objects), `--rows N-M` (data rows, 1 = first after the header),
-  `--where COL=VAL|COL!=VAL|COL~=TEXT` (repeatable, case-insensitive), `--copies-from COL` (identical copies per
-  row, 0 skips it; counters advance once per row), max 1000 labels per job, `--repeat N`, `--copies N`, `--set KEY=VALUE`, `-o FILE` (bytes to a file: not printing, no confirmation).
+- `print --data FILE`: one label per row (docs/guides/batch-printing.md); `--copies-from COL` 0 skips the row;
+  counters advance once per row; max 1000 labels per job. `-o FILE`: the bytes to a file, no confirmation.
 - Printers: `transport = bluetooth` (status checked before printing: exit 5 if cover open/paper out), `command`, `file`.
 - Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks.
-- `bobina edit` drafts live in `~/.local/state/bobina/drafts/`; the last print in `~/.local/state/bobina/last/` (`--last` resends identical bytes, `--again` re-renders).
+- The last print is kept in `~/.local/state/bobina/last/` (`--last`, `--again`).
 - **Calibration** (also on the `init` strip): `bobina calibrate tear` prints a ruler with no feed after it; the mm at
   the torn edge (`bobina calibrate tear 5`) + 6 mm (`tear_margin_mm`) ends every job. `bobina calibrate feed`: lines
   A–B 10 mm drawn, B–C a 10 mm ESC J right after B; `touching` (the MTP-II) keeps the safe mode, `apart` turns it

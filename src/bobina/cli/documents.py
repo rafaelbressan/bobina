@@ -378,11 +378,15 @@ def _stored_nudge(p: dict):
 
 def cmd_check(args):
     res, source, base, _ = load_job(args)
+    cols = getattr(res, "data_columns", [])  # what {{ }} can use, with --data / --join (agents asked for a way)
     if args.json:
-        print_json(job_json(res), indent=2, ensure_ascii=False)  # problems as --problems json
+        out = job_json(res) | ({"data_columns": cols} if cols else {})
+        print_json(out, indent=2, ensure_ascii=False)  # problems as --problems json
     else:
         for line in summary(res):
             print(line.strip())
+        if cols:
+            print(f"data columns: {', '.join(cols)}")
     return report_nudges(res, args)
 
 

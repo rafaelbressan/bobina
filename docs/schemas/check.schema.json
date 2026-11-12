@@ -49,6 +49,13 @@
       "items": {
         "$ref": "problem.schema.json"
       }
+    },
+    "data_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "with --data: the columns {{ }} can use"
     }
   }
 }

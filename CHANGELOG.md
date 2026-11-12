@@ -58,6 +58,14 @@
   as written). Suggestions to try a command by hand give it an empty job (`printf '' | …`). Before: `command
   failed (1):` and nothing else. Bluetooth printers, devices and files say what to check too (by the error), and a
   device that fails half way keeps "part of the job may have printed".
+- `bobina status` on a file or command printer says what it is and that it has no live status (only a Bluetooth
+  printer answers one), where its jobs go and, through ssh to a bobina, the command that asks the printer there;
+  exit 0 (before: `E404`, exit 1, which read as a broken printer). `--json`: `live_status: false`.
+- `bobina check --data` lists the data columns a `{{ }}` can use (`data_columns` in `--json`).
+- `E501` for a block left open names the line where it opens (`line 6: {% if %} is not closed`), not the end.
+- `bobina init` with a test file or a command printer no longer says `P402`: the summary says the default profile
+  is taken because such a printer has no model. `init --help` lists every form `--printer` takes.
+- `--problems` help says where they go: always stderr, stdout keeps the command's own output.
 
 ## 0.1.2 — 2026-11-11
 

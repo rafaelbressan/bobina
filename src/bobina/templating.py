@@ -1138,7 +1138,48 @@ def current_time(tz) -> datetime:
     return datetime.now(tz)
 
 
-def _given_names(fields: dict | None) -> list[str]:
+BLOCK_TAGS = {"if", "for", "macro", "call", "filter", "with", "block", "autoescape", "set"}
+UNCLOSED = re.compile(r"innermost block that needs to be closed is '(\w+)'")
+
+
+def unclosed_block(env, body: str, tag: str) -> int | None:
+    """The line where the innermost `{% tag %}` left open starts (Jinja names only the end of the template), or
+    None when the template cannot be read that far. A {% set x = … %} is not a block; {% set x %} is."""
+    stack: list[tuple[str, int]] = []
+    try:
+        toks = [t for t in env.lex(body) if t[1] != "whitespace"]
+    except TemplateSyntaxError:
+        return None
+    for i, (line, kind, value) in enumerate(toks):
+        if kind != "name" or i == 0 or toks[i - 1][1] != "block_begin":
+            continue
+        if value in BLOCK_TAGS:
+            if value == "set":  # a block only without "=" before the end of the tag
+                parts = next((toks[i:j] for j in range(i, len(toks)) if toks[j][1] == "block_end"), toks[i:])
+                if any(k == "operator" and v == "=" for _, k, v in parts):
+                    continue
+            stack.append((value, line))
+        elif value.startswith("end") and stack and stack[-1][0] == value[3:]:
+            stack.pop()
+    return next((line for name, line in reversed(stack) if name == tag), None)
+
+
+def syntax_error(env, body: str, e: TemplateSyntaxError, offset: int) -> str:
+    """The E501 message: where it is and what Jinja said; a block left open is placed where it opens."""
+    m = UNCLOSED.search(e.message or "")
+    if m and "Unexpected end of template" in (e.message or ""):
+        tag = m.group(1)
+        opened = unclosed_block(env, body, tag)
+        if opened is not None:
+            return f"line {opened + offset}: {{% {tag} %}} is not closed: add {{% end{tag} %}} where the block ends"
+        return (
+            f"line {e.lineno + offset}: an {{% {tag} %}} opened earlier is not closed (look for the {{% {tag} %}}"
+            f" without {{% end{tag} %}})"
+        )
+    return f"line {e.lineno + offset}: template syntax error: {e.message}"
+
+
+def given_names(fields: dict | None) -> list[str]:
     """The names a {{ … }} could have used: data columns and --set keys (a joined source as a.column)."""
     out = []
     for k, v in (fields or {}).items():
@@ -1259,7 +1300,7 @@ def render(
                 raise SecurityError("M313", "document grew beyond 2 MB while rendering")
             out.append(chunk)
     except TemplateSyntaxError as e:
-        raise ValueError(f"line {e.lineno + line_offset}: template syntax error: {e.message}") from e
+        raise ValueError(syntax_error(env, body, e, line_offset)) from e
     except JinjaSecurityError as e:
         raise SecurityError("M311", f"unsafe template operation: {e}") from e
     except RecursionError:
@@ -1275,7 +1316,7 @@ def render(
             raise SecurityError("M310", "templates cannot read files (include/import are disabled)") from e
         raise ValueError(f"template error: {e}") from e
 
-    given = _given_names(fields)
+    given = given_names(fields)
     for name in dict.fromkeys(undefined_names):
         if name in quiet_names:  # already reported as an empty required field (M131): one cause, one warning
             continue

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path  # noqa: F401
 from types import SimpleNamespace
@@ -61,20 +62,8 @@ def cmd_status(args):
     name, pr = config.printer(config.load(), args.printer)
     if pr is None:
         raise Fail(UNREACHABLE, "no printer configured: bobina printer add NAME ADDRESS", problem="E401")
-    if pr.get("transport", "bluetooth") != "bluetooth":
-        path = str(pr.get("path", ""))
-        if pr.get("transport") != "file":
-            where = "it only runs a command"
-        elif path.startswith("/dev/"):
-            where = f"it writes to the device {path}, which gives no status here"
-        else:
-            where = f"its bytes are appended to {path}"
-        raise Fail(
-            USAGE,
-            f"status needs a bluetooth printer ('{name}' uses {pr.get('transport')}: {where})"
-            "\n→ printing works the same; bobina printer list shows each printer and where it goes",
-            problem="E404",
-        )
+    if pr.get("transport", "bluetooth") != "bluetooth":  # nothing to ask: say what it is (not an error, exit 0)
+        return _no_live_status(args, name, pr)
     st = printer_status(pr)
     if args.json:
         print_json({"printer": name, **st}, indent=2)
@@ -93,6 +82,36 @@ def cmd_status(args):
             print(f"  → {common.PAPER_OUT_HINT}")
     if st.get("cover_open") or st.get("paper_out") or st.get("error"):
         return PRINTER_ERR
+    return OK
+
+
+def _no_live_status(args, name: str, pr: dict) -> int:
+    """`bobina status` on a file or command printer: it has no live status (only a Bluetooth printer answers
+    one), which is normal; say where its jobs go and, through ssh to a bobina, how to ask the printer there."""
+    transport_name = pr.get("transport")
+    path, cmd = str(pr.get("path", "")), str(pr.get("command", ""))
+    ask_there = ""
+    if transport_name == "file":
+        kind = "a device printer" if transport.is_device(path) else "a file printer (a test printer)"
+        where = f"writes to {path}"
+    else:
+        kind, where = "a command printer", f"runs {cmd}"
+        try:
+            ssh = transport.ssh_target(shlex.split(cmd))
+        except ValueError:  # a quote left open: config.toml edited by hand
+            ssh = None
+        if ssh and (bobina := transport.remote_bobina(ssh[2])):
+            ask_there = f"{ssh[1]} {bobina} status"
+    note = f"{kind}: no live status (only a Bluetooth printer answers one); printing works the same"
+    if args.json:
+        out = {"printer": name, "transport": transport_name, "live_status": False, "where": path or cmd, "note": note}
+        print_json({**out, **({"status_there": ask_there} if ask_there else {})}, indent=2)
+        return OK
+    print(f"{name}: {note}")
+    print(f"  {'transport':16s} {transport_name}")
+    print(f"  {'where':16s} {where}")
+    if ask_there:
+        print(f"  → the printer's own status, on the other machine: {ask_there}")
     return OK
 
 
