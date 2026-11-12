@@ -28,6 +28,7 @@ dependencies = [
   "python-barcode>=0.15",
   "ppf-datamatrix>=0.2",
   "pdf417gen>=0.7",
+  "prompt_toolkit>=3.0.40",  # bobina chat: the input box, the status line (pure Python)
 ]
 
 [project.optional-dependencies]
@@ -35,8 +36,7 @@ pdf = ["pypdfium2>=5.14"]
 svg = ["resvg-py>=0.5"]
 xlsx = ["openpyxl>=3.1"]
 mcp = ["mcp>=2,<3"]  # bobina mcp: the official SDK (MCPServer; 1.x called it FastMCP)
-ai = ["anthropic>=2", "openai>=1", "prompt_toolkit>=3.0.40"]  # bobina chat: API keys, and the chat screen
-dev = ["pytest>=8", "ruff>=0.6", "pypdfium2>=5.14", "resvg-py>=0.5", "openpyxl>=3.1", "mcp>=2,<3", "prompt_toolkit>=3.0.40"]
+dev = ["pytest>=8", "ruff>=0.6", "pypdfium2>=5.14", "resvg-py>=0.5", "openpyxl>=3.1", "mcp>=2,<3"]
 
 [project.scripts]
 bobina = "bobina.cli:main"

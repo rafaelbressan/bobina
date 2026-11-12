@@ -1,4 +1,4 @@
-"""The chat screen of bobina chat on a terminal (prompt_toolkit, the extra bobina[ai]).
+"""The chat screen of bobina chat on a terminal (prompt_toolkit).
 
 Inline, like Claude Code: the terminal keeps its scrollback; messages scroll above a framed input box pinned under
 the last message (at the bottom once the screen fills), with a status line under it. Only how things look and how
@@ -200,8 +200,13 @@ class TerminalUI(PlainUI):
             line = app.run()
         except EOFError:
             return None
-        if line.strip() and not line.strip().startswith("/") and line.strip() != "p":
-            self.user(line.strip())
+        text = line.strip()
+        if text.startswith("/say "):
+            text = text[5:].strip()
+        elif text.startswith("/") or text == "p":
+            text = ""
+        if text:
+            self.user(text)
         return line
 
     def user(self, text: str) -> None:

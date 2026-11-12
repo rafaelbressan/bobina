@@ -27,7 +27,7 @@ class Fake(ai.Backend):
     def ask(self, system, messages):
         self.calls.append((system, [dict(m) for m in messages]))
         a = self.answers.pop(0)
-        if isinstance(a, Exception):
+        if isinstance(a, BaseException):
             raise a
         return ai.Reply(a, self.model)
 
@@ -39,10 +39,34 @@ def printer(tmp_path):
     return out
 
 
-def run_chat(monkeypatch, capsys, fake, lines, *argv):
+def fake_ai(monkeypatch, fake):
     monkeypatch.setattr(ai, "backend", lambda name, model=None: fake)
     monkeypatch.setattr(ai, "detect", lambda: [ai.Found("claude", "Claude Code", True, "/bin/claude")])
+
+
+def run_chat(monkeypatch, capsys, fake, lines, *argv):
+    """The chat screen, driven by lines (the session is the same; PlainUI stands for the terminal screen)."""
+    from bobina.cli import chat as cli_chat
+
+    capsys.readouterr()
+    fake_ai(monkeypatch, fake)
+    monkeypatch.setattr(cli_chat, "terminal", lambda: True)
+    monkeypatch.setattr(cli_chat, "_ui", lambda args: cli_chat.PlainUI())
     monkeypatch.setattr(sys, "stdin", io.StringIO("".join(line + "\n" for line in lines)))
+    code = main(["chat", *argv])
+    return code, capsys.readouterr()
+
+
+def ask_once(monkeypatch, capsys, fake, *argv, stdin=""):
+    """One question, no screen: bobina chat "QUESTION" (stdin is not a terminal here: a pipe)."""
+    import os
+
+    capsys.readouterr()
+    fake_ai(monkeypatch, fake)
+    r, w = os.pipe()
+    os.write(w, stdin.encode())
+    os.close(w)
+    monkeypatch.setattr(sys, "stdin", open(r, encoding="utf-8"))  # noqa: SIM115 - closed with the test
     code = main(["chat", *argv])
     return code, capsys.readouterr()
 
@@ -199,7 +223,7 @@ def test_chat_prints_each_answer_on_a_file_printer(monkeypatch, capsys, printer)
     code, out = run_chat(monkeypatch, capsys, fake, ["why is the sky blue?", "and sunsets?", "/quit"])
     assert code == 0
     o = out.out
-    assert "printer test" in o and "layout: one strip" in o and "/tickets" in o and "prints every answer" in o
+    assert "printer test" in o and "layout: one strip" in o and "/tickets" in o and "each answer prints right away" in o
     assert o.count("printed on test") == 2 and "fed to the tear bar" in o
     assert "Fake · fake-1:\nThe sky is blue because" in o  # bold shown without the stars
     data = printer.read_bytes()
@@ -221,7 +245,7 @@ def test_manual_mode_prints_only_on_p_and_in_chat_switches(monkeypatch, capsys, 
     fake = Fake(["One.", "Two."])
     code, out = run_chat(monkeypatch, capsys, fake, ["/manual", "a?", "p", "p", "/auto", "/tickets", "b?"])
     o = out.out
-    assert "manual mode" in o and "p prints it" in o and "already on paper" in o
+    assert "manual mode" in o and "p prints it" in o and "already printed (~" in o and "/again prints" in o
     assert o.count("printed on test") == 2 and "one ticket per answer from now on" in o
 
 
@@ -249,14 +273,14 @@ def test_dry_run_prints_nothing_and_counts_the_paper(monkeypatch, capsys, printe
 
 def test_the_first_chat_chooses_and_saves_the_ai(monkeypatch, capsys, printer):
     code, out = run_chat(monkeypatch, capsys, Fake(["One."]), ["a?"])
-    assert "using Claude Code, the AI found on this machine" in out.out
+    assert "using Claude Code, the first AI found" in out.err
     assert config.load()["ai"] == "claude"
 
 
 def test_no_ai_found_says_what_to_install(monkeypatch, capsys):
     monkeypatch.setattr(ai, "detect", lambda: [ai.Found(n, n, False, needs=ai.INSTALL[n]) for n in ai.ORDER])
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
-    assert main(["chat"]) == 1
+    assert main(["chat", "hello?"]) == 1
     e = capsys.readouterr().err
     assert "E601" in e and "no AI found" in e and "ollama pull" in e and "ANTHROPIC_API_KEY" in e
 
@@ -293,12 +317,11 @@ def test_detection_order_and_what_is_missing(monkeypatch):
     monkeypatch.setattr(ai, "ollama_models", lambda timeout=0.5: ["qwen2.5"])
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setattr(ai, "_sdk", lambda m: False)
     found = ai.detect()
     assert [f.name for f in found] == list(ai.ORDER)
     by = {f.name: f for f in found}
     assert by["codex"].available and not by["claude"].available and by["ollama"].ready
-    assert by["anthropic"].available and not by["anthropic"].ready and "bobina[ai]" in by["anthropic"].needs
+    assert by["anthropic"].ready and not by["openai"].available and "OPENAI_API_KEY" in by["openai"].needs
 
 
 # ------------------------------------------------------------------------------------------- the backends, mocked
@@ -442,44 +465,61 @@ def test_ollama_over_http(monkeypatch):
     assert calls[-1][1] == "http://127.0.0.1:11434/api/chat" and calls[-1][2]["messages"][0]["role"] == "system"
 
 
-def test_api_backends_need_their_sdk(monkeypatch):
-    monkeypatch.setitem(sys.modules, "anthropic", None)
-    monkeypatch.setitem(sys.modules, "openai", None)
-    for name in ("anthropic", "openai"):
-        with pytest.raises(ai.AIError) as e:
-            ai.backend(name).ask("S", [{"role": "user", "content": "x"}])
-        assert "bobina[ai]" in e.value.hint
+def fake_api(monkeypatch, reply):
+    sent = []
+
+    def http(method, url, body=None, timeout=0, headers=None):
+        sent.append({"url": url, "body": body, "headers": headers or {}})
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(ai, "_http", http)
+    return sent
 
 
-def test_anthropic_backend_with_a_fake_sdk(monkeypatch):
-    import types
-
-    sent = {}
-
-    class Block:
-        type, text = "text", "Blue."
-
-    class Msg:
-        stop_reason, content, model = "end_turn", [Block()], "claude-opus-5-5"
-
-    class Messages:
-        def create(self, **kw):
-            sent.update(kw)
-            return Msg()
-
-    class Client:
-        def __init__(self):
-            self.messages = Messages()
-            self.beta = types.SimpleNamespace(messages=Messages())
-
-    mod = types.ModuleType("anthropic")
-    mod.Anthropic = Client
-    for n in ("AuthenticationError", "NotFoundError", "RateLimitError", "APIStatusError", "APIConnectionError"):
-        setattr(mod, n, type(n, (Exception,), {}))
-    monkeypatch.setitem(sys.modules, "anthropic", mod)
+def test_the_claude_api_with_the_standard_library(monkeypatch):
+    """No SDK: a plain POST with the current API version, low effort and server-side fallbacks on a refusal."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    out = {"model": "claude-opus-5-5", "stop_reason": "end_turn",
+           "content": [{"type": "thinking", "thinking": ""}, {"type": "text", "text": "Blue."}]}  # fmt: skip
+    sent = fake_api(monkeypatch, out)
     r = ai.backend("anthropic").ask("S", [{"role": "user", "content": "x"}])
-    assert r.text == "Blue." and sent["model"] == "claude-opus-5-5" and sent["system"] == "S"
-    assert sent["fallbacks"] == "default" and sent["output_config"] == {"effort": "low"}
+    req = sent[0]
+    assert r.text == "Blue." and r.model == "claude-opus-5-5" and req["url"] == "https://api.anthropic.com/v1/messages"
+    assert req["headers"]["x-api-key"] == "sk-test" and req["headers"]["anthropic-version"] == "2026-10-21"
+    assert req["headers"]["anthropic-beta"] == "server-side-fallback-2026-07-01"
+    assert req["body"]["fallbacks"] == "default" and req["body"]["output_config"] == {"effort": "low"}
+    assert req["body"]["system"] == "S" and "temperature" not in req["body"]
+    fake_api(monkeypatch, {"stop_reason": "refusal", "content": []})
+    with pytest.raises(ai.AIError, match="declined"):
+        ai.backend("anthropic").ask("S", [{"role": "user", "content": "x"}])
+    sent = fake_api(monkeypatch, out)
+    ai.backend("anthropic", "claude-haiku-4-5").ask("S", [{"role": "user", "content": "x"}])
+    assert "fallbacks" not in sent[0]["body"] and "anthropic-beta" not in sent[0]["headers"]  # an older model
+
+
+def test_an_api_refusal_says_its_reason(monkeypatch):
+    import urllib.error
+
+    body = io.BytesIO(b'{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}')
+    fake_api(monkeypatch, urllib.error.HTTPError("u", 401, "Unauthorized", {}, body))
+    with pytest.raises(ai.AIError) as e:
+        ai.backend("anthropic").ask("S", [{"role": "user", "content": "x"}])
+    assert "invalid x-api-key" in str(e.value) and "ANTHROPIC_API_KEY" in e.value.hint
+    fake_api(monkeypatch, urllib.error.URLError("no route"))
+    with pytest.raises(ai.AIError, match="cannot reach the OpenAI API"):
+        ai.backend("openai").ask("S", [{"role": "user", "content": "x"}])
+
+
+def test_the_openai_api_with_the_standard_library(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-o")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:9/v1/")
+    sent = fake_api(monkeypatch, {"model": "gpt-5", "choices": [{"message": {"content": "Hi."}}]})
+    r = ai.backend("openai").ask("SYSTEM", [{"role": "user", "content": "x"}])
+    assert r.text == "Hi." and r.model == "gpt-5" and sent[0]["url"] == "http://127.0.0.1:9/v1/chat/completions"
+    assert sent[0]["headers"]["Authorization"] == "Bearer sk-o" and sent[0]["body"]["messages"][0]["role"] == "system"
 
 
 def test_model_labels():
@@ -574,10 +614,13 @@ class Screen:
 def _session(lines, answers, **kw):
     from bobina.cli import chat as cli_chat
 
-    args = type("A", (), {"manual": False, "questions": False, "dry_run": True, "argv": ["chat"], **kw})()
+    pr = {"transport": "command", "command": "true"}  # a printer whose roll is counted
+    config.update(lambda c: c.setdefault("printers", {}).update(test=pr))
+    args = type("A", (), {"manual": False, "questions": False, "dry_run": False, "argv": ["chat"], "printer": "test",
+                          **kw})()  # fmt: skip
     conv = chat.Conversation(Fake(answers), ticket(), paper_left=lambda: 2500.0)
     ui = Screen(lines)
-    return cli_chat.Session(args, conv, "test", {"transport": "file", "path": "x"}, ui, 80), ui
+    return cli_chat.Session(args, conv, "test", pr, ui, 80), ui
 
 
 def test_the_session_drives_any_screen():
@@ -588,10 +631,10 @@ def test_the_session_drives_any_screen():
     welcome = " ".join(ui.shown[0][1])
     assert "Fake AI" in welcome and "one strip" in welcome and "/tickets" in welcome and "10 cm" in welcome
     status = [x[1] for x in ui.shown if x[0] == "status"]
-    assert "Fake · fake-1" in status[1] and "strip" in status[0] and "roll 2.5 m" in status[0]
+    assert "Fake · fake-1" in status[1] and "strip" in status[0] and "roll 2.5 m left" in status[0]
     assert "tickets" in status[-1] and "manual" in status[-1] and "questions printed" in status[-1]
     dims = [x[1] for x in ui.shown if x[0] == "dim"]
-    assert any(d.startswith("not printed (--dry-run)") for d in dims) and "not printed yet: p prints it" in dims
+    assert any(d.startswith("printed on test") for d in dims) and "not printed yet: p prints it" in dims
 
 
 def test_a_stopped_answer_leaves_no_trace():
@@ -652,15 +695,28 @@ def test_each_style_keeps_the_person_right_and_the_ai_left(style):
 
     t = chat.Ticket(profiles.load("mtp-ii-58"), style=style)
     res = t.ticket("Air scatters blue light the most.", question="why is the sky blue?", who="Claude")
-    images = [r.image for r in res.rows if isinstance(r, BitmapRow)]
+    images = [r.image for r in res.rows if isinstance(r, BitmapRow) and r.kind == "chat"]
+    rules = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "divider"]
     if style == "plain":
         assert not images
         return
     person, speaker = images[0], images[-1]
-    xs = _ink_x(person)  # the bubble or the "you" line, on the right
-    assert min(xs) > person.width // 6 and max(xs) >= person.width - 8
+    xs = _ink_x(person)  # the bubble (across the paper in bubbles) or the "you" line: ending at the right edge
+    full = style in ("bubbles", "labels-bubble")
+    assert (min(xs) <= 2 if full else min(xs) > person.width // 6) and max(xs) >= person.width - 8
     xs = _ink_x(speaker)  # the AI: its icon and name on the left
     assert min(xs) <= 2 and max(xs) < speaker.width * 2 // 3
+    want = {"labels-ruled": 2, "labels-underlined": 2, "labels-exchange": 1}.get(style, 0)
+    assert len(rules) == want, style
+
+
+def test_the_rules_between_exchanges():
+    from bobina.rows import BitmapRow
+
+    t = chat.Ticket(profiles.load("mtp-ii-58"), style="labels-exchange")
+    res = t.ticket("Ok.", question="and then?", who="Claude", separator=True)
+    rules = [r.image for r in res.rows if isinstance(r, BitmapRow) and r.kind == "divider"]
+    assert len(rules) == 2 and rules[0].height > rules[1].height  # a double rule, then a dashed one
 
 
 def test_bubbles_are_white_on_black():
@@ -670,4 +726,210 @@ def test_bubbles_are_white_on_black():
     res = t.ticket("Ok.", question="hello there", who="Claude")
     bubble = next(r for r in res.rows if isinstance(r, BitmapRow)).image
     ink = bubble.convert("L").histogram()[0] / (bubble.width * bubble.height)
-    assert 0.15 < ink < 0.7  # a black bubble with white letters, not a thin frame
+    assert 0.5 < ink < 0.97  # a black bubble with white letters, not a thin frame
+    xs = [x for x in range(bubble.width) if bubble.getpixel((x, bubble.height // 2)) == 1]
+    assert min(xs) > bubble.width // 2  # the white letters on the right of the bubble
+
+
+def test_the_roll_left_or_how_to_set_it():
+    s, ui = _session([], [])
+    s.conv.paper_left = lambda: None
+    assert s.status().endswith("roll ?")
+    assert "bobina paper new 30m" in " ".join(s.welcome())
+    s.conv.paper_left = lambda: 7400.0
+    assert s.status().endswith("roll 7.4 m left") and "roll: 7.4 m left" in s.welcome()
+    s.counts = False  # a file printer: no roll
+    assert "roll" not in s.status()
+
+
+# ------------------------------------------------------------------------------- one question, no screen (way 2)
+
+
+def test_one_question_shows_the_answer_and_prints_only_with_yes(monkeypatch, capsys, printer):
+    code, o = ask_once(monkeypatch, capsys, Fake(["The sky is **blue**."]), "why", "blue?")
+    assert code == 0 and o.out == "The sky is blue.\n"
+    assert "not printed: ~" in o.err and "add --yes to print" in o.err and not printer.exists()
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "why blue?", "--yes")
+    assert code == 0 and o.out == "Blue.\n" and "printed on test: ~" in o.err and printer.read_bytes()
+    rows = [json.loads(x) for x in (config.paths.state_dir() / "history.jsonl").read_text().splitlines()]
+    assert rows[-1]["outcome"] == "printed"
+
+
+def test_one_question_from_stdin_and_json(monkeypatch, capsys, printer):
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "--json", "--yes", stdin="why is the sky blue?\n")
+    doc = json.loads(o.out)
+    assert code == 0 and doc["question"] == "why is the sky blue?" and doc["answer"] == "Blue."
+    assert doc["printed"] is True and doc["printer"] == "test" and doc["paper_mm"] > 10 and doc["ai"] == "fake"
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("schemas", Path(__file__).with_name("test_schemas.py"))
+    schemas = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(schemas)
+    schemas._check(doc, schemas._schema("chat"))  # the same checker as the other schemas
+
+
+def test_one_question_contradictions_are_said(monkeypatch, capsys, printer):
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "q?", "--dry-run", "--yes", "--manual")
+    assert code == 0 and "--dry-run wins over --yes" in o.err and "--manual does nothing with one question" in o.err
+    assert "not printed (--dry-run): ~" in o.err and not printer.exists()
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "q?", stdin="other question\n")
+    assert "the text on stdin was not read" in o.err
+
+
+def test_one_question_failures_and_their_exit_codes(monkeypatch, capsys):
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "q?", "--yes")
+    assert code == 4 and o.out == "Blue.\n" and "E401" in o.err  # no printer: the answer shown, nothing printed
+    config.update(lambda c: c.setdefault("printers", {}).update(gone={"transport": "command", "command": "false"}))
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "q?", "--yes", "--printer", "gone")
+    assert code == 4 and "E402" in o.err and "Blue." in o.out
+    code, o = ask_once(monkeypatch, capsys, Fake([ai.AIError("Claude Code failed: Not logged in", "log in")]), "q?")
+    assert code == 4 and "E602" in o.err and "Not logged in" in o.err and o.out == ""
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "")
+    assert code == 1 and "an empty question" in o.err
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--printer", "nope", "--yes")
+    assert code == 4 and "unknown printer 'nope'" in o.err
+
+
+def test_one_printed_question_over_its_limit_is_refused(monkeypatch, capsys, printer):
+    fake = Fake(["Blue."])
+    code, o = ask_once(monkeypatch, capsys, fake, "why " * 40, "--questions", "--yes")
+    assert code == 1 and "too long to print: 159/" in o.err and not fake.calls  # never sent, never cut
+    code, o = ask_once(monkeypatch, capsys, fake, "why " * 40, "--questions")  # nothing prints: no limit
+    assert code == 0 and fake.calls
+
+
+def test_ctrl_c_while_one_question_waits(monkeypatch, capsys):
+    stopped = []
+    monkeypatch.setattr(ai, "cancel", lambda: stopped.append(True))
+    code, o = ask_once(monkeypatch, capsys, Fake([KeyboardInterrupt()]), "q?")
+    assert code == 130 and stopped
+
+
+def test_the_screen_needs_a_terminal(monkeypatch, capsys):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    fake_ai(monkeypatch, Fake([]))
+    monkeypatch.setattr(sys, "stdin", Tty(""))
+    monkeypatch.setenv("BOBINA_NONINTERACTIVE", "1")
+    assert main(["chat"]) == 7
+    e = capsys.readouterr().err
+    assert "E107" in e and 'bobina chat "QUESTION"' in e
+
+
+def test_json_in_the_screen_is_a_note(monkeypatch, capsys, printer):
+    code, o = run_chat(monkeypatch, capsys, Fake([]), [], "--json")
+    assert code == 0 and "--json does nothing in the chat screen" in o.err
+
+
+# ---------------------------------------------------------------------------------------------- --limit, values
+
+
+@pytest.mark.parametrize(
+    "value,mm",
+    [("10cm", 100), ("100mm", 100), ("0.1m", 100), ("10in", 254), ('4"', 101.6), ("10 inches", 254), ("1ft", 304.8),
+     ("2 1/2in", 63.5), ("1,5cm", 15)],
+)  # fmt: skip
+def test_limit_units(value, mm):
+    from bobina.cli import chat as cli_chat
+
+    args = type("A", (), {"limit": value})()
+    assert cli_chat._limit(args, {}, None) == pytest.approx(mm)
+
+
+@pytest.mark.parametrize(
+    "value,said",
+    [("10", "give it a unit"), ("0", "more than 0"), ("0cm", "more than 0"), ("-5cm", "more than 0"), ("1km", "use 15m"),
+     ("1cm", "at least 1.5cm"), ("ten cm", "use 15m")],
+)  # fmt: skip
+def test_limit_mistakes_are_refused_clearly(value, said):
+    from bobina.cli import chat as cli_chat
+    from bobina.cli.common import Fail
+
+    args = type("A", (), {"limit": value})()
+    with pytest.raises(Fail) as e:
+        cli_chat._limit(args, {}, None)
+    assert said in str(e.value) and e.value.problem == "E304"
+
+
+def test_a_huge_limit_is_capped_and_the_roll_is_said(capsys):
+    from bobina.cli import chat as cli_chat
+
+    assert cli_chat._limit(type("A", (), {"limit": "10m"})(), {}, None) == 1000
+    assert "capped at 1m" in capsys.readouterr().err
+    assert cli_chat._limit(type("A", (), {"limit": "50cm"})(), {}, 300.0) == 500
+    assert "the roll has ~30 cm left" in capsys.readouterr().err
+
+
+def test_limit_from_the_command_line(monkeypatch, capsys, printer):
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--limit", "10")
+    assert code == 1 and "--limit 10: give it a unit" in o.err
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", "--limit=-5cm")
+    assert code == 1 and "more than 0" in o.err
+
+
+@pytest.mark.parametrize(
+    "argv,want",
+    [(["--layout", "ticket"], None), (["--layout", "continuous"], None), (["--style", "c1"], None),
+     (["--style", "bubble"], None), (["--layout", "tickts"], "did you mean tickets?"),
+     (["--style", "lables"], "did you mean labels?"), (["--layout", "xyz"], "strip, tickets"),
+     (["--style", "zzz"], "plain, bubbles, boxes, labels")],
+)  # fmt: skip
+def test_layout_and_style_values(monkeypatch, capsys, argv, want):
+    if want is None:
+        code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?", *argv)
+        assert code == 0
+        return
+    with pytest.raises(SystemExit) as e:
+        main(["chat", "q?", *argv])
+    assert e.value.code == 1 and want in capsys.readouterr().err
+
+
+def test_a_bad_setting_in_config_lists_the_valid_ones(monkeypatch, capsys):
+    config.set_value("chat_layout", "roll")
+    code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?")
+    assert code == 1 and "chat_layout = 'roll' in config.toml: use strip, tickets" in o.err
+
+
+def test_config_defaults_apply_and_options_win(monkeypatch, capsys, printer):
+    config.set_value("chat_questions", True)
+    config.set_value("chat_style", "labels-ruled")
+    code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "my question?", "--yes")
+    assert code == 0 and b"my question?" in printer.read_bytes()  # chat_questions = true
+
+
+# ---------------------------------------------------------------------------------------------- p, /again, /say
+
+
+def test_print_again_and_say(monkeypatch, capsys, printer):
+    fake = Fake(["One.", "Two."])
+    code, o = run_chat(monkeypatch, capsys, fake, ["a?", "p", "/again", "/say p"])
+    out = o.out
+    assert "already printed (~" in out and "/again prints another copy" in out
+    assert out.count("printed on test") == 3  # the answer, the copy, and the answer to "p"
+    assert [m["content"] for m in fake.calls[1][1]][-1] == "p"
+
+
+def test_p_retries_a_failed_print(monkeypatch, capsys, tmp_path):
+    out = tmp_path / "later.bin"
+    config.update(lambda c: c.setdefault("printers", {}).update(flaky={"transport": "command", "command": "false"}))
+    config.set_value("default_printer", "flaky")
+
+    def fix_it(line_after):
+        config.update(lambda c: c["printers"].update(flaky={"transport": "command", "command": f"tee -a {out}"}))
+
+    from bobina.cli import chat as cli_chat
+
+    real = cli_chat.Session.command
+
+    def command(self, line):
+        if line == "p":
+            fix_it(line)
+        return real(self, line)
+
+    monkeypatch.setattr(cli_chat.Session, "command", command)
+    code, o = run_chat(monkeypatch, capsys, Fake(["One."]), ["a?", "p"])
+    assert "not printed:" in o.out and "p tries this answer again" in o.out and "printed on flaky" in o.out
+    assert out.read_bytes()

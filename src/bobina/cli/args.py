@@ -262,7 +262,7 @@ def _common(printing: bool = True):
 
 
 # Commands with nothing to write as JSON: --json is accepted (it is a global option) and a note says it does nothing.
-NO_JSON = {"view", "edit", "send", "mode", "mcp", "chat"}
+NO_JSON = {"view", "edit", "send", "mode", "mcp"}
 
 # Every command declares its kind; a new command must be added here (and to tests/test_option_hints.py CASES):
 # "prints" commands take --yes, --dry-run and --editor; "reads" commands never print, so those options are not

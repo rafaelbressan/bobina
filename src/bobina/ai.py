@@ -2,7 +2,7 @@
 
 Order of preference (decided 11/11): AI programs already logged in (Claude Code, Codex, Gemini CLI: called
 non-interactively with their own login, no keys), then a local model (Ollama on localhost), then an API key in the
-environment (ANTHROPIC_API_KEY, OPENAI_API_KEY; their SDKs are the extra bobina[ai], never a hard dependency).
+environment (ANTHROPIC_API_KEY, OPENAI_API_KEY; their HTTP APIs, called with the standard library).
 The choice lives in config.toml: ai = "NAME", ai_model = "MODEL" ("" or absent: the AI's own default)."""
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from pathlib import Path
 
 ORDER = ("claude", "codex", "gemini", "ollama", "anthropic", "openai")
 TIMEOUT_S = 300  # a CLI that starts, thinks and answers; a short chat answer takes seconds
-EXTRA = "pip install 'bobina[ai]' (or: uv tool install 'bobina[ai]')"
 
 
 class AIError(Exception):
@@ -46,7 +45,7 @@ class Found:
     available: bool
     detail: str = ""  # how it is reached (the program's path, the host, the variable)
     needs: str = ""  # what to install or set (when not available or not ready)
-    ready: bool = True  # available and usable now (an API key without its SDK is available, not ready)
+    ready: bool = True  # available and usable now (an Ollama with no chat model answers, but is not ready)
     models: list[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -259,9 +258,10 @@ class Gemini(Backend):
         return Reply(out.strip(), self.model)
 
 
-def _http(method: str, url: str, body: dict | None = None, timeout: float = TIMEOUT_S) -> dict:
+def _http(method: str, url: str, body: dict | None = None, timeout: float = TIMEOUT_S, headers: dict | None = None):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json", **(headers or {})})  # fmt: skip
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - a local Ollama, http by design
         return json.loads(resp.read().decode("utf-8"))
 
@@ -343,46 +343,47 @@ class Ollama(Backend):
 
 
 ANTHROPIC_DEFAULT = "claude-opus-5-5"
+ANTHROPIC_VERSION = "2026-10-21"
 # models that take output_config.effort and server-side fallbacks on a refusal (others: a plain request)
 ANTHROPIC_CURRENT = {"claude-fable-5-2", "claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
+
+
+def _api(url: str, body: dict, headers: dict, what: str, key_var: str) -> dict:
+    """A POST to an AI's HTTP API (the standard library: no SDK to install); its error message when it refuses."""
+    try:
+        return _http("POST", url, body, headers=headers)
+    except urllib.error.HTTPError as e:
+        said = ""
+        try:
+            err = json.loads(e.read().decode("utf-8", "replace")).get("error") or {}
+            said = err.get("message", "") if isinstance(err, dict) else str(err)
+        except (OSError, ValueError, AttributeError):
+            pass
+        why = said or f"{e.code} {e.reason}"
+        key = f"check {key_var}, or unset it"
+        hints = {401: key, 403: key, 404: "is the model right? bobina ai use NAME --model MODEL",
+                 429: "wait a little and ask again"}  # fmt: skip
+        raise AIError(f"{what} refused ({e.code}): {why[:300]}", hints.get(e.code, "")) from None
+    except (OSError, ValueError, urllib.error.URLError) as e:
+        raise AIError(f"cannot reach {what}: {getattr(e, 'reason', e)}", "check the network") from None
 
 
 class AnthropicAPI(Backend):
     name, label, vendor = "anthropic", "Claude API (ANTHROPIC_API_KEY)", "Claude"
 
     def ask(self, system: str, messages: list[dict]) -> Reply:
-        try:
-            import anthropic
-        except ImportError:
-            raise AIError("the Anthropic SDK is not installed", EXTRA) from None
         model = self.model or ANTHROPIC_DEFAULT
-        client = anthropic.Anthropic()
-        kw: dict = {"model": model, "max_tokens": 16000, "system": system, "messages": messages}
-        try:
-            if model in ANTHROPIC_CURRENT:  # a chat answer: low effort; a refusal falls back on the server
-                r = client.beta.messages.create(
-                    **kw,
-                    output_config={"effort": "low"},
-                    betas=["server-side-fallback-2026-07-01"],
-                    fallbacks="default",
-                )
-            else:
-                r = client.messages.create(**kw)
-        except anthropic.AuthenticationError:
-            raise AIError("the Anthropic API refused ANTHROPIC_API_KEY", "check the key, or unset it") from None
-        except anthropic.NotFoundError:
-            raise AIError(f"the Anthropic API does not know the model {model}", "bobina ai use anthropic --model "
-                          + ANTHROPIC_DEFAULT) from None  # fmt: skip
-        except anthropic.RateLimitError:
-            raise AIError("the Anthropic API is rate limiting this key", "wait a little and ask again") from None
-        except anthropic.APIStatusError as e:
-            raise AIError(f"the Anthropic API failed ({e.status_code}): {e.message}") from None
-        except anthropic.APIConnectionError:
-            raise AIError("cannot reach the Anthropic API", "check the network") from None
-        if r.stop_reason == "refusal":
+        base = (os.environ.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com").rstrip("/")
+        headers = {"x-api-key": os.environ.get("ANTHROPIC_API_KEY", ""), "anthropic-version": ANTHROPIC_VERSION}
+        body: dict = {"model": model, "max_tokens": 16000, "system": system, "messages": messages}
+        if model in ANTHROPIC_CURRENT:  # a chat answer: low effort; a refusal falls back on the server
+            headers["anthropic-beta"] = "server-side-fallback-2026-07-01"
+            body |= {"output_config": {"effort": "low"}, "fallbacks": "default"}
+        out = _api(base + "/v1/messages", body, headers, "the Claude API", "ANTHROPIC_API_KEY")
+        if out.get("stop_reason") == "refusal":
             raise AIError("Claude declined to answer that", "ask it another way")
-        text = "".join(b.text for b in r.content if b.type == "text")
-        return Reply(text, getattr(r, "model", None) or model)
+        text = "".join(b.get("text", "") for b in out.get("content") or [] if b.get("type") == "text")
+        return Reply(text, out.get("model") or model)
 
 
 OPENAI_DEFAULT = "gpt-5"
@@ -392,22 +393,13 @@ class OpenAIAPI(Backend):
     name, label, vendor = "openai", "OpenAI API (OPENAI_API_KEY)", "OpenAI"
 
     def ask(self, system: str, messages: list[dict]) -> Reply:
-        try:
-            import openai
-        except ImportError:
-            raise AIError("the OpenAI SDK is not installed", EXTRA) from None
         model = self.model or OPENAI_DEFAULT
-        try:
-            r = openai.OpenAI().chat.completions.create(
-                model=model, messages=[{"role": "system", "content": system}, *messages]
-            )
-        except openai.AuthenticationError:
-            raise AIError("the OpenAI API refused OPENAI_API_KEY", "check the key, or unset it") from None
-        except openai.APIStatusError as e:
-            raise AIError(f"the OpenAI API failed ({e.status_code}): {e.message}") from None
-        except openai.APIConnectionError:
-            raise AIError("cannot reach the OpenAI API", "check the network") from None
-        return Reply(r.choices[0].message.content or "", getattr(r, "model", None) or model)
+        base = (os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        headers = {"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"}
+        body = {"model": model, "messages": [{"role": "system", "content": system}, *messages]}
+        out = _api(base + "/chat/completions", body, headers, "the OpenAI API", "OPENAI_API_KEY")
+        choices = out.get("choices") or [{}]
+        return Reply(str((choices[0].get("message") or {}).get("content") or ""), out.get("model") or model)
 
 
 BACKENDS: dict[str, type[Backend]] = {
@@ -426,15 +418,9 @@ INSTALL = {
     "codex": "npm install -g @openai/codex, then codex login",
     "gemini": "npm install -g @google/gemini-cli, then run gemini once to log in",
     "ollama": "install Ollama (https://ollama.com), then ollama pull llama3.2",
-    "anthropic": "export ANTHROPIC_API_KEY=… and " + EXTRA,
-    "openai": "export OPENAI_API_KEY=… and " + EXTRA,
+    "anthropic": "export ANTHROPIC_API_KEY=… (a key from the Claude Console)",
+    "openai": "export OPENAI_API_KEY=… (a key from the OpenAI platform)",
 }
-
-
-def _sdk(module: str) -> bool:
-    import importlib.util
-
-    return importlib.util.find_spec(module) is not None
 
 
 def detect() -> list[Found]:
@@ -447,11 +433,10 @@ def detect() -> list[Found]:
     detail = f"{ollama_host()}: " + (", ".join(models[:4]) or "no model pulled yet") if models is not None else ""
     out.append(Found("ollama", Ollama.label, models is not None, detail,
                      INSTALL["ollama"] if not models else "", ready=bool(models), models=models or []))  # fmt: skip
-    for name, var, module in (("anthropic", "ANTHROPIC_API_KEY", "anthropic"), ("openai", "OPENAI_API_KEY", "openai")):
-        has_key, has_sdk = bool(os.environ.get(var, "").strip()), _sdk(module)
-        needs = INSTALL[name] if not has_key else ("" if has_sdk else EXTRA)
-        out.append(Found(name, BACKENDS[name].label, has_key, f"{var} is set" if has_key else "", needs,
-                         ready=has_key and has_sdk))  # fmt: skip
+    for name, var in (("anthropic", "ANTHROPIC_API_KEY"), ("openai", "OPENAI_API_KEY")):
+        has_key = bool(os.environ.get(var, "").strip())
+        out.append(Found(name, BACKENDS[name].label, has_key, f"{var} is set" if has_key else "",
+                         "" if has_key else INSTALL[name]))  # fmt: skip
     return out
 
 

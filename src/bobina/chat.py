@@ -60,7 +60,17 @@ def paragraphs(text: str) -> list[Block]:
     return [Paragraph(runs=runs(p)) for p in re.split(r"\n\s*\n", text) if p.strip()]
 
 
-STYLES = ("plain", "bubbles", "boxes", "labels")  # how the two speakers look on paper (docs/chat.md)
+# how the two speakers look on paper (docs/chat.md); labels-* are labels with rules, labels-bubble with the bubble
+STYLES = ("plain", "bubbles", "boxes", "labels", "labels-ruled", "labels-underlined", "labels-exchange",
+          "labels-bubble")  # fmt: skip
+BETWEEN = {
+    "plain": "dashed",
+    "boxes": "dashed",
+    "labels": "dashed",
+    "labels-exchange": "double",
+    "labels-bubble": "dotted",
+}  # between answers
+IN_BUBBLE = ("bubbles", "boxes", "labels-bubble")  # the person's message inside a bubble or a box
 SPEAKER_ICON = {"ai": "sparkles", "person": "user-round", "ai-boxes": "bot"}
 ICON_PX = 24  # one line of native text
 PAD = 6  # dots inside a bubble or box
@@ -113,9 +123,18 @@ def speaker_row(profile, icon: str, label: str, side: str = "left"):
     return BitmapRow(out, 0, "chat")
 
 
-def bubble_row(profile, text: str, *, inverted: bool, icon: str = "user-round"):
+def rule_row(profile, style: str = "solid"):
+    """A thin rule across the paper (2 dots: thinner prints broken, B101) with little space around it."""
+    from . import imaging
+    from .rows import BitmapRow
+
+    return BitmapRow(imaging.divider(profile.width_dots, style, 2, pad=2), 0, "divider")
+
+
+def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: str = "user-round"):
     """The person's message on the right, like a chat app: wrapped inside a rounded bubble (white on black when
-    inverted, else a 2-dot frame), the person icon next to its top."""
+    inverted, else a 2-dot frame), the person icon next to its top. full: the bubble spans the paper, the text
+    still on its right."""
     from PIL import Image, ImageDraw, ImageOps
 
     from . import icons
@@ -123,18 +142,20 @@ def bubble_row(profile, text: str, *, inverted: bool, icon: str = "user-round"):
 
     w = profile.width_dots
     inner = w - ICON_PX - 6 - 2 * PAD - 4
-    words = text_image(profile, text, inner)
-    bw, bh = words.width + 2 * PAD, words.height + 2 * PAD
+    words = text_image(profile, text, inner, align="right" if full else "left")
+    bw = (w - ICON_PX - 6) if full else words.width + 2 * PAD
+    bh = words.height + 2 * PAD
     out = Image.new("1", (w, bh), 1)
     x0 = w - ICON_PX - 6 - bw
+    tx = x0 + bw - PAD - words.width  # the text against the bubble's right side
     d = ImageDraw.Draw(out)
     if inverted:
         d.rounded_rectangle((x0, 0, x0 + bw - 1, bh - 1), radius=8, fill=0)
         white = ImageOps.invert(words.convert("L")).convert("1")
-        out.paste(white, (x0 + PAD, PAD))
+        out.paste(white, (tx, PAD))
     else:
         d.rounded_rectangle((x0, 0, x0 + bw - 1, bh - 1), radius=8, outline=0, width=2)
-        out.paste(words, (x0 + PAD, PAD))
+        out.paste(words, (tx, PAD))
     out.paste(icons.load(icon, ICON_PX), (w - ICON_PX, 0))
     return BitmapRow(out, 0, "chat")
 
@@ -190,7 +211,7 @@ class Ticket:
 
     def question_chars(self, lines: int = 3) -> int:
         """The longest message of the person that prints in about `lines` lines (inside a bubble when there is one)."""
-        cols = self.profile.columns - (3 if self.style in ("bubbles", "boxes") else 0)
+        cols = self.profile.columns - (3 if self.style in IN_BUBBLE else 0)
         return max(20, int(cols * lines * 0.9))
 
     def cut(self, text: str, limit_mm: float) -> str:
@@ -212,28 +233,37 @@ class Ticket:
     def ticket(self, answer: str, *, header: list[str] | None = None, question: str | None = None,
                separator: bool = False, top: bool = True, feed: bool = True,
                who: str = "AI") -> engine.Result:  # fmt: skip
-        """One answer as it prints: a dashed line between answers (not with bubbles: they separate already), the
-        header, the person's message on the right, the AI's answer on the left (under its name, but in plain)."""
-        style, p = self.style, self.profile
+        """One answer as it prints: a rule between answers (by style), the header, the person's message on the
+        right, the AI's answer on the left (under its icon and name, but in plain)."""
+        st, p = self.style, self.profile
         parts: list = []
-        if separator and style != "bubbles":
-            parts.append([Divider(attrs=Attrs({"dashed"}))])
+        if separator and st in BETWEEN:
+            between = BETWEEN[st]
+            parts.append([Divider(attrs=Attrs({between}))] if between == "dashed" else rule_row(p, between))
         if header:
             head = [Paragraph(attrs=Attrs({"center"}), runs=[Run(header[0], bold=True)])]
             parts.append(head + [Paragraph(attrs=Attrs({"center"}), runs=[Run(line)]) for line in header[1:]])
         if question:
             text = "\n\n".join(paragraphs_text(question))
-            if style == "bubbles":
-                parts.append(bubble_row(p, text, inverted=True))
-            elif style == "boxes":
-                parts.append(bubble_row(p, text, inverted=False))
+            if st in IN_BUBBLE:
+                parts.append(bubble_row(p, text, inverted=st != "boxes", full=st != "boxes"))
             else:  # wrapped first, then each line aligned right (never stretched)
-                if style == "labels":
+                if st == "labels-ruled":
+                    parts.append(rule_row(p))
+                if st.startswith("labels"):
                     parts.append(speaker_row(p, SPEAKER_ICON["person"], "you", side="right"))
                 parts.append([Paragraph(attrs=Attrs({"right"}), runs=[Run(q)]) for q in paragraphs_text(question)])
-        if style != "plain":
-            parts.append(speaker_row(p, SPEAKER_ICON["ai-boxes" if style == "boxes" else "ai"], who))
+                if st == "labels-underlined":
+                    parts.append(rule_row(p))
+                if st == "labels-exchange":  # inside one exchange: a dashed rule; between exchanges: a double one
+                    parts.append(rule_row(p, "dashed"))
+        if st != "plain":
+            if st == "labels-ruled":
+                parts.append(rule_row(p))
+            parts.append(speaker_row(p, SPEAKER_ICON["ai-boxes" if st == "boxes" else "ai"], who))
         parts.append(paragraphs(answer))
+        if st == "labels-underlined":
+            parts.append(rule_row(p))
         return self.job(parts, top, feed)
 
     def end_of_strip(self) -> engine.Result:
@@ -279,6 +309,7 @@ class Answer:
     cut: bool = False
     first_mm: float = 0.0  # the paper the first answer would have taken, when it was too long
     printed: bool = False
+    printed_cm: float = 0.0  # the paper its last print took
 
 
 @dataclass

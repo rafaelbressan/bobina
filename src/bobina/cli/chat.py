@@ -1,39 +1,77 @@
-"""bobina chat (talk to an AI in the terminal, its answers print on the roll) and bobina ai (which AI).
+"""bobina chat (talk to an AI; its answers print on the roll) and bobina ai (which AI).
 
-The conversation logic (Session) talks to the person through a small UI object: PlainUI (lines on stdin and stdout:
-pipes, tests, agents, or no prompt_toolkit) or the full terminal screen of cli/chat_tui.py (prompt_toolkit, the
-extra bobina[ai]). Everything the chat decides is in Session, so it is tested without a terminal."""
+Two ways: `bobina chat` on a terminal opens the chat screen (cli/chat_tui.py) until the person leaves, and each
+answer prints right away (entering the chat is the consent); `bobina chat "QUESTION"` (or the question on stdin)
+asks once, writes the answer and exits, and prints only with --yes, as print does. The conversation logic (Session)
+talks to the screen through a small UI object, so it is tested without a terminal (PlainUI)."""
 
 from __future__ import annotations
 
+import argparse
+import difflib
+import os
+import re
 import sys
 
 from .. import ai, config, engine
 from .. import profile as profiles
-from ..chat import DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
+from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
 from .common import (
+    CONFIRM,
     OK,
+    STDIN_MAX,
+    UNREACHABLE,
     USAGE,
     Fail,
     counts_paper,
     do_send,
     err,
     marks_setting,
+    noninteractive,
     plural,
     print_json,
     printer_overrides,
+    stdin_has_data,
 )
 
+DEFAULT_STYLE = "labels"  # the labels family, decided 11/11 (the exact variant is still to be chosen)
 COMMANDS = {  # slash command -> what it does (completion and /help)
-    "/tickets": "one ticket per answer, fed to the tear bar to tear off",
-    "/strip": "one strip, a dashed line between answers (the default)",
-    "/manual": "print only when you type p",
+    "/print": "print the last answer, if it is not on paper yet (p for short)",
+    "/again": "print another copy of the last answer",
+    "/manual": "print only on /print (p)",
     "/auto": "print every answer right away (the default)",
+    "/tickets": "one ticket per answer, fed to the tear bar to tear off",
+    "/strip": "one strip, the answers one after the other (the default)",
     "/questions on": "print your messages too, on the right",
     "/questions off": "print only the answers",
+    "/say": "/say TEXT sends TEXT as it is (the letter p, or a line that starts with /)",
     "/help": "this list",
     "/quit": "end the chat (also Ctrl-D)",
 }
+LAYOUT_WORDS = {"continuous": "strip", "roll": "strip", "tira": "strip", "one": "strip", "single": "strip",
+                "ticket": "tickets", "receipt": "tickets", "receipts": "tickets", "each": "tickets",
+                "separate": "tickets", "cupom": "tickets", "tiquetes": "tickets"}  # fmt: skip
+STYLE_WORDS = {"label": "labels", "c": "labels", "c1": "labels-ruled", "c2": "labels-underlined",
+               "c3": "labels-exchange", "c4": "labels-bubble", "a": "bubbles", "bubble": "bubbles", "b": "boxes",
+               "box": "boxes", "simple": "plain", "none": "plain", "ruled": "labels-ruled",
+               "underlined": "labels-underlined", "exchange": "labels-exchange"}  # fmt: skip
+
+
+def _value(kind: str, valid: tuple, words: dict):
+    """An option value with its synonyms and typos: the valid name, or an error that suggests one and lists all."""
+
+    def convert(text: str) -> str:
+        k = text.strip().lower().replace("_", "-")
+        if k in valid:
+            return k
+        if k in words:
+            return words[k]
+        near = difflib.get_close_matches(k, [*valid, *words], n=1, cutoff=0.6)
+        hint = f" (did you mean {words.get(near[0], near[0])}?)" if near else ""
+        raise argparse.ArgumentTypeError(f"unknown {kind} '{text}'{hint}: {', '.join(valid)}")
+
+    convert.__name__ = kind
+    return convert
 
 
 class Cancelled(Exception):
@@ -46,39 +84,45 @@ def register(sub, cmd) -> None:
         sub,
         "chat",
         "talk to an AI; its answers print",
-        "a conversation in the terminal; each answer of the AI also prints on the roll, short (about 10 cm at"
-        " most, the AI is told so on every turn). The AI: bobina ai (asked on the first chat)",
+        "on a terminal, a chat that stays open: each answer of the AI shows and prints right away (/manual: only on"
+        " /print). With a QUESTION (or one on stdin): asks once, writes the answer and exits; it prints only with"
+        " --yes. Answers stay short on paper (about 10 cm, the AI is told so every turn). The AI: bobina ai",
         [
             "bobina chat",
-            "bobina chat --manual",
-            "bobina chat --questions --limit 6cm",
-            "bobina chat --layout tickets --style bubbles",
-            "bobina chat --ai ollama --model llama3.2",
-            "bobina chat --dry-run",
+            'bobina chat "why is the sky blue?"',
+            'bobina chat "why is the sky blue?" --yes',
+            'echo "a haiku about paper" | bobina chat --yes --json',
+            "bobina chat --manual --questions --limit 6cm",
+            "bobina chat --layout tickets --style labels-ruled",
+            "bobina chat --ai ollama --model llama3.2 --dry-run",
         ],
         cmd_chat,
     )
-    p.add_argument("--ai", metavar="NAME", help="the AI for this chat only (default: bobina ai use NAME)")
-    p.add_argument("--model", metavar="MODEL", help="the AI's model for this chat (default: the saved one or its own)")
+    p.add_argument("question", nargs="*", metavar="QUESTION", help="ask once and exit (prints only with --yes)")
+    p.add_argument("--ai", metavar="NAME", help="the AI for this run only (default: bobina ai use NAME)")
+    p.add_argument("--model", metavar="MODEL", help="the AI's model for this run (default: the saved one or its own)")
     p.add_argument(
-        "--limit", metavar="LENGTH", help="paper per answer at most (default 10cm; chat_limit in config.toml)"
-    )
+        "--limit", metavar="LENGTH", help="paper per answer at most, with its unit: 10cm (default), 100mm, 4in"
+        " (chat_limit in config.toml)"
+    )  # fmt: skip
     p.add_argument(
-        "--questions", action="store_true", help="print your messages too, on the right (default: only the answers)"
-    )
+        "--questions", action="store_true", help="print your messages too, on the right (default: only the answers;"
+        " chat_questions in config.toml)"
+    )  # fmt: skip
     p.add_argument(
         "--layout",
+        type=_value("layout", LAYOUTS, LAYOUT_WORDS),
         choices=LAYOUTS,
-        help="strip: one strip, the AI on top once, a dashed line between answers (default); tickets: one ticket per"
-        " answer with the AI and time on top, fed to the tear bar (chat_layout in config.toml)",
+        help="strip: one strip, the AI on top once, the answers one after the other (default); tickets: one ticket"
+        " per answer with the AI and time on top, fed to the tear bar (chat_layout in config.toml)",
     )
     p.add_argument(
         "--style",
+        type=_value("style", STYLES, STYLE_WORDS),
         choices=STYLES,
-        help="how the two speakers look on paper: plain (default), bubbles, boxes or labels (icons and names;"
-        " chat_style in config.toml)",
+        help=f"how the two speakers look on paper (default {DEFAULT_STYLE}; chat_style in config.toml)",
     )
-    p.add_argument("--manual", action="store_true", help="print an answer only when you type p")
+    p.add_argument("--manual", action="store_true", help="the chat screen: print an answer only on /print (p)")
     p = cmd(
         sub,
         "ai",
@@ -147,13 +191,15 @@ def cmd_ai(args):
 
 
 def _choose(args, ui) -> tuple[str, str | None]:
-    """The AI of this chat: --ai, else config.toml, else asked now (and saved). Never a dead end: a saved AI that is
-    gone falls back to the best one found, and says so."""
+    """The AI of this chat: --ai, else config.toml, else the best one found now (asked on a terminal, and saved).
+    Never a dead end: a saved AI that is gone falls back to the best one found, and says so."""
     cfg = config.load()
     saved, saved_model = cfg.get("ai"), (cfg.get("ai_model") or None)
     if args.ai:
         if args.ai not in ai.BACKENDS:
-            raise Fail(USAGE, f"unknown AI '{args.ai}': " + ", ".join(ai.ORDER), problem="E601")
+            near = difflib.get_close_matches(args.ai.lower(), ai.ORDER, n=1)
+            hint = f" (did you mean {near[0]}?)" if near else ""
+            raise Fail(USAGE, f"unknown AI '{args.ai}'{hint}: " + ", ".join(ai.ORDER), problem="E601")
         return args.ai, args.model or (saved_model if args.ai == saved else None)  # the saved AI keeps its model
     model = args.model or saved_model
     found = ai.detect()
@@ -162,16 +208,18 @@ def _choose(args, ui) -> tuple[str, str | None]:
         f = next(x for x in found if x.name == saved)
         if f.ready or not ready:
             return saved, model
-        err(f"note: the AI in config.toml ({saved}) is not ready here ({f.needs}); using {ready[0].name} for this chat")
+        err(f"note: the AI in config.toml ({saved}) is not here any more ({f.needs}); using {ready[0].name} for"
+            f" this chat (bobina ai use {ready[0].name} saves it)")  # fmt: skip
         return ready[0].name, args.model
     if not ready:
         avail = [f for f in found if f.available]
         extra = "".join(f"\n  {f.name}: found, but needs: {f.needs}" for f in avail)
         raise Fail(USAGE, f"no AI found on this machine{extra}\n→ " + ai.none_found_hint().replace("\n", "\n  "),
                    problem="E601")  # fmt: skip
-    pick = ui.choose_ai(ready) if len(ready) > 1 else ready[0]
-    if len(ready) == 1:
-        print(f"using {pick.label}, the AI found on this machine (saved; bobina ai use NAME changes it)")
+    pick = ui.choose_ai(ready) if (ui is not None and len(ready) > 1) else ready[0]
+    if ui is None or len(ready) == 1:
+        others = f" (also here: {', '.join(f.name for f in ready[1:])})" if len(ready) > 1 else ""
+        err(f"using {pick.label}, the first AI found{others}; saved: bobina ai use NAME changes it")
     try:
         config.set_value("ai", pick.name)
     except OSError as e:
@@ -179,19 +227,37 @@ def _choose(args, ui) -> tuple[str, str | None]:
     return pick.name, model
 
 
-def _limit(args, cfg) -> float:
+# ------------------------------------------------------------------------------------------------------ settings
+
+MAX_LIMIT_MM = 1000.0  # more paper than this for one answer is not a chat any more
+
+
+def _limit(args, cfg, roll_left: float | None) -> float:
+    """--limit (or chat_limit): a length with its unit, from 1.5 cm to 1 m. Too much is capped, with a note."""
     from .. import paper
 
-    raw = args.limit or cfg.get("chat_limit")
+    raw = args.limit if args.limit is not None else cfg.get("chat_limit")
     if raw is None:
-        return DEFAULT_LIMIT_MM
-    try:
-        mm = paper.parse_length(str(raw), "cm")
-    except ValueError as e:
-        where_ = "--limit" if args.limit else "chat_limit in config.toml"
-        raise Fail(USAGE, f"{where_}: {e}", problem="E304") from None
-    if mm < 15:
-        raise Fail(USAGE, f"{args.limit or raw}: an answer needs at least 1.5cm of paper", problem="E304")
+        mm = DEFAULT_LIMIT_MM
+    else:
+        where_ = f"--limit {raw}" if args.limit is not None else f"chat_limit = {raw!r} in config.toml"
+        text = str(raw).strip()
+        if text.startswith("-") or re.fullmatch(r"[0.,\s]+", text):
+            raise Fail(USAGE, f"{where_}: a length is more than 0 (10cm)", problem="E304")
+        if re.fullmatch(r"[\d.,\s/-]+", text):
+            raise Fail(USAGE, f"{where_}: give it a unit: 10cm, 100mm, 4in", problem="E304")
+        try:
+            mm = paper.parse_length(text, None)
+        except ValueError as e:
+            raise Fail(USAGE, f"{where_}: {e}", problem="E304") from None
+        if mm < 15:
+            raise Fail(USAGE, f"{where_}: an answer needs at least 1.5cm of paper", problem="E304")
+        if mm > MAX_LIMIT_MM:
+            err(f"note: {where_} is more than 1 m of paper per answer: capped at 1m")
+            mm = MAX_LIMIT_MM
+    if roll_left is not None and mm > roll_left:
+        err(f"note: the roll has ~{roll_left / 10:.0f} cm left, less than one answer may take: answers print until"
+            " it runs out (bobina paper new LENGTH after loading a new roll)")  # fmt: skip
     return mm
 
 
@@ -206,7 +272,7 @@ def _setting(args, cfg, key: str, option: str, choices: tuple, default: str) -> 
 
 
 class PlainUI:
-    """Lines on stdin and stdout: a pipe works too (its lines are echoed, so the transcript reads)."""
+    """The chat as plain lines on stdin and stdout (tests drive the session with it; a fallback screen)."""
 
     def __init__(self):
         self.interactive = sys.stdin.isatty()
@@ -227,8 +293,6 @@ class PlainUI:
         return line.rstrip("\n")
 
     def answer(self, who: str, text: str) -> None:
-        from ..chat import BOLD
-
         print(f"{who}:\n{BOLD.sub(lambda m: m.group(1), text)}\n", flush=True)
 
     def note(self, text: str) -> None:
@@ -237,23 +301,15 @@ class PlainUI:
     dim = note
 
     def wait(self, label: str, fn):
-        """fn() with a line saying the AI is thinking (on a terminal); Ctrl-C stops it (Cancelled)."""
-        if sys.stderr.isatty():
-            sys.stderr.write(f"  ({label}…)\r")
-            sys.stderr.flush()
+        """fn(); Ctrl-C stops it (Cancelled) and the chat goes on."""
         try:
             return fn()
         except KeyboardInterrupt:
             ai.cancel()
             raise Cancelled from None
-        finally:
-            if sys.stderr.isatty():
-                sys.stderr.write(" " * (len(label) + 8) + "\r")
 
     def choose_ai(self, ready: list):
         if not self.interactive:
-            others = ", ".join(f.name for f in ready[1:])
-            print(f"using {ready[0].label}, the first AI found (also here: {others}); bobina ai use NAME changes it")
             return ready[0]
         print("Which AI should answer? (saved for next time; bobina ai use NAME changes it)")
         for i, f in enumerate(ready, 1):
@@ -270,9 +326,6 @@ class PlainUI:
                 return hit[0]
             print(f"  1 to {len(ready)}, or a name above")
 
-    def status(self, session) -> None:
-        pass
-
 
 # -------------------------------------------------------------------------------------------------- the session
 
@@ -280,13 +333,15 @@ class PlainUI:
 class Session:
     """The chat: what each line does, what prints, and what the person is told. UI-free."""
 
-    def __init__(self, args, conv: Conversation, printer: str | None, pr: dict | None, ui, question_limit: int):
+    def __init__(self, args, conv: Conversation, printer: str | None, pr: dict | None, ui, question_limit: int,
+                 questions: bool = False):  # fmt: skip
         self.args, self.conv, self.printer, self.pr, self.ui = args, conv, printer, pr, ui
         self.manual = bool(args.manual)
-        self.questions = bool(args.questions)
+        self.questions = bool(questions or args.questions)
         self.question_limit = question_limit
         self.last = None  # (answer, question)
         self.model = conv.ai.model
+        self.counts = bool(pr and counts_paper(pr)) and not args.dry_run  # a roll to count
 
     # what the screen shows
 
@@ -304,7 +359,9 @@ class Session:
         return "one strip" if self.conv.layout == "strip" else "one ticket per answer"
 
     def mode_text(self) -> str:
-        return "prints on p" if self.manual else "prints every answer"
+        if self.args.dry_run or not self.pr:
+            return "nothing prints"
+        return "prints on /print (p)" if self.manual else "each answer prints right away (/manual: only on p)"
 
     def welcome(self) -> list[str]:
         """The block the chat opens with: the AI, where answers go, the layout and mode, the limits, the commands."""
@@ -313,27 +370,44 @@ class Session:
         limit = f"at most {conv.limit_mm / 10:g} cm of paper per answer"
         if self.questions:
             limit += f" · your messages print too ({self.question_limit} characters at most)"
+        roll = []
+        if self.counts:
+            left = self.roll_left()
+            unknown = "roll: its length is unknown; set it with bobina paper new 30m (or --diameter 40mm)"
+            roll = [f"roll: {left / 1000:.1f} m left" if left is not None else unknown]
         return [
             f"bobina chat · {conv.ai.label} · {model}",
             f"{self.destination()} · layout: {self.layout_text()} · {self.mode_text()}",
             limit,
-            " ".join(dict.fromkeys(c.split()[0] for c in COMMANDS)) + " · p prints the last answer"
+            *roll,
+            " ".join(dict.fromkeys(c.split()[0] for c in COMMANDS)) + " · p = /print"
             + ("" if a.dry_run else " · Ctrl-D ends"),
         ]  # fmt: skip
 
+    def roll_left(self) -> float | None:
+        return self.conv.paper_left() if self.conv.paper_left else None
+
     def status(self) -> str:
         conv = self.conv
-        left = conv.paper_left() if conv.paper_left else None
         parts = [self.who(), self.printer or "no printer", conv.layout, "manual" if self.manual else "auto"]
+        if self.args.dry_run:
+            parts[1] = f"{self.printer or 'no printer'} (dry run)"
         if self.questions:
             parts.append("questions printed")
-        paper = f"chat {conv.used_mm / 10:.1f} cm" + (f" · roll {left / 1000:.1f} m" if left is not None else "")
-        return " │ ".join([*parts, paper])
+        parts.append(f"chat {conv.used_mm / 10:.1f} cm")
+        if self.counts:  # a file printer has no roll to count
+            left = self.roll_left()
+            parts.append(f"roll {left / 1000:.1f} m left" if left is not None else "roll ?")
+        return " │ ".join(parts)
 
     def too_long(self, text: str) -> str:
         """Why a message cannot be sent as it is ("" when it can): printed questions have a limit too."""
         t = text.strip()
-        if not self.questions or t.startswith("/") or t == "p" or len(t) <= self.question_limit:
+        if t.startswith("/say "):
+            t = t[5:].strip()
+        elif t.startswith("/") or t == "p":
+            return ""
+        if not self.questions or len(t) <= self.question_limit:
             return ""
         return (f"too long to print: {len(t)}/{self.question_limit} characters (about 3 lines); shorten it,"
                 " or /questions off")  # fmt: skip
@@ -359,7 +433,11 @@ class Session:
             return True
         if line in ("/quit", "/exit", "/q"):
             return False
-        if self.command(line):
+        if line.startswith("/say "):  # the text as it is: "p", or a line that starts with /
+            line = line[5:].strip()
+            if not line:
+                return True
+        elif self.command(line):
             return True
         why = self.too_long(line)
         if why:
@@ -370,17 +448,25 @@ class Session:
 
     def command(self, line: str) -> bool:
         ui = self.ui
-        if line in ("p", "/p", "/print"):
+        words = line.split()
+        if line in ("p", "/print", "/p"):
             if not self.last:
                 ui.note("nothing to print yet")
             elif self.last[0].printed:
-                ui.note("the last answer is already on paper")
+                ui.note(f"already printed (~{self.last[0].printed_cm:.1f} cm); /again prints another copy")
+            else:
+                self.print_answer(*self.last)
+            return True
+        if line == "/again":
+            if not self.last:
+                ui.note("nothing to print yet")
             else:
                 self.print_answer(*self.last)
             return True
         if line in ("/manual", "/auto"):
             self.manual = line == "/manual"
-            ui.note("manual mode: p prints the last answer" if self.manual else "every answer prints right away")
+            ui.note("manual mode: p (or /print) prints the last answer" if self.manual
+                    else "every answer prints right away")  # fmt: skip
             return True
         if line in ("/strip", "/tickets"):
             want = line[1:]
@@ -392,8 +478,8 @@ class Session:
             self.conv.layout = want
             ui.note("one ticket per answer from now on" if want == "tickets" else "one strip from now on")
             return True
-        if line.split()[0] == "/questions":
-            arg = (line.split() + [""])[1]
+        if words[0] == "/questions":
+            arg = (words + [""])[1]
             if arg not in ("on", "off", ""):
                 ui.note("/questions on or /questions off")
                 return True
@@ -402,11 +488,10 @@ class Session:
                     else "only the answers print")  # fmt: skip
             return True
         if line in ("/help", "/?"):
-            ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()) + "\n  p               print the last"
-                    " answer (manual mode, or after a print failed)")  # fmt: skip
+            ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()))
             return True
         if line.startswith("/"):
-            ui.note(f"unknown command {line}; /help lists them (a message never starts with /)")
+            ui.note(f"unknown command {words[0]}; /help lists them (/say TEXT sends a line that starts with /)")
             return True
         return False
 
@@ -446,28 +531,18 @@ class Session:
         if a.dry_run:
             self._problems(res)
             passed = conv.count(res)
-            ans.printed = True
+            ans.printed, ans.printed_cm = True, cm
             ui.dim(f"not printed (--dry-run) · {cm:.1f} cm · chat {conv.used_mm / 10:.1f} cm")
         elif not self.pr:
             ui.dim("not printed: no printer configured (bobina printer add NAME ADDRESS)")
             return
         else:
-            if counts_paper(self.pr):
-                from .. import paper
-
-                paper.check(self.printer, res.length_mm, res.nudges)  # P101/P102: said, never in the way
-            self._problems(res)
-            try:
-                name = do_send(a, res.data, res.profile, length_mm=res.length_mm)
-            except Fail as e:
-                head, _, hint = str(e).partition("\n")
-                ui.note(f"not printed: {head}" + (f"\n  {hint.strip()}" if hint.strip() else "")
-                        + "\n  the chat goes on; p tries this answer again")  # fmt: skip
-                self._history(res, "failed", e.code, e.problems())
+            name, problems = send(a, res, self.printer, self.pr, ui.note)
+            if problems is not None:
+                ui.note("the chat goes on; p tries this answer again")
                 return
             passed = conv.count(res)
-            ans.printed = True
-            self._history(res, "printed", OK, None, name)
+            ans.printed, ans.printed_cm = True, cm
             ui.dim(f"printed on {name} · {cm:.1f} cm · chat {conv.used_mm / 10:.1f} cm")
         if passed is not None:
             ui.note(f"this conversation has used ~{passed / 1000:.1f} m of paper")
@@ -491,13 +566,6 @@ class Session:
         if passed is not None:
             self.ui.note(f"this conversation has used ~{passed / 1000:.1f} m of paper")
 
-    def _history(self, res, outcome: str, code: int, problems, name: str = "") -> None:
-        from .. import history
-
-        rec = history.Recorder(getattr(self.args, "argv", ["chat"]))
-        rec.res, rec.printer = res, name or (self.printer or "")
-        rec.finish(outcome, code, problems)
-
     def end(self) -> None:
         conv = self.conv
         try:
@@ -511,16 +579,27 @@ class Session:
             self.ui.note("bye")
 
 
-def _ui(args):
-    """The full screen when this is a terminal and prompt_toolkit is installed; plain lines otherwise."""
-    if sys.stdin.isatty() and sys.stdout.isatty():
-        try:
-            from .chat_tui import TerminalUI
-        except ImportError:
-            err("note: pip install 'bobina[ai]' for the chat screen (input box, status line, completion)")
-            return PlainUI()
-        return TerminalUI(color=not args.no_color)
-    return PlainUI()
+def send(args, res, printer: str | None, pr: dict, note) -> tuple[str, list | None]:
+    """Prints a chat job as print does: the roll check and the job's nudges said first (never in the way), the
+    job recorded in the history. (printer name, None) when it printed; (name, problems) when it did not."""
+    from .. import history, paper
+
+    if counts_paper(pr):
+        paper.check(printer, res.length_mm, res.nudges)  # P101/P102
+    for n in res.visible_nudges():
+        note(f"{n.severity} {n.code}: {n.message}" + (f" → {n.suggestion}" if n.suggestion else ""))
+    rec = history.Recorder(getattr(args, "argv", ["chat"]))
+    rec.res, rec.printer = res, printer or ""
+    try:
+        name = do_send(args, res.data, res.profile, length_mm=res.length_mm)
+    except Fail as e:
+        head, _, hint = str(e).partition("\n")
+        note(f"not printed: {head}" + (f"\n  {hint.strip()}" if hint.strip() else ""))
+        rec.finish("failed", e.code, e.problems())
+        return printer or "", [e]
+    rec.printer = name
+    rec.finish("printed", OK, None)
+    return name, None
 
 
 def paper_left_of(printer: str | None, pr: dict | None):
@@ -543,12 +622,69 @@ def paper_left_of(printer: str | None, pr: dict | None):
     return left
 
 
+# ------------------------------------------------------------------------------------------------ bobina chat
+
+
+def terminal() -> bool:
+    """The chat screen needs a terminal on both sides (and BOBINA_NONINTERACTIVE unset)."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not noninteractive()
+
+
+def _ui(args):
+    from .chat_tui import TerminalUI
+
+    return TerminalUI(color=not args.no_color)
+
+
+def _stdin_has_text() -> bool:
+    """Text waiting on stdin (a pipe at its end, or /dev/null, is "ready" too: one byte read says which; the rest
+    of stdin is not used anyway)."""
+    if not stdin_has_data(0.2):
+        return False
+    try:
+        return bool(os.read(sys.stdin.fileno(), 1))
+    except (OSError, ValueError):
+        return False
+
+
+def _question(args) -> str | None:
+    """The question of one-question use: the words on the command line, else stdin when it is not a terminal.
+    None: no question (the chat screen)."""
+    words = " ".join(args.question).strip() if args.question else None
+    piped = not sys.stdin.isatty()
+    if words is not None:
+        if piped and _stdin_has_text():
+            err("note: the text on stdin was not read: the question is the one on the command line")
+        if not words:
+            raise Fail(USAGE, 'an empty question: ask something, e.g. bobina chat "why is the sky blue?"',
+                       problem="E101")  # fmt: skip
+        return words
+    if piped and not terminal():
+        text = sys.stdin.read(STDIN_MAX + 1)
+        if len(text) > STDIN_MAX:
+            raise Fail(USAGE, "the question on stdin is too long", problem="E304")
+        if not text.strip():
+            raise Fail(USAGE, 'no question on stdin: echo "why is the sky blue?" | bobina chat', problem="E101")
+        return text.strip()
+    return None
+
+
 def cmd_chat(args):
     cfg = config.load()
-    ui = _ui(args)
+    question = _question(args)
+    one = question is not None
+    if not one and not terminal():
+        raise Fail(CONFIRM, 'the chat screen needs a terminal; for one question: bobina chat "QUESTION" (add --yes'
+                   " to print the answer)", problem="E107")  # fmt: skip
+    if not one and args.json:
+        err('note: --json does nothing in the chat screen; for JSON ask one question: bobina chat "QUESTION" --json')
+        args.json = False
+    ui = None if one else _ui(args)
     name, model = _choose(args, ui)
     backend = ai.backend(name, model)
     printer, pr = config.printer(cfg, args.printer)
+    if args.printer and not pr:
+        raise Fail(UNREACHABLE, f"unknown printer '{args.printer}': bobina printer list", problem="E401")
     try:
         prof = profiles.load(args.profile or (pr or {}).get("profile") or cfg.get("profile"))
     except KeyError as e:
@@ -556,12 +692,77 @@ def cmd_chat(args):
     # the printer's measured tear bar and the marks setting, as print uses them
     prof = engine.apply_overrides(prof, {**printer_overrides(pr), "marks": marks_setting(args, cfg)})
     layout = _setting(args, cfg, "chat_layout", "layout", LAYOUTS, "strip")
-    style = _setting(args, cfg, "chat_style", "style", STYLES, "plain")
+    style = _setting(args, cfg, "chat_style", "style", STYLES, DEFAULT_STYLE)
     ticket = Ticket(prof, style=style)
     try:
         qlimit = int(cfg.get("chat_question_limit") or ticket.question_chars())
     except (TypeError, ValueError):
         raise Fail(USAGE, "chat_question_limit in config.toml: a number of characters", problem="E304") from None
-    conv = Conversation(backend, ticket, limit_mm=_limit(args, cfg), paper_left=paper_left_of(printer, pr),
-                        layout=layout)  # fmt: skip
-    return Session(args, conv, printer if pr else None, pr, ui, qlimit).run()
+    left = paper_left_of(printer, pr)
+    conv = Conversation(backend, ticket, limit_mm=_limit(args, cfg, left()), paper_left=left, layout=layout)
+    questions = bool(args.questions or cfg.get("chat_questions") is True)
+    if one:
+        return one_question(args, conv, printer if pr else None, pr, question, qlimit, questions)
+    return Session(args, conv, printer if pr else None, pr, ui, qlimit, questions).run()
+
+
+def one_question(args, conv, printer, pr, question: str, qlimit: int, questions: bool) -> int:
+    """bobina chat "QUESTION": asks once, writes the answer, exits. It prints only with --yes (as print)."""
+    if args.manual:
+        err("note: --manual does nothing with one question: it prints only with --yes")
+    if args.dry_run and args.yes:
+        err("note: --dry-run wins over --yes: nothing prints")
+    printing = args.yes and not args.dry_run
+    if questions and (args.yes or args.dry_run) and len(question) > qlimit:
+        raise Fail(USAGE, f"the question is too long to print: {len(question)}/{qlimit} characters (about 3 lines)"
+                   "\n→ shorten it, or leave out --questions", problem="E304")  # fmt: skip
+    out = {"schema": "bobina.chat/1", "question": question, "answer": None, "ai": conv.ai.name, "model": None,
+           "paper_mm": None, "printed": False, "printer": printer, "rewritten": False, "cut": False,
+           "problems": []}  # fmt: skip
+    try:
+        ans = conv.ask(question)
+    except ai.AIError as e:
+        f = Fail(UNREACHABLE, f"no answer: {e}" + (f"\n→ {e.hint}" if e.hint else ""), problem="E602")
+        if args.json:
+            print_json({**out, "problems": [n.as_dict() for n in f.problems()]}, indent=2, ensure_ascii=False)
+        raise f from None
+    except KeyboardInterrupt:
+        ai.cancel()
+        raise
+    conv.layout = "tickets"  # one answer: a whole ticket, the header on top, fed to the tear bar
+    res = conv.job(ans, question if questions else None)
+    out |= {"answer": ans.text, "model": ans.model, "paper_mm": round(res.length_mm, 1), "rewritten": ans.rewritten,
+            "cut": ans.cut, "paper_answer": ans.paper}  # fmt: skip
+    if not args.json:
+        print(BOLD.sub(lambda m: m.group(1), ans.text), flush=True)
+    cm = res.length_mm / 10
+    failed = None
+    if ans.cut:
+        err(f"note: too long for {conv.limit_mm / 10:g} cm even after a rewrite: on paper it would end with …")
+    if not printing:
+        problems = list(res.visible_nudges())
+        for n in problems:
+            err(f"{n.severity} {n.code}: {n.message}" + (f" → {n.suggestion}" if n.suggestion else ""))
+        err(f"not printed (--dry-run): ~{cm:.1f} cm" if args.dry_run else f"not printed: ~{cm:.1f} cm; add --yes to"
+            " print")  # fmt: skip
+    elif not pr:
+        failed = Fail(UNREACHABLE, "not printed: no printer configured: bobina printer add NAME ADDRESS",
+                      problem="E401")  # fmt: skip
+        problems = failed.problems()
+    else:
+        name, errors = send(args, res, printer, pr, err)
+        problems = list(res.visible_nudges())
+        if errors:
+            failed = errors[0]
+            problems += failed.problems()
+        else:
+            out |= {"printed": True, "printer": name}
+            err(f"printed on {name}: ~{cm:.1f} cm")
+    out["problems"] = [n.as_dict() for n in problems]
+    if args.json:
+        print_json(out, indent=2, ensure_ascii=False, default=str)
+    if failed is not None:
+        if args.json:
+            failed.args = (str(failed),)
+        raise failed
+    return OK
