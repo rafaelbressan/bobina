@@ -99,6 +99,27 @@ def test_macros_cannot_run_forever(src):
         '{{ ("a" * 1000).join(("b" * 1000000) | list) }}',
         '{{ ("b" * 1000000) | list | join("a" * 1000) }}',
         '{{ "ab" | replace("a", "a" * 10000) | replace("a", "a" * 10000) }}',
+        # ~ and set, block assignments, macro bodies
+        '{% set b = "x" * 1900000 %}{{ (b ~ b) | length }}',
+        '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = [n.s, n.s] | join %}{% endfor %}',
+        '{% set b = "x" * 1900000 %}{% set s %}{{ b }}{{ b }}{% endset %}{{ s }}',
+        '{% set b = "x" * 1900000 %}{% macro m() %}{{ b }}{{ b }}{% endmacro %}{{ m() }}',
+        '{% set b = "x" * 1900000 %}{% for i in range(1500) %}{{ b }}{% endfor %}',  # 2.8 GB once resolved
+        # numbers
+        "{% set n = namespace(x=3) %}{% for i in range(40) %}{% set n.x = n.x * n.x %}{% endfor %}",
+        # filters and methods that expand a small input
+        "{{ [1] | slice(1000000000) | list | length }}",
+        '{{ [1] | batch(1000000000, "x") | list | length }}',
+        '{{ ("a\n" * 1000000) | indent("x" * 1000) }}',
+        '{{ ("a" * 1000000).replace("a", "b" * 1000) }}',
+        '{{ ("a" * 1000000) | replace("a", "b" * 1000) }}',
+        '{{ ("a " * 900000) | wordwrap(1, wrapstring="x" * 1000) }}',
+        '{{ ["x" * 1000000, "y" * 1000000, "z" * 1000000] | join }}',
+        # widths from the arguments
+        '{{ "%*d" % (10000000000, 1) }}',
+        '{{ "%.*f" % (10000000000, 1.0) }}',
+        '{{ "{:{w}}".format(1, w=10000000000) }}',
+        '{{ "{:{w}}".format_map({"w": 10000000000}) }}',
     ],
 )
 def test_no_value_grows_beyond_the_output_limit(src):
@@ -107,9 +128,34 @@ def test_no_value_grows_beyond_the_output_limit(src):
     assert time.monotonic() - start < 5  # refused before the memory is taken, not after
 
 
-def test_a_render_has_a_deadline(monkeypatch):
+@pytest.mark.parametrize(
+    "src",
+    [
+        '{% for i in range(100) %}{{ "a" | upper }}{% endfor %}',
+        "{% for i in range(100) %}{% set x = i * i %}{% endfor %}",  # arithmetic ticks too
+        "{% for i in range(100) %}{{ 'a' ~ i }}{% endfor %}",
+        "{{ ('a' * 1000) | map('upper') | list | length }}",  # a lazy result is drawn with the clock ticking
+    ],
+)
+def test_a_render_has_a_deadline(monkeypatch, src):
     monkeypatch.setattr(templating, "MAX_SECONDS", 1e-9)
-    assert "s to render" in refused('{% for i in range(100) %}{{ "a" | upper }}{% endfor %}')
+    assert "s to render" in refused(src)
+
+
+@pytest.mark.parametrize("n", [0, -1, -100000])
+def test_taking_no_numbers_or_fewer_is_an_error_and_gives_no_loop_steps_back(n):
+    with pytest.raises(ValueError, match="take at least 1"):
+        build(f"{{% for i in range(1990) %}}{{{{ seq.t.take({n}) }}}}{{% endfor %}}")
+
+
+def test_the_new_checks_leave_usual_templates_alone():
+    res = build(
+        "{{ 'a' ~ 1 ~ 'b' }} {% set s %}hi {{ 2 }}{% endset %}{{ s }} {{ 'aaa bbb' | wordwrap(4) }} "
+        "{{ 'a\\nb' | indent(2, true) }} {{ [1, 2, 3] | batch(2, 0) | list }} {{ [1, 2, 3] | slice(2) | list }} "
+        "{{ ['a', 'b'] | map('upper') | join(',') }} {{ 'x'.replace('x', 'yy') }} {{ 12 * 3 - 1 }} {{ 7 // 2 }} "
+        "{{ '%5.1f' % 2.25 }} {{ '{:>4}'.format('a') }}"
+    )
+    assert rendered(res) == "a1b hi 2 aaa\nbbb   a\n  b [[1, 2], [3, 0]] [[1, 2], [3]] A,B yy 35 3   2.2    a"
 
 
 def test_waiting_for_the_counters_file_is_not_the_templates_time(monkeypatch):
@@ -154,6 +200,7 @@ def test_template_symlink_out_of_the_document_folder_is_refused(tmp_path):
 # -- data files: size, unpacked size, rows ------------------------------------------------------------------
 
 DEV_ZERO = pytest.mark.skipif(not os.path.exists("/dev/zero"), reason="no /dev/zero here")
+FIFO = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no named pipes here")
 
 
 def test_a_data_file_is_read_up_to_its_limit_only(tmp_path, monkeypatch):
@@ -166,10 +213,27 @@ def test_a_data_file_is_read_up_to_its_limit_only(tmp_path, monkeypatch):
 
 
 @DEV_ZERO
-def test_a_device_as_data_is_capped_not_read_forever(monkeypatch):
-    monkeypatch.setattr(datasource, "MAX_FILE", 1_000_000)  # /dev/zero (or a pipe) has no size to check first
-    with pytest.raises(datasource.DataError, match="larger than"):
-        datasource.read_rows("/dev/zero")
+def test_a_device_as_data_is_refused_before_it_is_read(tmp_path):
+    for dev in ("/dev/zero", "/dev/tty", str(tmp_path)):  # endless, waits for a person, a folder
+        if os.path.exists(dev):
+            with pytest.raises(datasource.DataError, match="not a regular file"):
+                datasource.read_rows(dev)
+
+
+@FIFO
+def test_a_pipe_as_data_is_read_up_to_the_limit_and_never_waits(tmp_path):
+    fifo = tmp_path / "rows.csv"
+    os.mkfifo(fifo)
+    with pytest.raises(datasource.DataError, match="no rows"):  # nobody writes: empty at once, no wait
+        datasource.read_rows(str(fifo))
+    writer = threading.Thread(target=lambda: fifo.write_text("name\nRice\n"))
+    writer.start()
+    time.sleep(0.2)  # the writer is there before the read (as with --data <(command))
+    assert datasource.read_rows(str(fifo)) == [{"name": "Rice"}]
+    writer.join(5)
+    os.mkfifo(tmp_path / "s.xlsx")
+    with pytest.raises(datasource.DataError, match="not a regular file"):  # a zip needs a file it can seek
+        datasource.read_rows(str(tmp_path / "s.xlsx"))
 
 
 def test_rows_beyond_max_read_are_not_read(tmp_path, monkeypatch):
@@ -220,10 +284,16 @@ def test_library_names_are_names_not_paths():
 
 
 @DEV_ZERO
-def test_an_image_path_to_a_device_is_capped(monkeypatch):
-    monkeypatch.setattr(sources, "MAX_FILE_BYTES", 1_000_000)
-    with pytest.raises(sources.ImageError, match="larger than"):
-        sources.load("/dev/zero", "/")
+def test_an_image_path_to_a_device_or_a_pipe_is_refused_before_it_is_opened(tmp_path):
+    paths = [p for p in ("/dev/zero", "/dev/tty") if os.path.exists(p)]
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(tmp_path / "pipe.png")
+        paths.append(str(tmp_path / "pipe.png"))
+    for p in paths:
+        with pytest.raises(sources.ImageError, match="not a regular file"):
+            sources.load(p, "/")
+    with pytest.raises(fileio.NotAFile):  # the open file is checked too: a path swapped after stat() is refused
+        fileio.read_capped("/dev/zero", 10)
 
 
 def test_image_files_over_the_limit_and_folders_are_refused(tmp_path, monkeypatch):
@@ -250,6 +320,22 @@ def test_a_tall_svg_is_refused_without_being_drawn(height):
     with pytest.raises(sources.ImageError, match="taller than"):
         sources.render_svg(tall_svg(height), 384)
     assert time.monotonic() - start < 5
+
+
+def test_an_svg_drawn_taller_than_asked_is_still_refused(monkeypatch):
+    import io
+
+    from PIL import Image
+
+    def tall(**kw):  # a renderer that ignores the height it was given
+        buf = io.BytesIO()
+        Image.new("L", (kw["width"], sources.MAX_RENDER_DOTS + 1), 255).save(buf, format="PNG")
+        return buf.getvalue()
+
+    resvg = pytest.importorskip("resvg_py")
+    monkeypatch.setattr(resvg, "svg_to_bytes", tall)
+    with pytest.raises(sources.ImageError, match="taller than"):
+        sources.render_svg(tall_svg(10), 384)
 
 
 def test_an_svg_at_the_height_limit_still_renders():
@@ -292,6 +378,9 @@ def fake_dns(monkeypatch, *addrs):
         "2002:c0a8:101::1",  # 6to4 of a LAN address
         "2001:0:4136:e378:8000:63bf:3fff:fdd2",  # Teredo
         "fec0::1", "fe80::1", "ff02::1", MAPPED_CGNAT,
+        "::ffff:0:7f00:1", "::ffff:0:c0a8:101",  # IPv4-translated (SIIT)
+        "64:ff9b:1::808:808",  # a local NAT64 prefix
+        "2606:4700::5efe:7f00:1", "2606:4700::200:5efe:c0a8:101",  # ISATAP around loopback, a LAN address
     ],
 )  # fmt: skip
 def test_addresses_that_reach_this_machine_or_its_network_are_refused(monkeypatch, addr):
@@ -301,8 +390,9 @@ def test_addresses_that_reach_this_machine_or_its_network_are_refused(monkeypatc
     assert e.value.code == "I106"
 
 
-def test_nat64_of_a_public_address_is_public():
-    assert sources._public("64:ff9b::808:808") and sources._public("8.8.8.8")
+def test_ipv4_inside_ipv6_of_a_public_address_is_public():
+    for a in ("8.8.8.8", "64:ff9b::808:808", "::ffff:0:808:808", "2606:4700::5efe:808:808", "2606:4700::1111"):
+        assert sources._public(a), a
 
 
 class FakeResponse:

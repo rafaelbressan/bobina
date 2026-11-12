@@ -19,6 +19,7 @@ import ipaddress
 import re
 import socket
 import ssl
+import stat
 import threading
 import time
 import urllib.parse
@@ -87,13 +88,16 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
     if not p.is_absolute():
         p = Path(base_dir) / p
     try:
-        size = p.stat().st_size
+        st = p.stat()
     except OSError as e:
         raise ImageError(
             "I101", f"{e.strerror or 'cannot read'}: {src[:60]}", "paths are relative to the document"
         ) from None
-    if p.is_dir():
+    size = st.st_size
+    if stat.S_ISDIR(st.st_mode):
         raise ImageError("I101", f"{src[:60]} is a folder, not an image")
+    if not stat.S_ISREG(st.st_mode):  # /dev/tty, a FIFO, a device: reading could wait forever or never end
+        raise ImageError("I101", f"{src[:60]} is not a regular file")
     from .fileio import read_capped
 
     try:
@@ -109,20 +113,34 @@ def load(src: str, base_dir: str, *, allow_net: bool = False) -> Source:
 
 
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")  # DNS64 answers for IPv4 hosts on IPv6-only networks
+_NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")  # a translator of one network's own choosing
+_TRANSLATED = ipaddress.ip_network("::ffff:0:0:0/96")  # SIIT: ::ffff:0:a.b.c.d
+_COMPATIBLE = ipaddress.ip_network("::/96")  # ::a.b.c.d, deprecated (and ::, ::1)
+
+
+def _low_ipv4(ip: ipaddress.IPv6Address) -> str:
+    return str(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
 
 
 def _public(addr: str) -> bool:
     """A public internet address. IPv6 forms that carry an IPv4 address are judged by that address (mapped,
-    NAT64, 6to4); IPv4-compatible (::a.b.c.d), site-local and Teredo addresses are never public."""
+    translated, NAT64, 6to4, ISATAP); IPv4-compatible, site-local, Teredo and local NAT64 addresses are never
+    public."""
     ip = ipaddress.ip_address(addr)
     if isinstance(ip, ipaddress.IPv6Address):
         if ip.ipv4_mapped:
             ip = ip.ipv4_mapped
+        elif ip in _TRANSLATED:
+            ip = ipaddress.IPv4Address(_low_ipv4(ip))
         elif ip in _NAT64:  # 64:ff9b::192.168.1.1 reaches the LAN behind the translator
-            return _public(str(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)))
+            return _public(_low_ipv4(ip))
         else:
-            six_to_four = ip.sixtofour is not None and not _public(str(ip.sixtofour))
-            if six_to_four or int(ip) >> 32 == 0 or ip.is_site_local or ip.teredo is not None:
+            if ip in _COMPATIBLE or ip in _NAT64_LOCAL or ip.is_site_local or ip.teredo is not None:
+                return False
+            embedded = [str(ip.sixtofour)] if ip.sixtofour is not None else []
+            if (int(ip) >> 32) & 0xFDFFFFFF == 0x5EFE:  # ISATAP: the interface id is [02]00:5efe:a.b.c.d
+                embedded.append(_low_ipv4(ip))
+            if not all(_public(e) for e in embedded):
                 return False
     return ip.is_global and not ip.is_multicast
 
@@ -307,7 +325,7 @@ def render_svg(data: bytes, width: int):
     except Exception as e:  # noqa: BLE001 - resvg reports parse errors as generic exceptions
         raise ImageError("I101", f"SVG: {str(e)[:80]}") from None
     im = Image.open(io.BytesIO(bytes(png)))
-    if im.width < width:  # the height limit set the scale: at the paper width it would be taller
+    if im.width < width or im.height > MAX_RENDER_DOTS:  # narrower: the height limit set the scale
         raise ImageError("I101", f"SVG renders taller than {MAX_RENDER_DOTS} dots")
     return im
 

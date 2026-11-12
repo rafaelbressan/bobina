@@ -53,10 +53,28 @@ def atomic_write(
         raise
 
 
-def read_capped(path, limit: int) -> bytes | None:
-    """The file, or None when it holds more than `limit` bytes. Reads at most limit + 1 bytes: a pipe or a device
-    (/dev/zero, <(cmd)) has no size to check first."""
-    with open(path, "rb") as f:
+class NotAFile(OSError):
+    """A path to a device, a socket or a folder where a file was expected."""
+
+
+def read_capped(path, limit: int, pipes: bool = False) -> bytes | None:
+    """The file, or None when it holds more than `limit` bytes (reads at most limit + 1). Only a regular file, or
+    with pipes=True also a pipe (<(cmd), a FIFO): a device like /dev/tty or /dev/zero is refused, and opening
+    never waits (O_NONBLOCK; the type is checked on the open file, so it cannot change in between)."""
+    import stat
+
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0))
+    try:
+        mode = os.fstat(fd).st_mode
+        if not (stat.S_ISREG(mode) or (pipes and stat.S_ISFIFO(mode))):
+            raise NotAFile(0, "not a regular file", str(path))
+        if hasattr(os, "set_blocking"):
+            os.set_blocking(fd, True)  # a pipe without a writer reads as empty
+        f = os.fdopen(fd, "rb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with f:
         data = f.read(limit + 1)
     return None if len(data) > limit else data
 

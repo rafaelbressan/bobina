@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import re
+import stat
 import zipfile
 from datetime import date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -35,12 +36,15 @@ def read_rows(path: str, sheet: str | None = None, notes: list | None = None) ->
     notes = notes if notes is not None else []
     p = Path(path).expanduser()
     try:
-        size = p.stat().st_size
+        st = p.stat()
     except OSError as e:
         raise DataError(f"{path}: {e.strerror}") from None
-    if size > MAX_FILE:
-        raise DataError(f"{p.name}: larger than {MAX_FILE // 1_000_000} MB")
     ext = p.suffix.lower()
+    pipe = stat.S_ISFIFO(st.st_mode)  # --data <(command): read as it comes, up to MAX_FILE
+    if not (stat.S_ISREG(st.st_mode) or (pipe and ext not in (".xlsx", ".xlsm"))):
+        raise DataError(f"{path}: not a regular file")  # /dev/tty, a device, a folder: it could wait forever
+    if st.st_size > MAX_FILE:
+        raise DataError(f"{p.name}: larger than {MAX_FILE // 1_000_000} MB")
     if ext in (".xlsx", ".xlsm"):
         rows = _xlsx(p, sheet, notes)
     elif ext in (".xls", ".ods", ".numbers"):
@@ -58,7 +62,7 @@ def _text(p: Path) -> str:
     from .fileio import read_capped
 
     try:
-        raw = read_capped(p, MAX_FILE)
+        raw = read_capped(p, MAX_FILE, pipes=True)
     except OSError as e:
         raise DataError(f"{p.name}: {e.strerror}") from None
     if raw is None:  # a pipe or a device: no size to check before reading
