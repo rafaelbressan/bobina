@@ -19,6 +19,7 @@ def bt(monkeypatch, tmp_path):
     found = [(BUDS, "Galaxy Buds"), (OTHER, "Printer001"), (MTP, "MTP-II")]
     monkeypatch.setattr(discover, "bluetooth_missing", lambda: "")
     monkeypatch.setattr(transport, "scan", lambda seconds: list(found))
+    monkeypatch.setattr(discover.socket, "AF_BLUETOOTH", 31, raising=False)  # CI's Python has no Bluetooth sockets
     monkeypatch.setattr(discover, "USB_GLOB", str(tmp_path / "no-usb-lp*"))
     monkeypatch.setattr(discover, "known_name", lambda mac: dict((m, n) for m, n in found).get(mac, ""))
     return found
