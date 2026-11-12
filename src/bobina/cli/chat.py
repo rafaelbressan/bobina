@@ -756,7 +756,7 @@ def one_question(args, conv, printer, pr, question: str, qlimit: int, questions:
     try:
         ans = conv.ask(question)
     except ai.AIError as e:
-        f = Fail(UNREACHABLE, f"no answer: {e}" + (f"\n→ {e.hint}" if e.hint else ""), problem="E602")
+        f = Fail.with_hint(UNREACHABLE, f"no answer: {e}", e.hint, "E602")
         if args.json:
             print_json({**out, "problems": [n.as_dict() for n in f.problems()]}, indent=2, ensure_ascii=False)
         raise f from None

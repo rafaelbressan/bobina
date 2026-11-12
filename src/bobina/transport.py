@@ -73,38 +73,74 @@ def _shell_word(w: str) -> str:
     return w if re.fullmatch(r"[^\s'\"\\$`;&|<>()*?!#{}\[\]]+", w) else shlex.quote(w)
 
 
+SSH_REFUSALS = [  # what ssh said when it exits 255 -> what to try ({m}: the machine, {reach}: ssh up to it)
+    (r"Permission denied|Too many authentication failures",
+     "ssh reached {m} but was not let in: does your key work there? Try: {reach} true"),
+    (r"Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED",
+     "{m}'s host key is not known here, or changed: connect once by hand to check it: {reach} true"),
+    (r"Could not resolve hostname|Name or service not known|nodename nor servname|Temporary failure in name",
+     "the name {m} is not known here: check it, or use its address"),
+    (r"Connection refused",
+     "{m} answered, but no ssh server listens there (not running, or on another port: -p)"),
+    (r"timed out|No route to host|Network is unreachable|Host is down",
+     "{m} did not answer: is it on and on the network? Try: {reach} true"),
+]  # fmt: skip
+
+
 def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
     """A printer command that exited with an error -> what failed (its exit code and the end of its stderr) and
-    what to try. ssh is read: 255 is ssh itself (the machine did not answer), anything else came from the other
-    side. `typed`: the command as in config.toml (what the user typed, so nothing new is shown)."""
+    what to try. ssh is read: 255 is ssh itself (what it said tells why), anything else came from the other side.
+    `typed`: the command as in config.toml (what the user typed, so nothing new is shown). No suggestion runs a
+    command that would wait for a job on stdin."""
+    import signal
+
     cmd = shlex.split(typed)
     said = stderr_tail(stderr) or "nothing on stderr"
+    if code < 0:  # killed on this machine (out of memory, a kill), whatever it was reaching
+        try:
+            sig = signal.Signals(-code).name
+        except ValueError:
+            sig = f"signal {-code}"
+        return PrinterUnreachable(
+            f"the command was stopped on this machine by {sig}: {said}",
+            "nothing on the printer's side did it; try again",
+        )
     ssh = ssh_target(cmd)
-    how = f"was stopped by signal {-code}" if code < 0 else f"exited with {code}"
     if ssh:
         host, reach, remote = ssh
-        machine = host.rpartition("@")[2]
-        there = (remote[0].split() or ["?"])[0] if remote else "?"  # ssh h bobina send, or ssh h 'bobina send'
+        m = host.rpartition("@")[2]
+        words = " ".join(remote).split()  # ssh h bobina send, or ssh h 'bobina send'
+        bobina = next((w for w in words if os.path.basename(w) == "bobina"), "")  # as given: ~/.local/bin/bobina
         if code == 255:
-            return PrinterUnreachable(
-                f"ssh could not reach {machine} (exit 255): {said}",
-                f"is {machine} on and on the network? Try it by hand: {reach} true",
+            hint = next(
+                (h for pat, h in SSH_REFUSALS if re.search(pat, said, re.I)),
+                "is {m} on and on the network? Try: {reach} true",
             )
+            return PrinterUnreachable(f"ssh to {m} failed (exit 255): {said}", hint.format(m=m, reach=reach))
         if code == 127:
-            return PrinterUnreachable(
-                f"{there} was not found on {machine} (exit 127): {said}",
-                f"is it installed there, in the PATH ssh gives it? Try: {reach} command -v {shlex.quote(there)}",
+            hint = (
+                f"is bobina installed on {m}, in the PATH ssh gives it (not your login shell's)? Try: {reach} {bobina}"
+                " --version"
+                if bobina
+                else f"is the program installed on {m}, in the PATH ssh gives it (not your login shell's)?"
             )
+            return PrinterUnreachable(f"a program was not found on {m} (exit 127): {said}", hint)
         hint = (
-            f"is the printer of {machine} on and in range? {reach} bobina status asks it"
-            if "bobina" in os.path.basename(there)
-            else f"{machine} answered; run the command there by hand to see why"
+            f"is the printer of {m} on and in range? {reach} {bobina} status asks it"
+            if bobina
+            else f"{m} answered; what ran there failed. Try it with an empty job: printf '' | {typed}"
         )
-        return PrinterUnreachable(f"the command on {machine} {how}: {said}", hint)
-    by_hand = f"Run it by hand to see why: {typed}" if len(typed) <= 100 else "Run it by hand (bobina printer list)"
+        return PrinterUnreachable(f"the command on {m} exited with {code}: {said}", hint)
+    by_hand = (
+        f"Try it with an empty job: printf '' | {typed}"
+        if len(typed) <= 100
+        else "Try it with an empty job: printf '' | COMMAND (bobina printer list shows it)"
+    )
     if code == 127:
-        return PrinterUnreachable(f"the command {how} (a program was not found): {said}", f"is it installed? {by_hand}")
-    return PrinterUnreachable(f"the command {how}: {said}", f"is the printer behind it on? {by_hand}")
+        return PrinterUnreachable(
+            f"the command exited with 127 (a program was not found): {said}", f"is it installed? {by_hand}"
+        )
+    return PrinterUnreachable(f"the command exited with {code}: {said}", f"is the printer behind it on? {by_hand}")
 
 
 def no_bluetooth_sockets() -> str:
@@ -377,11 +413,33 @@ def _write_device(path: str, data: bytes, timeout: float, progress: dict | None 
         raise SendFailed(f"{path} did not take the whole job in {timeout:.0f} s (printer off or offline?)", len(data))
     if "err" in box:
         e = box["err"]
-        hint = {
-            errno.ENOENT: "is the printer plugged in and on? The device appears when it is",
-            errno.EACCES: "this user may not write to it (on Linux: the lp group, or dialout for a serial port)",
-        }.get(e.errno, "is the printer plugged in and on?")
-        raise PrinterUnreachable(f"cannot write to {path}: {e.strerror or e}", hint) from e
+        what = f"cannot write to {path}: {e.strerror or e}"
+        hint = device_hint(path, e.errno)
+        if box.get("opened"):  # failed while writing: some of the job may have reached the printer
+            raise SendFailed(what, len(data), hint) from e
+        raise PrinterUnreachable(what, hint) from e
+
+
+def is_device(path: str) -> bool:
+    """A printer's device (/dev/usb/lp0, COM3, \\\\.\\COM10), not a plain file a job is written to."""
+    return path.startswith("/dev/") or bool(re.match(r"(?i)^(\\\\\.\\)?(com|lpt)\d+$", path))
+
+
+def device_hint(path: str, err: int | None) -> str:
+    """What to do when a printer file or device cannot be written, by the error's errno."""
+    device = is_device(path)
+    hints = {
+        errno.ENOENT: "is the printer plugged in and on? The device appears when it is"
+        if device
+        else "its folder does not exist: check the path (bobina printer list)",
+        errno.EACCES: "this user may not write to it (on Linux: the lp group, or dialout for a serial port)"
+        if device
+        else "this user may not write there: check the path and its permissions",
+        errno.ENOSPC: "the disk is full: free some space, or write the job elsewhere",
+        errno.EISDIR: "that is a folder: give the printer's device, or a file name in the folder",
+        errno.EIO: "an input/output error: the device went away? Unplug the printer and plug it in again",
+    }
+    return hints.get(err, "is the printer plugged in and on?" if device else "check the path (bobina printer list)")
 
 
 def query(

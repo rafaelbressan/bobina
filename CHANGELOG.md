@@ -46,10 +46,12 @@
   the same column: a heading (2x, its bar drawn in), text in a raster font, right to left text (the bar on the
   right), an inverted band (a white bar); centred text is centred after the bar.
 - Fixed: a printer that cannot be reached says which printer and why (`E402`): a printer through a command, its
-  exit code and the last lines it wrote on stderr (3 at most, without colours), with what to try: ssh's own failure
-  (exit 255) asks whether that machine is on, with `ssh … true` to try; a failure on the other side points to
-  `ssh … bobina status`. Before: `command failed (1):` and nothing else. Bluetooth and device printers say what to
-  check too.
+  exit code and the last lines it wrote on stderr (3 at most, without colours), with what to try. Through ssh,
+  exit 255 is ssh's own failure, read from what it said (not let in, unknown host key, unknown name, refused, no
+  answer); 127 a program missing over there; anything else points to `ssh HOST bobina status` (the remote bobina
+  as written). Suggestions to try a command by hand give it an empty job (`printf '' | …`). Before: `command
+  failed (1):` and nothing else. Bluetooth printers, devices and files say what to check too (by the error), and a
+  device that fails half way keeps "part of the job may have printed".
 
 ## 0.1.2 — 2026-11-11
 
