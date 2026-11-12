@@ -57,6 +57,18 @@ COMMANDS = {  # slash command -> what it does (completion and /help)
     "/theme light": "dark text on a light terminal",
     "/theme mono": "no colours (bold and dim stay)",
     "/theme contrast": "high contrast",
+    "/style": "how the answers look on paper: /style lists them, /style NAME switches",
+    **{
+        f"/style {k}": v
+        for k, v in {
+            "labels-underline": "a short mark under each name (the default)",
+            "labels-dashes": "a short dashed mark under each name",
+            "labels-dots": "no marks; a small · · · between exchanges",
+            "labels-outline": "your message in a framed bubble",
+            "labels-filled": "your message in a black bubble",
+            "labels-hook": "a hooked mark under each name, — ✦ — between exchanges",
+        }.items()
+    },
     "/help": "this list",
     "/quit": "end the chat (also Ctrl-D)",
 }
@@ -457,6 +469,9 @@ class Session:
         if words[0] == "/theme":
             self.theme(words[1] if len(words) > 1 else "")
             return True
+        if words[0] == "/style":
+            self.style(words[1] if len(words) > 1 else "")
+            return True
         if line in ("/help", "/?"):
             ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()))
             return True
@@ -464,6 +479,24 @@ class Session:
             ui.note(f"unknown command {words[0]}; /help lists them (/say TEXT sends a line that starts with /)")
             return True
         return False
+
+    def style(self, wanted: str) -> None:
+        """/style: the paper styles, the one in use marked; /style NAME: the next answers print in it."""
+        ticket = self.conv.ticket
+        if not wanted:
+            self.ui.note("paper styles: " + ", ".join(f"{s} (in use)" if s == ticket.style else s for s in STYLES)
+                         + " · /style NAME switches; chat_style in config.toml keeps one")  # fmt: skip
+            return
+        try:
+            name = _value("style", STYLES, STYLE_WORDS)(wanted)
+        except argparse.ArgumentTypeError as e:
+            self.ui.note(f"no change: {e}")
+            return
+        if name == ticket.style:
+            self.ui.note(f"already: {name}")
+            return
+        ticket.style = name
+        self.ui.note(f"the next answers print in the style {name}")
 
     def theme(self, wanted: str) -> None:
         """/theme: the themes, the one in use marked; /theme NAME: switch (one's own [chat.colors] stay on top)."""

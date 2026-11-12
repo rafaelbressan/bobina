@@ -94,7 +94,8 @@ a terminal: without one (or with `BOBINA_NONINTERACTIVE`), ask one question inst
 | `/again` | print another copy of the last answer |
 | `/manual`, `/auto` | print only on `/print`, or every answer right away (the default) |
 | `/strip`, `/tickets`, `/questions on\|off` | switch the layout; print your messages too, or not |
-| `/theme`, `/theme NAME` | list the themes; switch to one |
+| `/style`, `/style NAME` | list the paper styles; the next answers print in one |
+| `/theme`, `/theme NAME` | list the screen's colour themes; switch to one |
 | `/say TEXT` | send TEXT as it is: the single letter p, or a line that starts with / |
 | `/help`, `/quit` | the commands (Tab completes them); end (also Ctrl-D) |
 | Esc or Ctrl-C | stop the answer being written; the chat goes on |

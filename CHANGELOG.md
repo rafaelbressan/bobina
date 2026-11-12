@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `/style` in the chat lists the paper styles and `/style NAME` switches the next answers to one (synonyms
+  such as `d4` work), like `/theme` for the screen's colours.
 - The chat screen's colours: `--theme dark|light|mono|contrast` (`chat_theme`; by default the terminal's background
   when `COLORFGBG` says it, else dark), `/theme NAME` in the chat, and colours of one's own per element in
   `[chat.colors]` (a wrong one is a note and the theme's stays). `NO_COLOR` and `--no-color` win. When bobina

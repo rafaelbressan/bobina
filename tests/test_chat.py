@@ -1096,3 +1096,30 @@ def test_the_outlined_bubble_has_the_name_above_it():
     assert ink < 0.25  # a thin frame, white inside
     x0, _, x1, _ = _ink_box(bubble)
     assert x1 >= bubble.width - 2 and x0 > bubble.width // 3  # fitted to the text, on the right
+
+
+def test_style_switches_the_paper_style_inside_the_chat():
+    """/style lists the paper styles with the one in use; /style NAME (or a synonym like d4) changes the next answers."""
+    from bobina import chat
+    from bobina.cli import chat as cli_chat
+
+    class UI(LinesUI):
+        notes: list = []
+
+        def note(self, text):
+            self.notes.append(text)
+
+    ui = UI()
+    args = type("A", (), {"manual": False, "questions": False, "dry_run": True, "argv": ["chat"], "printer": None,
+                          "strict": False, "quiet": False})()  # fmt: skip
+    t = ticket()
+    t.style = cli_chat.DEFAULT_STYLE
+    s = cli_chat.Session(args, chat.Conversation(Fake([]), t), None, None, ui, 80)
+    s.handle("/style")
+    assert "labels-underline (in use)" in ui.notes[-1] and "labels-outline" in ui.notes[-1]
+    s.handle("/style d4")
+    assert t.style == "labels-outline" and "labels-outline" in ui.notes[-1]
+    s.handle("/style outlnie")
+    assert t.style == "labels-outline" and "did you mean" in ui.notes[-1]
+    s.handle("/style labels-outline")
+    assert ui.notes[-1] == "already: labels-outline"
