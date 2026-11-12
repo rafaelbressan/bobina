@@ -55,6 +55,12 @@ def _image_key(src: str, base_dir: str, attrs, extra: tuple):
     return ident, attrs_key, extra
 
 
+def _real(folder):
+    from pathlib import Path
+
+    return Path(folder).expanduser().resolve()
+
+
 def _remember(key, value) -> None:
     if len(_IMAGES) >= _IMAGES_MAX:
         _IMAGES.pop(next(iter(_IMAGES)))
@@ -63,9 +69,11 @@ def _remember(key, value) -> None:
 
 class Layout:
     def __init__(self, profile, doc: Document, rendered: Rendered | None, nudges: Nudges, net: bool = False,
-                 locale=None):  # fmt: skip
+                 locale=None, image_dirs: tuple[str, ...] | None = None):  # fmt: skip
         self.p, self.doc, self.r, self.n = profile, doc, rendered, nudges
         self.net = net  # https images allowed (only from the command line: --allow-net)
+        # --sandbox / MCP: local images only from these folders (None: anywhere)
+        self.image_dirs = None if image_dirs is None else tuple(_real(d) for d in image_dirs)
         self.locale = locale  # the job's locales.Choice (payment captions), the same as its templates use
         self.em = Emulator(profile)
         self.W = profile.width_dots
@@ -1070,14 +1078,17 @@ class Layout:
         except ValueError:
             page = 1
         settings = tuple(self.p.get(k) for k in ("image.dither", "image.gamma", "image.gamma_atkinson"))
-        key = _image_key(src, self.doc.base_dir, attrs, (w, page, self.W, self.net, repr(self.img), settings))
+        extra = (w, page, self.W, self.net, self.image_dirs, repr(self.img), settings)  # --sandbox: its own entry
+        key = _image_key(src, self.doc.base_dir, attrs, extra)
         if key is not None and key in _IMAGES:  # a batch of 1000 labels with the same logo decodes it once
             host, row_im = _IMAGES[key]
             if host:
                 self.n.add("I104", f"fetched {host}", line, "that server can see when you print")
             return [BitmapRow(row_im, line, "image")]
         try:
-            im = imaging.open_image(src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net)
+            im = imaging.open_image(
+                src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
+            )
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []

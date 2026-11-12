@@ -603,6 +603,21 @@ def build(args, source, base_dir, counters=None, machine=None):
         raise
 
 
+def sandbox_dirs(cfg: dict, base_dir: str, doc_folder: bool = True) -> tuple[str, ...]:
+    """The folders a sandboxed document's images may come from: its own folder (not for stdin or inline text: they
+    have none) and image_dirs in config.toml."""
+    extra = cfg.get("image_dirs", [])
+    if not isinstance(extra, list) or not all(isinstance(d, str) and d.strip() for d in extra):
+        raise Fail(
+            USAGE,
+            f'image_dirs = {extra!r} in config.toml: use a list of folders, e.g. image_dirs = ["~/Pictures"]',
+            problem="E101",
+        )
+    home = config.path().parent  # a relative entry is relative to config.toml, wherever the command runs
+    dirs = [str(home / Path(d).expanduser()) for d in extra]  # an absolute or ~ path stays as it is
+    return tuple(([base_dir] if doc_folder else []) + dirs)
+
+
 def _build(args, source, base_dir, counters=None, machine=None):
     from .. import locales
 
@@ -627,6 +642,9 @@ def _build(args, source, base_dir, counters=None, machine=None):
             plain=getattr(args, "plain", False),
             allow=allow_set(args),
             net=getattr(args, "allow_net", False),
+            image_dirs=sandbox_dirs(cfg, base_dir, getattr(args, "doc_folder", True))
+            if getattr(args, "sandbox", False)
+            else None,
             locale=machine or locales.Machine(),  # the locale of a document without locale:
             **({"counters": counters} if counters is not None else {}),
         )
@@ -654,6 +672,7 @@ def _build(args, source, base_dir, counters=None, machine=None):
 
 JOB_FLAGS = (
     "yes", "dry_run", "compact_all", "quiet", "strict", "json", "no_color", "verbose", "debug", "force", "pages",
+    "sandbox",
 )  # fmt: skip
 JOB_VALUES = ("printer", "profile", "output", "editor", "marks")
 PLAIN_WORD = re.compile(r"[^\s/\\.@:]+")
@@ -751,6 +770,7 @@ def _load_job(args, store):
         label = f"part {g + 1} ({_short(a.target)})" if many else ""
         try:
             s, b, origin = _read_one(a)
+            a.doc_folder = origin not in ("stdin", "inline")  # --sandbox: stdin and inline text have no folder
             if getattr(a, "ask", False):
                 cache = args.__dict__.setdefault("_asked", {})  # an edit-and-rebuild keeps the answers
                 if (g, a.target) not in cache:

@@ -9,7 +9,11 @@ document structure, is never evaluated again, and cannot produce raw printer byt
 from __future__ import annotations
 
 import calendar
+import contextlib
+import functools
+import math
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -18,17 +22,23 @@ import yaml
 from babel import Locale
 from babel import dates as bdates
 from babel import numbers as bnumbers
-from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined
+from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, UndefinedError, nodes
+from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
-from jinja2.sandbox import ImmutableSandboxedEnvironment
+from jinja2.runtime import LoopContext, Macro
+from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedFormatter
+from jinja2.utils import Namespace
+from markupsafe import Markup
 
 from . import paths
 from .nudges import Nudges, SecurityError
 
 PH_OPEN, PH_CLOSE = "", ""
 PH_RE = re.compile(PH_OPEN + r"(\d+)" + PH_CLOSE)
-MAX_ITER = 2000  # total loop iterations from range()/take()
+MAX_ITER = 2000  # loop steps: every {% for %} step, recursive loop() item, range() step, number taken
 MAX_OUTPUT = 2_000_000  # characters
+MAX_CALLS = 10_000  # macro calls (a recursive macro that branches is exponential)
+MAX_SECONDS = 10  # one render (a label of a batch, a document): a usual one takes milliseconds
 RESERVED = {
     "bob",
     "profile",
@@ -357,13 +367,403 @@ class CounterStore:
 
 
 class Budget:
-    def __init__(self, n=MAX_ITER):
-        self.n = n
+    """n steps (loop iterations, macro calls) and, with seconds, a deadline for the whole render: a loop of
+    filters over long values spends few steps but can still take minutes."""
+
+    def __init__(self, n=MAX_ITER, what="loop iterations", seconds: float | None = None):
+        self.n, self.limit, self.what = n, n, what
+        self.seconds = seconds
+        self.deadline = time.monotonic() + seconds if seconds else None
 
     def spend(self, k=1):
         self.n -= k
         if self.n < 0:
-            raise SecurityError("M313", f"more than {MAX_ITER} loop iterations")
+            raise SecurityError("M313", f"more than {self.limit} {self.what}")
+        self.tick()
+
+    def tick(self):
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            raise SecurityError("M313", f"the template took more than {self.seconds:g} s to render")
+
+    @contextlib.contextmanager
+    def paused(self):
+        """Time spent waiting for something else (the counters file of another print) is not the template's."""
+        start = time.monotonic()
+        try:
+            yield
+        finally:
+            if self.deadline is not None:
+                self.deadline += time.monotonic() - start
+
+
+def too_big(v) -> bool:
+    """A value no template needs: longer than the whole output may be (strings, lists, dicts)."""
+    return isinstance(v, (str, list, tuple, dict)) and len(v) > MAX_OUTPUT
+
+
+def _refuse_size():
+    raise SecurityError("M313", f"a value grew beyond {MAX_OUTPUT // 1_000_000} MB while rendering")
+
+
+def check_size(v):
+    if too_big(v):
+        _refuse_size()
+    return v
+
+
+def check_estimate(n: int) -> None:
+    """Refuses an operation whose result would be longer than MAX_OUTPUT, before it is built."""
+    if n > MAX_OUTPUT:
+        _refuse_size()
+
+
+MAX_BITS = 100_000  # integers: about 30 000 digits, far beyond any amount, and quick to compute
+
+
+def check_bits(n: int) -> None:
+    if n > MAX_BITS:
+        raise SecurityError("M313", "a number too large to compute")
+
+
+class SafeRange:
+    """range() for templates: lazy, and each step taken (a loop, | list, | sum …) spends the loop budget, so
+    range(10**9) | length is free and range(10**9) | list stops at the limit."""
+
+    def __init__(self, r: range, budget: Budget):
+        self._r, self._budget = r, budget
+
+    def __iter__(self):
+        for x in self._r:
+            self._budget.spend()
+            yield x
+
+    def __reversed__(self):
+        return iter(SafeRange(self._r[::-1], self._budget))
+
+    def __len__(self):
+        return len(self._r)
+
+    def __contains__(self, x):
+        return x in self._r
+
+    def __getitem__(self, k):
+        return SafeRange(self._r[k], self._budget) if isinstance(k, slice) else self._r[k]
+
+    def __repr__(self):
+        return repr(self._r)
+
+
+class Taken(list):
+    """seq.NAME.take(n): the numbers were paid for when taken, so the first loop over them is free."""
+
+    fresh = True
+
+
+def _ints(values) -> list[int]:
+    return [v for v in values if isinstance(v, int) and not isinstance(v, bool)]
+
+
+def _strlen(v) -> int:
+    return len(v) if isinstance(v, str) else 0
+
+
+_WIDTH_METHODS = {"center", "ljust", "rjust", "zfill"}
+_PRINTF_SIZES = re.compile(r"%(?:\([^)]*\))?[-+ #0]*(\d+|\*)?(?:\.(\d+|\*))?")
+_FORMAT_SPECS = re.compile(r"\{[^{}]*:([^{}]*)\}")
+_NESTED_SPEC = re.compile(r"\{[^{}]*:[^{}]*\{")
+
+
+def check_format(fmt: str, args=(), kwargs=None) -> None:
+    """A format string cannot ask for a field wider than the output may be: '%100000000d', '%*d' % (10**9, 1),
+    '{:>100000000}', '{:{w}}'.format(1, w=10**9), format_map({'w': 10**9})."""
+    sizes = [n for w, p in _PRINTF_SIZES.findall(fmt) for n in (w, p) if n]
+    nums = [int(n) for n in sizes if n != "*"]
+    nums += [int(n) for spec in _FORMAT_SPECS.findall(fmt) for n in re.findall(r"\d+", spec)]
+    if "*" in sizes or _NESTED_SPEC.search(fmt):  # the width comes from the arguments
+        nums += _ints((*args, *(kwargs or {}).values()))
+    if any(n > MAX_OUTPUT for n in nums):
+        raise SecurityError("M313", f"a format asks for a field wider than {MAX_OUTPUT // 1_000_000} MB")
+
+
+def check_widths(args) -> None:
+    if any(a > MAX_OUTPUT for a in _ints(args)):
+        raise SecurityError("M313", f"a width beyond {MAX_OUTPUT // 1_000_000} MB")
+
+
+def _textlen(x) -> int:
+    """The length str(x) will have, for the items a join puts together (numbers too: range(10**6) | join)."""
+    if isinstance(x, str):
+        return len(x)
+    return len(str(x)) if isinstance(x, (int, float)) else 0
+
+
+def join_size(sep, items) -> int:
+    """The length of sep.join(items). items must be sized: lazy inputs are drawn first (Sandbox.materialized)."""
+    sep = sep if isinstance(sep, str) else str(sep or "")
+    if isinstance(items, str):
+        return len(items) * (len(sep) + 1)
+    if isinstance(items, SafeRange):  # its items are numbers: sep between them and their digits
+        return len(sep) * max(0, len(items) - 1) + len(items) * len(str(max(abs(items._r.start), abs(items._r.stop))))
+    if not hasattr(items, "__len__"):
+        return 0
+    return len(sep) * max(0, len(items) - 1) + sum(_textlen(x) for x in items)
+
+
+def replace_size(s, old, new, count=-1) -> int:
+    """The length of str(s).replace(old, new, count): the filter turns any value into text first."""
+    if not (isinstance(old, str) and isinstance(new, str)):
+        return 0
+    s = s if isinstance(s, str) else str(s)
+    n = s.count(old) if old else len(s) + 1
+    if isinstance(count, int) and count >= 0:
+        n = min(n, count)
+    return len(s) + n * max(0, len(new) - len(old))
+
+
+def translate_size(s: str, table) -> int:
+    """str.translate: each character may become the longest string the table maps to."""
+    if not isinstance(table, dict):
+        return len(s)
+    longest = max([1, *(len(v) for v in table.values() if isinstance(v, str))])
+    return len(s) * longest
+
+
+def expandtabs_size(s: str, tabsize=8) -> int:
+    tab = tabsize if isinstance(tabsize, int) and tabsize > 0 else 8
+    return len(s) + s.count("\t") * tab
+
+
+class _BoundedFormatter(SandboxedFormatter):
+    """str.format and format_map in templates: each field's spec is checked after Python put the nested
+    arguments into it ('{:{w}}' with w = '999999999', 9.9e8, row['w']), so no width comes from anywhere unseen."""
+
+    def format_field(self, value, format_spec):
+        if any(int(n) > MAX_OUTPUT for n in re.findall(r"\d+", format_spec)):
+            raise SecurityError("M313", f"a format asks for a field wider than {MAX_OUTPUT // 1_000_000} MB")
+        return check_size(super().format_field(value, format_spec))
+
+
+def _lines(s) -> int:
+    return str(s).count("\n") + 1
+
+
+class _CountingCodeGenerator(CodeGenerator):
+    """Compiles templates so that no work escapes bobina's limits: every {% for x in it %} becomes
+    {% for x in environment.bobina_loop(it) %}, every `a ~ b` environment.bobina_join((a, b)), and every
+    {% set x = v %} checks the size of v. A template cannot reach these names."""
+
+    def visit_Template(self, node, frame=None):
+        def call(name, arg, lineno):
+            return nodes.Call(nodes.EnvironmentAttribute(name), [arg], [], None, None, lineno=lineno)
+
+        for f in node.find_all(nodes.For):
+            f.iter = call("bobina_loop", f.iter, f.lineno)
+        for a in node.find_all(nodes.Assign):
+            a.node = call("bobina_value", a.node, a.lineno)
+        super().visit_Template(node, frame)
+
+    def visit_Concat(self, node, frame):  # no constant folding: the result size is checked at render time
+        self.write("environment.bobina_join((")
+        for arg in node.nodes:
+            self.visit(arg, frame)
+            self.write(", ")
+        self.write("))")
+
+
+class Sandbox(ImmutableSandboxedEnvironment):
+    """Jinja's sandbox plus bobina's limits (FORMAT.md §7, SECURITY.md): every {% for %} step and every macro call
+    spends a budget, every operation ticks the render's deadline, and no operation may build a value longer than
+    the whole output may be. Without this a short template could loop forever over a string or allocate
+    gigabytes ('a' * 10**10) before any output is counted."""
+
+    intercepted_binops = frozenset({"+", "-", "*", "/", "//", "%", "**"})
+
+    def __init__(self, loops: Budget, calls: Budget, **kw):
+        super().__init__(**kw)
+        self.loops, self.calls = loops, calls
+        self.code_generator_class = _CountingCodeGenerator
+        self.concat = self.bobina_concat  # {% set %}…{% endset %}, macro bodies, {% filter %} blocks
+
+    def bobina_loop(self, iterable):
+        """Wraps the iterable of every {% for %} (see _CountingCodeGenerator)."""
+        if isinstance(iterable, SafeRange):
+            return iterable  # each step already spends
+        if isinstance(iterable, Taken) and iterable.fresh:
+            iterable.fresh = False
+            return iterable
+        return self._spending(iterable)
+
+    def _spending(self, iterable):
+        for x in iterable:
+            self.loops.spend()
+            yield x
+
+    def bobina_value(self, value):
+        """{% set x = value %}: reached through call(), which ticks the deadline and checks the size."""
+        return value
+
+    def bobina_join(self, parts):
+        """a ~ b ~ c: as Jinja's str_join, with its size known before it is joined (call() ticks)."""
+        texts = [str(p) for p in parts]
+        check_estimate(sum(len(t) for t in texts))
+        return "".join(texts)
+
+    def bobina_concat(self, buffer):
+        """The output of a block kept as a value: it stops growing at MAX_OUTPUT, as the document does."""
+        out, size = [], 0
+        for chunk in buffer:
+            size += len(chunk)
+            check_estimate(size)
+            out.append(chunk)
+        return "".join(out)
+
+    def call_binop(self, context, operator, left, right):
+        self.loops.tick()
+        seq = (str, list, tuple)
+        ints = isinstance(left, int) and isinstance(right, int)
+        if operator == "*":
+            if ints:
+                check_bits(left.bit_length() + right.bit_length())
+            else:
+                n, s = (right, left) if isinstance(left, seq) else (left, right)
+                if isinstance(s, seq) and isinstance(n, int):
+                    check_estimate(len(s) * n)
+        elif operator in ("+", "-"):
+            if isinstance(left, seq) and isinstance(right, seq):
+                check_estimate(len(left) + len(right))
+            elif ints:
+                check_bits(max(left.bit_length(), right.bit_length()) + 1)
+        elif operator == "**" and isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            if abs(left) > 1 and right > 0 and right * math.log2(abs(left)) > MAX_BITS:
+                check_bits(MAX_BITS + 1)
+        elif operator == "%" and isinstance(left, str):
+            check_format(left, right if isinstance(right, tuple) else (right,))
+        return check_size(super().call_binop(context, operator, left, right))
+
+    def call(__self, __context, __obj, *args, **kwargs):  # noqa: N805 - Jinja's signature
+        __self.loops.tick()
+        if isinstance(__obj, Macro):
+            __self.calls.spend()
+        elif isinstance(__obj, LoopContext) and args:  # loop(children) in a recursive loop
+            args = (__self._spending(args[0]), *args[1:])
+        for a in (*args, *kwargs.values()):
+            check_size(a)
+        method = getattr(__obj, "__wrapped__", __obj)  # the sandbox wraps str.format
+        owner, name = getattr(method, "__self__", None), getattr(method, "__name__", "")
+        if isinstance(owner, str):
+            if name in _WIDTH_METHODS:
+                check_widths((*args, *kwargs.values()))
+            elif name == "format":
+                check_format(owner, args, kwargs)
+            elif name == "format_map" and args and isinstance(args[0], dict):
+                check_format(owner, (), args[0])
+            elif name == "join" and args:
+                args = (__self.materialized(args[0]), *args[1:])
+                check_estimate(join_size(owner, args[0]))
+            elif name == "replace" and len(args) >= 2:
+                check_estimate(replace_size(owner, *args[:3]))
+            elif name == "translate" and args:
+                check_estimate(translate_size(owner, args[0]))
+            elif name == "expandtabs":
+                check_estimate(expandtabs_size(owner, (*args, *kwargs.values(), 8)[0]))
+        return check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
+
+    def materialized(self, items):
+        """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
+        MAX_OUTPUT items, so its size can be estimated before anything is built from it."""
+        if isinstance(items, (str, list, tuple, dict, SafeRange)) or not hasattr(items, "__iter__"):
+            return items
+        return list(self._bounded(iter(items)))
+
+    def wrap_str_format(self, value):
+        """As Jinja's, with a formatter that checks each field's final spec (_BoundedFormatter)."""
+        import types
+        from functools import update_wrapper
+
+        if not isinstance(value, (types.MethodType, types.BuiltinMethodType)) or value.__name__ not in (
+            "format",
+            "format_map",
+        ):
+            return None
+        owner = value.__self__
+        if not isinstance(owner, str) or isinstance(owner, Markup):
+            return super().wrap_str_format(value)
+        formatter, is_map = _BoundedFormatter(self), value.__name__ == "format_map"
+
+        def wrapper(*args, **kwargs):
+            if is_map:
+                if kwargs or len(args) != 1:
+                    raise TypeError("format_map() takes a single mapping")
+                args, kwargs = (), args[0]
+            return type(owner)(formatter.vformat(owner, args, kwargs))
+
+        return update_wrapper(wrapper, value)
+
+    def _bounded(self, result):
+        """A lazy result (a generator from map, batch, slice …) is drawn with the deadline ticking and stops at
+        MAX_OUTPUT items, whatever consumes it (| list, | join, a loop)."""
+        if isinstance(result, (str, bytes, list, tuple, dict)) or not hasattr(result, "__next__"):
+            return result
+
+        def items():
+            for i, x in enumerate(result):
+                if i % 256 == 0:
+                    self.loops.tick()
+                check_estimate(i)
+                yield x
+
+        return items()
+
+
+def _size_guard(name: str, f, env: Sandbox):
+    """Filters, like calls: no width or result beyond MAX_OUTPUT ('a' | center(10**9), '%9999999999d' | format),
+    estimated before the work when the filter expands its input (join, replace, indent, wordwrap, batch, slice)."""
+
+    @functools.wraps(f)  # keeps jinja_pass_arg
+    def guarded(*a, **k):
+        values = [*a[1 if getattr(f, "jinja_pass_arg", None) else 0 :]]  # not the env/context argument
+        v, rest = (values[0] if values else None), values[1:]
+        env.loops.tick()  # map/select call a filter per item: the deadline sees each one
+        if name == "center":
+            check_widths((*rest, *k.values()))
+        elif name == "indent":
+            width = rest[0] if rest else k.get("width", 4)
+            check_widths([width])
+            pad = len(width) if isinstance(width, str) else width if isinstance(width, int) else 0
+            check_estimate(_strlen(v) + _lines(v) * pad)
+        elif name == "format" and isinstance(v, str):
+            check_format(v, rest, k)
+        elif name == "join":
+            if v is not None and not isinstance(v, (str, list, tuple, dict, SafeRange)):
+                v = env.materialized(v)  # a generator (map, select …): drawn, bounded, then estimated
+                a = (*a[: len(a) - len(values)], v, *rest)
+            check_estimate(join_size(rest[0] if rest else k.get("d", ""), v))
+        elif name == "replace" and len(rest) >= 2:
+            check_estimate(replace_size(v, *rest[:3], **({"count": k["count"]} if "count" in k else {})))
+        elif name == "wordwrap":
+            width = rest[0] if rest else k.get("width", 79)
+            wrap = rest[2] if len(rest) > 2 else k.get("wrapstring") or "\n"
+            if isinstance(width, int) and isinstance(wrap, str):
+                check_estimate(_strlen(v) + (_strlen(v) // max(1, width) + 1) * len(wrap))
+        elif name == "batch":
+            count = rest[0] if rest else k.get("linecount", 0)
+            fill = rest[1] if len(rest) > 1 else k.get("fill_with")
+            if fill is not None:
+                check_widths([count])  # the last batch is padded to `count` items
+        elif name == "slice":
+            count = rest[0] if rest else k.get("slices", 0)
+            if isinstance(count, int) and count > MAX_ITER:
+                raise SecurityError("M313", f"| slice into more than {MAX_ITER} parts")
+        return check_size(env._bounded(f(*a, **k)))
+
+    return guarded
+
+
+class _BudgetNamespace(Namespace):
+    """namespace(): {% set ns.s = ns.s ~ ns.s %} in a loop doubles a string; it stops at MAX_OUTPUT."""
+
+    def __setitem__(self, name, value):
+        super().__setitem__(name, check_size(value))
 
 
 class Counter:
@@ -372,13 +772,18 @@ class Counter:
 
     def __str__(self):
         if self._first is None:
-            self._first = self._store._next_values(self._name, 1)[0]
+            with self._budget.paused():
+                self._first = self._store._next_values(self._name, 1)[0]
         return self._store.fmt(self._name, self._first)
 
     def take(self, n):
         n = int(n)
+        if n < 1:  # take(0) or take(-5) would give loop steps back
+            raise ValueError(f"template error: seq.{self._name}.take({n}): take at least 1 number")
         self._budget.spend(n)
-        return [self._store.fmt(self._name, v) for v in self._store._next_values(self._name, n)]
+        with self._budget.paused():
+            values = self._store._next_values(self._name, n)
+        return Taken(self._store.fmt(self._name, v) for v in values)
 
 
 class Seq:
@@ -694,8 +1099,6 @@ RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?",
 
 # ---------------------------------------------------------------- render
 
-from jinja2.utils import Namespace  # noqa: E402
-
 
 def pick_labels(template_labels: dict | None, user_labels: dict | None, loc: Locale) -> dict:
     """Template labels per language ({en: {...}, pt: {...}}), overridable by the document."""
@@ -769,7 +1172,7 @@ def render(
     loc, tz = choice.locale, resolve_tz(meta)
     values: list[Value] = []
     undefined_names: list[str] = []
-    budget = Budget()
+    budget = Budget(seconds=MAX_SECONDS)
     store = counters or CounterStore(meta.get("counters"), nudges)
 
     class RecUndefined(ChainableUndefined):  # {{ c.id }} / {{ row["x"] }} on something undefined: M130, not a crash
@@ -779,6 +1182,17 @@ def render(
             undefined_names.append(self._undefined_name or "?")
             return ""
 
+    lengths: list[int] = []  # of each value once its placeholders are resolved (they nest: {% set %} blocks)
+
+    def resolved_len(text: str) -> int:
+        """What text becomes in the document: a placeholder counts as its value, not as its few characters."""
+        n = len(text)
+        if PH_OPEN in text:
+            for m in PH_RE.finditer(text):
+                i = int(m.group(1))
+                n += (lengths[i] if i < len(lengths) else 0) - len(m.group(0))
+        return n
+
     def finalize(v):
         if isinstance(v, MdSafe):
             return str(v)
@@ -787,10 +1201,14 @@ def render(
             return ""
         if v is None:
             return ""
-        values.append(Value(str(v), isinstance(v, Tainted)))
+        text = str(v)
+        lengths.append(resolved_len(text))
+        values.append(Value(text, isinstance(v, Tainted)))
         return f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
 
-    env = ImmutableSandboxedEnvironment(
+    env = Sandbox(
+        budget,
+        Budget(MAX_CALLS, "macro calls"),
         finalize=finalize,
         undefined=RecUndefined,
         autoescape=False,
@@ -803,12 +1221,11 @@ def render(
     env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
         if name != "markdown":  # markdown already handles data (no images, no raw) and returns MdSafe
-            env.filters[name] = keep_taint(f)
+            f = keep_taint(f)
+        env.filters[name] = _size_guard(name, f, env)
 
     def safe_range(*args):
-        r = range(*args)
-        budget.spend(len(r))
-        return r
+        return SafeRange(range(*args), budget)
 
     now = current_time(tz)
     ctx = {k: v for k, v in meta.items() if k not in RESERVED}
@@ -819,7 +1236,7 @@ def render(
             "today": now.date(),
             "seq": Seq(store, budget),
             "range": safe_range,
-            "namespace": Namespace,
+            "namespace": _BudgetNamespace,
             "label": pick_labels(labels, meta.get("labels"), loc),
         }
     )
@@ -828,6 +1245,8 @@ def render(
         if k not in ctx or ctx[k] in (None, ""):
             try:
                 ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else d
+            except SecurityError:
+                raise
             except Exception as e:  # noqa: BLE001
                 raise ValueError(f"default of field '{k}': {e}") from e
 
@@ -835,7 +1254,7 @@ def render(
         tpl = env.from_string(body)
         out, size = [], 0
         for chunk in tpl.generate(ctx):
-            size += len(chunk)
+            size += resolved_len(chunk)  # {{ b }} 1000 times is 1000 times b, whatever the placeholders weigh
             if size > MAX_OUTPUT:
                 raise SecurityError("M313", "document grew beyond 2 MB while rendering")
             out.append(chunk)
@@ -843,6 +1262,14 @@ def render(
         raise ValueError(f"line {e.lineno + line_offset}: template syntax error: {e.message}") from e
     except JinjaSecurityError as e:
         raise SecurityError("M311", f"unsafe template operation: {e}") from e
+    except RecursionError:
+        raise SecurityError("M313", "a macro or a recursive loop calls itself too deeply") from None
+    except MemoryError:
+        raise SecurityError("M313", "the template needs more memory than any document") from None
+    except UndefinedError as e:  # {{ lipsum() }}: calling something that is not defined
+        raise ValueError(f"template error: {e.message}") from None
+    except ArithmeticError as e:  # {{ 1 / 0 }}, {{ 10.0 ** 400 }}
+        raise ValueError(f"template error: {e}") from None
     except TypeError as e:
         if "no loader" in str(e):
             raise SecurityError("M310", "templates cannot read files (include/import are disabled)") from e

@@ -345,6 +345,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--strict": ["--estrito", "--fail-on-warning", "--werror"],
     "--verbose": ["--detalhado", "--detail"],
     "--allow-net": ["--internet", "--net", "--network", "--online", "--web"],
+    "--sandbox": ["--untrusted", "--safe-mode", "--seguro", "--isolado", "--confined"],
     "--copies-from": ["--qty-column", "--quantidade", "--qtd", "--copies-column"],
     "--set-all": ["--set-every", "--global-set"],
     "--json": ["--machine"],
@@ -541,6 +542,11 @@ def make_parser():
         p.add_argument("--force", action="store_true", help="-o: replace files that already exist")
         p.add_argument("--page", metavar="N|N-M", help="PDF target: pages to print (default: all)")
         p.add_argument("--allow-net", action="store_true", help="allow https images (public hosts only)")
+        p.add_argument(
+            "--sandbox",
+            action="store_true",
+            help="a document from someone else: its images only from its own folder and image_dirs (config.toml)",
+        )
 
     p = _cmd(
         sub,
@@ -618,6 +624,7 @@ def make_parser():
     p.add_argument("target", nargs="?", help="file to edit (created if missing); none = a new draft")
     p.add_argument("--template", help="start from a template (fields prefilled)")
     p.add_argument("--set", action="append", metavar="KEY=VALUE")
+    p.add_argument("--sandbox", action="store_true", help="images only from the document folder and image_dirs")
     p = _cmd(
         sub,
         "status",
@@ -959,6 +966,10 @@ def main(argv=None) -> int:
     if cmd in NO_JSON and getattr(args, "json", False):  # said, never ignored in silence (it also muted warnings)
         err(f"note: --json does nothing in bobina {cmd}: it writes no data (bobina check --json for the problems)")
         args.json = False
+    if any(getattr(a, "sandbox", False) for a in (args, *(getattr(args, "chain", None) or []))):
+        from ..fileio import limit_memory
+
+        limit_memory()  # untrusted input: a hard ceiling under bobina's own size checks
     try:
         code = args.func(args) or OK
         if getattr(args, "json", False) and not json_written() and code in (OK, LEFT_OUT):
@@ -984,3 +995,13 @@ def main(argv=None) -> int:
     except KeyboardInterrupt:
         err("interrupted")
         return 130
+    except MemoryError:
+        from ..fileio import memory_limit
+        from ..nudges import Nudge
+        from .common import render_problems, stopped
+
+        ceiling = memory_limit()
+        why = f"the {ceiling // 1024**3} GB allowed for --sandbox" if ceiling else "the memory of this machine"
+        msg = f"the document needs more than {why}: nothing was printed"
+        err("\n".join(render_problems([Nudge("M313", msg)], stopped())))
+        return SECURITY

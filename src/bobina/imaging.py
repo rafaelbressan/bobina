@@ -16,7 +16,9 @@ DITHERS = {"floyd-steinberg": "fs", "fs": "fs", "atkinson": "atkinson", "bayer":
 RASTER_FORMATS = ["PNG", "JPEG", "GIF", "BMP", "WEBP", "TIFF"]  # no EPS/PS: Pillow would run Ghostscript
 
 
-def open_image(src: str, base_dir: str, *, width: int | None = None, page: int = 1, allow_net: bool = False):
+def open_image(
+    src: str, base_dir: str, *, width: int | None = None, page: int = 1, allow_net: bool = False, confine=None
+):
     """Opens a photo, a PDF page or an SVG (rendered at `width` dots). Above MAX_IMAGE_PIXELS a raster is
     refused (Pillow alone only warns below 2x the limit). info['bobina.kind'|'bobina.host'] tell the caller
     what it got. Raises sources.ImageError."""
@@ -24,7 +26,7 @@ def open_image(src: str, base_dir: str, *, width: int | None = None, page: int =
 
     from . import sources
 
-    s = sources.load(src, base_dir, allow_net=allow_net)
+    s = sources.load(src, base_dir, allow_net=allow_net, confine=confine)
     if s.kind == "pdf":
         im = sources.render_pdf(s.data, width or 384, page)
     elif s.kind == "svg":

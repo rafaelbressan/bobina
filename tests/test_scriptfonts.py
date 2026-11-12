@@ -349,6 +349,86 @@ def test_downloads_off_is_read_once_per_document(monkeypatch):
     assert len(calls) == 1
 
 
+# -- the downloader itself, without a network: a fake opener stands in for GitHub --------------------------
+
+
+class FakeHTTP:
+    def __init__(self, body: bytes, status: int = 200):
+        self.body, self.status = body, status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self, n):
+        chunk, self.body = self.body[:n], self.body[n:]
+        return chunk
+
+
+def fake_opener(monkeypatch, answer):
+    seen = {}
+
+    def build_opener(*handlers):
+        seen["handlers"] = handlers
+
+        class Opener:
+            def open(self, request, timeout):
+                seen["url"] = request.full_url
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+
+        return Opener()
+
+    monkeypatch.setattr(scriptfonts.urllib.request, "build_opener", build_opener)
+    return seen
+
+
+def test_the_real_fetch_stops_at_the_pinned_size(monkeypatch):
+    url = scriptfonts.PACKS["thai"].url
+    fake_opener(monkeypatch, FakeHTTP(b"x" * 300_000))
+    with pytest.raises(scriptfonts.FontDownloadError, match="larger than pinned"):
+        real_fetch(url, 100_000)
+    seen = fake_opener(monkeypatch, FakeHTTP(b"x" * 1000))
+    assert real_fetch(url, 1000) == b"x" * 1000 and seen["url"] == url
+
+
+def test_the_real_fetch_follows_no_redirect(monkeypatch):
+    import urllib.error
+
+    url = scriptfonts.PACKS["thai"].url
+    moved = urllib.error.HTTPError(url, 302, "Found", {"Location": "https://example.com/f.ttf"}, None)
+    seen = fake_opener(monkeypatch, moved)
+    with pytest.raises(scriptfonts.FontDownloadError, match="answered 302"):
+        real_fetch(url, 1000)
+    (handler,) = seen["handlers"]
+    assert handler.redirect_request(None, None, 302, "Found", {}, "https://example.com/f.ttf") is None
+
+
+def test_a_failed_write_leaves_no_font_and_no_partial_file(fake_pack, monkeypatch, tmp_path):
+    def fail(src, dst):
+        raise OSError(28, "No space left on device")
+
+    from bobina import fileio
+
+    monkeypatch.setattr(fileio.os, "replace", fail)  # the last step of an atomic write
+    with pytest.raises(scriptfonts.FontDownloadError, match="cannot write"):
+        scriptfonts.download(scriptfonts.PACKS["thai"])
+    assert [p for p in (tmp_path / "data" / "fonts").rglob("*") if p.is_file()] == []  # no part, no temporary
+    assert scriptfonts.installed(scriptfonts.PACKS["thai"]) is None
+
+
+def test_a_font_changed_on_disk_is_not_used(fake_pack, tmp_path):
+    pack = scriptfonts.PACKS["thai"]
+    path = scriptfonts.download(pack)
+    assert scriptfonts.installed(pack) == path
+    path.write_bytes(b"\0" * pack.size)  # same size, other bytes
+    scriptfonts._verified.cache_clear()
+    assert scriptfonts.installed(pack) is None
+
+
 def test_packs_needed_by_script():
     assert [p.id for p in scriptfonts.packs_needed("日本語のテキスト and สวัสดี")] == ["japanese", "thai"]
     assert [p.id for p in scriptfonts.packs_needed("中文", "ko")] == ["korean"]

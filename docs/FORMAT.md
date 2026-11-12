@@ -487,6 +487,7 @@ Nudges:
 | `I105` | warning | PDF/SVG support not installed |
 | `I106` | warning | network source refused (private address, redirect, type, size) |
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
+| `I108` | warning | image outside its folder and `image_dirs` (`--sandbox`, MCP) |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |

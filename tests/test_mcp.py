@@ -86,7 +86,7 @@ def test_the_tools_and_print_is_not_read_only():
 def test_check_gives_the_json_of_check_and_its_exit_code():
     r = call("check", {"text": "# Market\n- [ ] milk"})
     assert not r.is_error
-    assert texts(r)[0] == "bobina check - --json\nexit 0 (ok)"
+    assert texts(r)[0] == "bobina check - --json --sandbox\nexit 0 (ok)"  # images: its folder and image_dirs
     assert output(r)["stats"]["profile"] == "mtp-ii-58"
 
 
