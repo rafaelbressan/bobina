@@ -37,7 +37,7 @@ from .common import (
     strict_hits,
 )
 
-DEFAULT_STYLE = "labels"  # the labels family, decided 11/11 (the exact variant is still to be chosen)
+DEFAULT_STYLE = "labels-underline"  # D1: a short mark under each name (chosen 11/11)
 COMMANDS = {  # slash command -> what it does (completion and /help)
     "/print": "print the last answer, if it is not on paper yet (p for short)",
     "/again": "print another copy of the last answer",

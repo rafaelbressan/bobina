@@ -14,7 +14,7 @@
   then cut with "…" (said in the terminal). A note at each metre of paper. The ticket's problems and the roll
   check (P101/P102) are said before printing.
 - Layouts (`--layout`, `chat_layout`, `/strip`, `/tickets`): one strip, or one ticket per answer fed to the tear
-  bar. Styles (`--style`, `chat_style`; default `labels`): your name (`--name`, `chat_name`; "you") and ✦ with
+  bar. Styles (`--style`, `chat_style`; default `labels-underline`): your name (`--name`, `chat_name`; "you") and ✦ with
   the AI's name over each message, with short marks by each speaker (`labels-underline`, `labels-dashes`,
   `labels-hook`), a small mark between exchanges (`labels-dots`), or a bubble (`labels-outline`, `labels-filled`);
   earlier looks too (`labels-ruled`, `labels-exchange`, `bubbles`, `boxes`, `plain`…). `--questions` (`chat_questions`) prints your messages too, on the right, about 3 lines at most: a longer

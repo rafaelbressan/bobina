@@ -21,7 +21,7 @@ echo "a haiku about paper" | bobina chat --json --dry-run
 | `--ai NAME`, `--model MODEL` | the AI and its model for this run | `ai`, `ai_model` |
 | `--printer NAME` | where answers print (shown in the welcome block and the status line) | `default_printer` |
 | `--layout strip\|tickets` | one strip (default), or one ticket per answer fed to the tear bar | `chat_layout` |
-| `--style STYLE` | how the two speakers look on paper (below); default `labels` | `chat_style` |
+| `--style STYLE` | how the two speakers look on paper (below); default `labels-underline` | `chat_style` |
 | `--name NAME` | your name over your messages, on paper and on screen (default "you") | `chat_name` |
 | `--questions` | print your messages too, on the right (about 3 lines at most; never cut: a longer one is not sent) | `chat_questions` |
 | `--limit LENGTH` | paper per answer: `10cm` (default), `100mm`, `4in` (a bare number is cm); 1.5 cm to 1 m | `chat_limit` |
@@ -70,7 +70,7 @@ a `.bob.md` document (no templates, raw bytes, images or files).
 
 Styles keep the conversation reading as one: marks are short and sit by their speaker (right for you, left
 for the AI), never across the paper. The `labels` family puts your name and a person icon over your message and ✦
-and the AI's name over the answer; then: `labels-underline` (a short solid mark under each name),
+and the AI's name over the answer; then: `labels-underline` (the default: a short solid mark under each name),
 `labels-dashes` (a short dashed one), `labels-dots` (no marks; a small "· · ·" in the middle between exchanges),
 `labels-outline` (your message in a framed bubble under your name), `labels-filled` (a black bubble, the AI's name
 with a short dotted mark), `labels-hook` (a short mark with a hook under each name, "— ✦ —" between exchanges).
