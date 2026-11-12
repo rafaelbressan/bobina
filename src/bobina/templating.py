@@ -1220,7 +1220,9 @@ def render(
         def __str__(self):
             if self._undefined_exception is JinjaSecurityError:
                 self._fail_with_undefined_error()
-            undefined_names.append(self._undefined_name or "?")
+            name = self._undefined_name or "?"
+            group = next((k for k, v in (fields or {}).items() if v is self._undefined_obj and isinstance(v, dict)), "")
+            undefined_names.append(f"{group}.{name}" if group else name)  # {{ a.nope }}: 'a.nope', not 'nope'
             return ""
 
     lengths: list[int] = []  # of each value once its placeholders are resolved (they nest: {% set %} blocks)
@@ -1321,6 +1323,9 @@ def render(
         if name in quiet_names:  # already reported as an empty required field (M131): one cause, one warning
             continue
         hint = "set it in front matter, --set or --data"
+        under = [g for g in given if "." in g and g.split(".", 1)[1] == name.rpartition(".")[2] and g != name]
+        if under:  # the column is there, under a source's name
+            hint = f"write {{{{ {under[0]} }}}}" + (f" (or {', '.join(under[1:3])})" if len(under) > 1 else "")
         if given:
             hint += "; the data and --set give: " + ", ".join(given[:12]) + (" …" if len(given) > 12 else "")
         nudges.add("M130", f"variable '{name}' is not defined", suggestion=hint)

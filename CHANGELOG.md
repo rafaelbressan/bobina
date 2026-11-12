@@ -66,6 +66,9 @@
 - `bobina init` with a test file or a command printer no longer says `P402`: the summary says the default profile
   is taken because such a printer has no model. `init --help` lists every form `--printer` takes.
 - `--problems` help says where they go: always stderr, stdout keeps the command's own output.
+- Fixed: a header with a space in a named source (`--data a=…`, `--join b=…`) is reachable as `{{ a.unit_price }}`,
+  as the bare `{{ unit_price }}` is (it printed empty). `M130` names the source (`a.nope`) and points a bare name
+  to the source that has it.
 
 ## 0.1.2 — 2026-11-11
 
