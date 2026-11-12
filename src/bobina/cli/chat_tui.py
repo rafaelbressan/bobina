@@ -25,27 +25,14 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output.color_depth import ColorDepth
-from prompt_toolkit.styles import Style
+from prompt_toolkit.styles import DynamicStyle, Style
 from prompt_toolkit.validation import ValidationError, Validator
 
 from .. import ai
 from ..chat import BOLD
 from .chat import COMMANDS, Cancelled
+from .chat_theme import Theme, build
 
-STYLE = Style.from_dict({
-    "frame": "#5f87af",
-    "title": "bold",
-    "you": "bold #00afaf",
-    "you-text": "#87d7d7",
-    "ai": "bold #d787ff",
-    "dim": "#808080",
-    "note": "#d7af5f",
-    "counter": "#808080",
-    "over": "bold #ff5f5f",
-    "bottom-toolbar": "noreverse",
-    "bottom-toolbar.text": "#808080",
-    "validation-toolbar": "bg:#5f0000 #ffffff",
-})  # fmt: skip
 SPINNER = "◐◓◑◒"
 
 
@@ -96,9 +83,8 @@ class Limit(Validator):
 class TerminalUI:
     """The chat screen: what Session shows and reads (welcome, read, answer, note, dim, wait, choose_ai)."""
 
-    def __init__(self, color: bool = True):
-        self.color = color and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
-        self.depth = None if self.color else ColorDepth.DEPTH_1_BIT
+    def __init__(self, theme: Theme | None = None):
+        self.set_theme(theme or build("dark"))
         self.app: Application | None = None
         self.buffer: Buffer | None = None
         self.error = ""
@@ -122,8 +108,14 @@ class TerminalUI:
                 return hit[0]
             self.note(f"1 to {len(ready)}, or a name above")
 
+    def set_theme(self, theme: Theme) -> None:
+        """The colours from now on (the input box and status line too: they read the style each time they draw)."""
+        self.theme = theme
+        self.style = Style.from_dict(theme.styles())
+        self.depth = None if theme.color else ColorDepth.DEPTH_1_BIT
+
     def out(self, parts: list[tuple[str, str]]) -> None:
-        print_formatted_text(FormattedText(parts), style=STYLE, color_depth=self.depth)
+        print_formatted_text(FormattedText(parts), style=self.style, color_depth=self.depth)
 
     def welcome(self, lines: list[str]) -> None:
         w = min(width(), 100)
@@ -190,7 +182,7 @@ class TerminalUI:
                 return [("class:over", " " + self.error)]
             s = session.status()
             w = width()
-            return [("class:dim", " " + (s if len(s) <= w - 2 else s[: w - 3] + "…"))]
+            return [("class:status", " " + (s if len(s) <= w - 2 else s[: w - 3] + "…"))]
 
         def counter_width():
             return D.exact(sum(len(t) for _, t in counter()))
@@ -209,7 +201,8 @@ class TerminalUI:
         root = FloatContainer(body, floats=[Float(xcursor=True, ycursor=True, content=CompletionsMenu(max_height=3))])
         self.app = Application(
             layout=Layout(root, focused_element=buf), key_bindings=merge_key_bindings([load_key_bindings(), keys]),
-            style=STYLE, color_depth=self.depth, full_screen=False, erase_when_done=True, mouse_support=False,
+            style=DynamicStyle(lambda: self.style), color_depth=lambda: self.depth, full_screen=False,
+            erase_when_done=True, mouse_support=False,
         )  # fmt: skip
         return self.app
 
@@ -238,7 +231,7 @@ class TerminalUI:
     def answer(self, who: str, text: str) -> None:
         cols = width() - 1
         wrapped = "\n".join(textwrap.fill(p, cols) if p.strip() else "" for p in text.split("\n"))
-        self.out([("class:ai", f"✦ {who}\n"), *rich_text(wrapped), ("", "\n")])
+        self.out([("class:ai", f"✦ {who}\n"), *rich_text(wrapped, "class:ai-text"), ("", "\n")])
 
     def note(self, text: str) -> None:
         self.out([("class:note", f"  › {text}")])

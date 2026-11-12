@@ -43,25 +43,100 @@ def load() -> dict:
         raise fileio.StateError(f"{p} is not valid TOML ({e})") from e
 
 
+ESCAPES = {"\\": "\\\\", '"': '\\"', "\b": "\\b", "\t": "\\t", "\n": "\\n", "\f": "\\f", "\r": "\\r"}
+
+
+def _toml_string(s: str) -> str:
+    """A TOML basic string: quotes, backslashes, newlines and every control character escaped."""
+    out = []
+    for ch in s:
+        if ch in ESCAPES:
+            out.append(ESCAPES[ch])
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
 def _toml_value(v) -> str:
+    """One value as TOML. A value TOML cannot hold is a ValueError (the file is then not rewritten)."""
+    import datetime as dt
+    import math
+
     if isinstance(v, bool):
         return "true" if v else "false"
-    if isinstance(v, (int, float)):
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if math.isnan(v):
+            return "nan"
+        if math.isinf(v):
+            return "inf" if v > 0 else "-inf"
         return repr(v)
-    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(v, str):
+        return _toml_string(v)
+    if isinstance(v, (dt.datetime, dt.date, dt.time)):
+        return v.isoformat()
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    if isinstance(v, dict):  # inside an array: an inline table
+        return "{" + ", ".join(f"{_key(k)} = {_toml_value(x)}" for k, x in v.items()) + "}"
+    raise ValueError(f"a {type(v).__name__} value cannot be written as TOML")
+
+
+def _key(k: str) -> str:
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else _toml_string(k)
+
+
+def _is_tables(v) -> bool:
+    return isinstance(v, list) and bool(v) and all(isinstance(x, dict) for x in v)
+
+
+def _table(lines: list[str], name: str, table: dict, array: bool = False) -> None:
+    """[name] (or [[name]]) with its values, then its own tables and arrays of tables: every table is kept."""
+    values = {k: v for k, v in table.items() if not isinstance(v, dict) and not _is_tables(v)}
+    nested = any(isinstance(v, dict) or _is_tables(v) for v in table.values())
+    if array or values or not nested:
+        lines += ["", f"[[{name}]]" if array else f"[{name}]"]
+        lines += [f"{_key(k)} = {_toml_value(v)}" for k, v in values.items()]
+    for k, v in table.items():
+        if isinstance(v, dict):
+            _table(lines, f"{name}.{_key(k)}", v)
+        elif _is_tables(v):
+            for item in v:
+                _table(lines, f"{name}.{_key(k)}", item, array=True)
+
+
+def dumps(cfg: dict) -> str:
+    """The config as TOML. It must read back as the same config, or this is a ValueError: a rewrite never
+    leaves a file that does not load, nor one that says something else."""
+    lines = ["# bobina configuration (written by bobina; comments are not preserved)"]
+    for k, v in cfg.items():
+        if not isinstance(v, dict) and not _is_tables(v):
+            lines.append(f"{_key(k)} = {_toml_value(v)}")
+    for k, v in cfg.items():
+        if isinstance(v, dict):
+            _table(lines, _key(k), v)
+        elif _is_tables(v):
+            for item in v:
+                _table(lines, _key(k), item, array=True)
+    text = "\n".join(lines) + "\n"
+    try:
+        same = tomllib.loads(text) == cfg
+    except tomllib.TOMLDecodeError:
+        same = False
+    if not same:
+        raise ValueError("the config would not read back the same")
+    return text
 
 
 def _write(cfg: dict) -> None:
-    lines = ["# bobina configuration (written by bobina; comments are not preserved)"]
-    for k, v in cfg.items():
-        if not isinstance(v, dict):
-            lines.append(f"{k} = {_toml_value(v)}")
-    for name, pr in (cfg.get("printers") or {}).items():
-        lines.append("")
-        lines.append(f"[printers.{name}]")
-        for k, v in pr.items():
-            lines.append(f"{k} = {_toml_value(v)}")
-    fileio.atomic_write(path(), "\n".join(lines) + "\n")  # a reader never sees half a config
+    try:
+        text = dumps(cfg)
+    except ValueError as e:
+        raise fileio.StateError(f"{path()} was not rewritten: {e}; change it by hand") from None
+    fileio.atomic_write(path(), text)  # a reader never sees half a config
 
 
 def save(cfg: dict) -> None:

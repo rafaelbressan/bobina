@@ -28,8 +28,21 @@ BRAILLE = [
 TEAR_MARK = " ⟶ "
 
 
+def colors_off(env=None, flag: bool = False) -> str:
+    """Why there must be no colours ("" when colours may be used): NO_COLOR, --no-color (flag), TERM=dumb. One rule
+    for the previews and the chat screen."""
+    env = os.environ if env is None else env
+    if env.get("NO_COLOR"):
+        return "NO_COLOR is set"
+    if flag:
+        return "--no-color"
+    if env.get("TERM") == "dumb":
+        return "TERM=dumb"
+    return ""
+
+
 def use_color(stream=sys.stdout) -> bool:
-    return stream.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+    return stream.isatty() and not colors_off()
 
 
 def braille(im: Image.Image, cell=(12, 24)) -> list[str]:
