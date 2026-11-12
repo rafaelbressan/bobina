@@ -1201,7 +1201,8 @@ def printer_status(pr, quiet=False, connect_timeout: float = 15) -> dict | None:
     except (OSError, transport.PrinterUnreachable) as e:
         if quiet:
             return None
-        raise Fail(UNREACHABLE, f"printer unreachable: {e}", problem="E402") from e
+        hint = getattr(e, "hint", "")
+        raise Fail(UNREACHABLE, f"printer unreachable: {e}" + (f"\n→ {hint}" if hint else ""), problem="E402") from e
     return decode_status(r)
 
 
@@ -1267,17 +1268,17 @@ def do_send(args, res_data: bytes, prof, check_status=True, length_mm: float = 0
     except transport.PrinterBusy as e:
         hint = "nothing was sent; to wait longer, add busy_timeout = SECONDS to the printer in config.toml"
         raise Fail(UNREACHABLE, f"{e}\n→ {hint}", problem="E405") from e
-    except transport.PrinterUnreachable as e:
-        raise Fail(UNREACHABLE, str(e), problem="E402") from e
+    except transport.PrinterUnreachable as e:  # the printer's name, what failed, then what to do
+        raise Fail(UNREACHABLE, f"printer '{name}': {e}" + (f"\n→ {e.hint}" if e.hint else ""), problem="E402") from e
     except transport.SendFailed as e:  # part of the job may be on paper
         if length_mm and e.sent and counts_paper(pr):
             _count_paper(name, length_mm * min(1.0, e.sent / max(1, len(res_data))))
-        f = Fail(UNREACHABLE, f"{e}{_why_it_stopped(pr, prof)}\n→ part of the job may have printed: check the paper"
-                 " before printing again", problem="E402")  # fmt: skip
+        hint = "part of the job may have printed: check the paper before printing again" + (e.hint and f"; {e.hint}")
+        f = Fail(UNREACHABLE, f"printer '{name}': {e}{_why_it_stopped(pr, prof)}\n→ {hint}", problem="E402")
         f.partial = e.sent > 0
         raise f from e
     except (OSError, subprocess.SubprocessError) as e:
-        raise Fail(UNREACHABLE, f"sending failed: {e}", problem="E402") from e
+        raise Fail(UNREACHABLE, f"printer '{name}': sending failed: {e}", problem="E402") from e
     if length_mm and counts_paper(pr):
         _count_paper(name, length_mm)
     return name

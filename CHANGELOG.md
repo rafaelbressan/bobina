@@ -44,6 +44,11 @@
 - Fixed: `>` quotes wrap inside their bar `│ `, nested quotes and quotes in a list item too: before, each line was
   wrapped to the full paper width and the bar pushed its end past the edge. A quote in a raster font now has its
   bar too (drawn; white across an inverted band).
+- Fixed: a printer that cannot be reached says which printer and why (`E402`): a printer through a command, its
+  exit code and the last lines it wrote on stderr (3 at most, without colours), with what to try: ssh's own failure
+  (exit 255) asks whether that machine is on, with `ssh … true` to try; a failure on the other side points to
+  `ssh … bobina status`. Before: `command failed (1):` and nothing else. Bluetooth and device printers say what to
+  check too.
 
 ## 0.1.2 — 2026-11-11
 

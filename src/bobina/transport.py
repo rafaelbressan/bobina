@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import os
 import re
 import shlex
 import socket
@@ -16,13 +17,94 @@ import time
 class SendFailed(Exception):
     """The link failed after part of the job was sent: some of it may be on paper."""
 
-    def __init__(self, message: str, sent: int):
+    def __init__(self, message: str, sent: int, hint: str = ""):
         super().__init__(message)
         self.sent = sent
+        self.hint = hint  # what to do, when the transport knows better than "check the paper"
 
 
 class PrinterUnreachable(Exception):
-    pass
+    def __init__(self, message: str, hint: str = ""):
+        super().__init__(message)
+        self.hint = hint  # what to do (shown after →)
+
+
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")  # colours, window titles
+STDERR_LINES, STDERR_CHARS = 3, 160
+
+
+def stderr_tail(raw: bytes | str | None) -> str:
+    """The last lines a command wrote on stderr, made fit for one problem line: no colours or control characters,
+    at most STDERR_LINES lines of STDERR_CHARS characters, joined by ' | '. Only what the command itself said."""
+    if isinstance(raw, bytes):
+        raw = raw[-8192:].decode(errors="replace")
+    lines = [re.sub(r"[\x00-\x1f\x7f-\x9f]", "", ln).strip() for ln in ANSI.sub("", raw or "").splitlines()]
+    lines = [ln if len(ln) <= STDERR_CHARS else ln[: STDERR_CHARS - 1] + "…" for ln in lines if ln]
+    return " | ".join(lines[-STDERR_LINES:])
+
+
+SSH_VALUE_OPTIONS = set("BbcDEeFIiJLlmOoPpQRSWw")  # ssh options that take a value (-p 22, -i KEY, -o X=Y)
+
+
+def ssh_target(cmd: list[str]) -> tuple[str, str, list[str]] | None:
+    """`ssh [options] HOST [command]` -> (HOST, the command up to HOST as typed, the remote command), else None."""
+    if not cmd or os.path.basename(cmd[0]).lower() not in ("ssh", "ssh.exe"):
+        return None
+    i = 1
+    while i < len(cmd):
+        a = cmd[i]
+        if a == "--":
+            i += 1
+            break
+        if not a.startswith("-") or a == "-":
+            break
+        for k, letter in enumerate(a[1:], 1):
+            if letter in SSH_VALUE_OPTIONS:
+                i += k == len(a) - 1  # -p 22: the value is the next word; -p22: in this one
+                break
+        i += 1
+    if i >= len(cmd):
+        return None
+    return cmd[i], " ".join(_shell_word(w) for w in cmd[: i + 1]), cmd[i + 1 :]
+
+
+def _shell_word(w: str) -> str:
+    """A word for a command to copy: quoted only when the shell would split or expand it (~/.ssh/key stays bare)."""
+    return w if re.fullmatch(r"[^\s'\"\\$`;&|<>()*?!#{}\[\]]+", w) else shlex.quote(w)
+
+
+def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
+    """A printer command that exited with an error -> what failed (its exit code and the end of its stderr) and
+    what to try. ssh is read: 255 is ssh itself (the machine did not answer), anything else came from the other
+    side. `typed`: the command as in config.toml (what the user typed, so nothing new is shown)."""
+    cmd = shlex.split(typed)
+    said = stderr_tail(stderr) or "nothing on stderr"
+    ssh = ssh_target(cmd)
+    how = f"was stopped by signal {-code}" if code < 0 else f"exited with {code}"
+    if ssh:
+        host, reach, remote = ssh
+        machine = host.rpartition("@")[2]
+        there = (remote[0].split() or ["?"])[0] if remote else "?"  # ssh h bobina send, or ssh h 'bobina send'
+        if code == 255:
+            return PrinterUnreachable(
+                f"ssh could not reach {machine} (exit 255): {said}",
+                f"is {machine} on and on the network? Try it by hand: {reach} true",
+            )
+        if code == 127:
+            return PrinterUnreachable(
+                f"{there} was not found on {machine} (exit 127): {said}",
+                f"is it installed there, in the PATH ssh gives it? Try: {reach} command -v {shlex.quote(there)}",
+            )
+        hint = (
+            f"is the printer of {machine} on and in range? {reach} bobina status asks it"
+            if "bobina" in os.path.basename(there)
+            else f"{machine} answered; run the command there by hand to see why"
+        )
+        return PrinterUnreachable(f"the command on {machine} {how}: {said}", hint)
+    by_hand = f"Run it by hand to see why: {typed}" if len(typed) <= 100 else "Run it by hand (bobina printer list)"
+    if code == 127:
+        return PrinterUnreachable(f"the command {how} (a program was not found): {said}", f"is it installed? {by_hand}")
+    return PrinterUnreachable(f"the command {how}: {said}", f"is the printer behind it on? {by_hand}")
 
 
 def no_bluetooth_sockets() -> str:
@@ -49,6 +131,7 @@ def _bt_connect(mac: str, channel: int, timeout: float = 15):
     return s
 
 
+BT_HINT = "is it on (steady yellow LED) and in range?"
 STATUS_QUERIES = [b"\x10\x04\x01", b"\x10\x04\x02", b"\x10\x04\x03", b"\x10\x04\x04"]
 
 
@@ -61,7 +144,7 @@ def _connect(mac: str, channel: int, log=None, full: bool = True, timeout: float
     except OSError as e:
         busy = e.errno == errno.EBUSY
         if not (full or busy):
-            raise PrinterUnreachable(f"printer {mac} unreachable: {e}. Is it on (steady yellow LED)?") from e
+            raise PrinterUnreachable(f"{mac} did not answer: {e}", BT_HINT) from e
         if log:
             log(f"connection failed ({e}); recovering Bluetooth…", file=sys.stderr)
         if busy:  # stale ACL link right after another connection (never another bobina job: the lock is held)
@@ -72,7 +155,7 @@ def _connect(mac: str, channel: int, log=None, full: bool = True, timeout: float
         try:
             return _bt_connect(mac, channel, timeout)
         except OSError as e2:
-            raise PrinterUnreachable(f"printer {mac} unreachable: {e2}. Is it on (steady yellow LED)?") from e2
+            raise PrinterUnreachable(f"{mac} did not answer: {e2}", BT_HINT) from e2
 
 
 def _ask(s, q: bytes, timeout: float = 1.5):
@@ -294,7 +377,11 @@ def _write_device(path: str, data: bytes, timeout: float, progress: dict | None 
         raise SendFailed(f"{path} did not take the whole job in {timeout:.0f} s (printer off or offline?)", len(data))
     if "err" in box:
         e = box["err"]
-        raise PrinterUnreachable(f"cannot write to {path}: {e.strerror or e}") from e
+        hint = {
+            errno.ENOENT: "is the printer plugged in and on? The device appears when it is",
+            errno.EACCES: "this user may not write to it (on Linux: the lp group, or dialout for a serial port)",
+        }.get(e.errno, "is the printer plugged in and on?")
+        raise PrinterUnreachable(f"cannot write to {path}: {e.strerror or e}", hint) from e
 
 
 def query(
@@ -365,15 +452,18 @@ def _send(data: bytes, printer: dict, profile, log=print, precheck=None, length_
         try:
             r = subprocess.run(cmd, input=data, capture_output=True, timeout=timeout)
         except FileNotFoundError:
-            raise PrinterUnreachable(f"command not found: {cmd[0]}") from None
-        except subprocess.TimeoutExpired:
+            raise PrinterUnreachable(f"command not found: {cmd[0]}", f"is {cmd[0]} installed, in the PATH?") from None
+        except subprocess.TimeoutExpired as e:
+            said = stderr_tail(e.stderr)
             raise SendFailed(
-                f"the command did not finish in {timeout:.0f} s (printer timeout = …)", len(data)
+                f"the command did not finish in {timeout:g} s" + (f": {said}" if said else ""),
+                len(data),
+                "for a long job, raise timeout = SECONDS for the printer in config.toml",
             ) from None
         except OSError as e:
             raise PrinterUnreachable(f"cannot run {cmd[0]}: {e.strerror}") from e
         if r.returncode:
-            raise PrinterUnreachable(f"command failed ({r.returncode}): {r.stderr.decode(errors='replace').strip()}")
+            raise command_failed(printer["command"], r.returncode, r.stderr)
     else:
         bluetooth(
             data,

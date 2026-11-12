@@ -83,7 +83,8 @@ FIX = {
     "E304": "Use a value in the range or format the message gives.",
     "E305": "Split the job with --rows: at most 1000 labels and 100 copies per job.",
     "E401": "bobina printer add NAME ADDRESS, or --printer with a name from bobina printer list.",
-    "E402": "Is the printer on and in range? Look at the paper before printing again: part of the job may be there.",
+    "E402": "Is the printer on and in range? Through a command (ssh): is that machine on? The message names the printer"
+    " and what the command said. Look at the paper before printing again: part of the job may be there.",
     "E403": "Load paper or close the cover (bobina status); a printer without a cover sensor reports both as no paper.",
     "E404": "This printer's transport (a file or a command) cannot do that; printing works the same.",
     "E405": "Wait for the other job, or raise busy_timeout for the printer in config.toml.",
