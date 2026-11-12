@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from . import imaging, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
@@ -24,6 +24,8 @@ SPACES = str.maketrans({c: " " for c in "\u00a0\u2007\u2009\u202f\u2002\u2003\u2
 CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # never let text carry printer commands
 SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
+QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
+QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 
 
 def is_wide(ch: str) -> bool:
@@ -90,6 +92,41 @@ class Layout:
         self._judged: set = set()
         lang = str(meta.get("locale") or meta.get("lang") or "")
         self.scripts = scriptfonts.Resolver(nudges, lang)  # fonts for other scripts, downloaded once
+        self.bars: tuple[int, ...] = ()  # the column (at 1x) of the bar of each quote being laid out, outermost first
+
+    # ------------------------------------------------------------ quotes
+    def bars_in(self, gutter: int) -> list[int]:
+        """The quote bars that a row indented `gutter` columns (at 1x) has room for: only the quotes it is inside
+        of, never over its own text (a code's caption laid out at no indent in a quote gets none)."""
+        return [c for c in self.bars if c + QUOTE_GUTTER <= gutter]
+
+    def lead(self, cols: int, gutter: int | None = None) -> list[Cell]:
+        """`cols` blank cells for the start of a 1x line, with the bar │ of each quote it is inside of."""
+        cells = [Cell(" ") for _ in range(cols)]
+        for c in self.bars_in(cols if gutter is None else gutter):
+            cells[c] = Cell(QUOTE_BAR)
+        return cells
+
+    def draw_bars(self, im: Image.Image, gutter: int, ink: int, rtl: bool = False) -> Image.Image:
+        """The quote bars drawn into a row printed as an image, where the printer font draws │ in a 1x cell (right
+        to left: mirrored, on the side where the text starts). ink 0 is black; 255 white, across an inverted band."""
+        cw = self.p.cell[0]
+        stroke = max(2, int(self.p.get("raster.min_stroke_dots", 2)))
+        draw = ImageDraw.Draw(im)
+        for c in self.bars_in(gutter):
+            x = c * cw + cw // 2 - 1
+            x = im.width - x - stroke if rtl else x
+            draw.rectangle((x, 0, x + stroke - 1, im.height - 1), fill=ink)
+        return im
+
+    def view_with_bars(self, cells: list[Cell], gutter: int, rtl: bool = False) -> list[Cell]:
+        """What the terminal views show for a row printed as an image: its words after the bars (before them, right
+        to left), within the paper's columns."""
+        lead = self.lead(gutter)
+        if not any(c.ch == QUOTE_BAR for c in lead):
+            return cells
+        room = max(0, self.cols - gutter)
+        return [*cells[:room], *reversed(lead)] if rtl else [*lead, *cells[:room]]
 
     # ------------------------------------------------------------ helpers
     def text(self, s: str) -> str:
@@ -420,13 +457,19 @@ class Layout:
             toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl
         )
         view_rows = [
-            TextRow([Cell(ch) for ch in t[: self.cols]], (1, 1), "left" if align == "justify" else align, line)
+            TextRow(
+                self.view_with_bars([Cell(ch) for ch in t[: self.cols]], indent, rtl),
+                (1, 1),
+                "left" if align == "justify" else align,
+                line,
+            )
             for t in texts
         ]
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
             band.paste(im.convert("L"), (0, m))
+            band = self.draw_bars(band, indent, 0, rtl)  # black here: white once the band is inverted
             if px < int(self.p.get("raster.invert_min_px", 20)) or not bold:
                 self.n.add(
                     "F204",
@@ -436,7 +479,7 @@ class Layout:
                     "R2-12",
                 )
             return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows)]
-        return [BitmapRow(im, line, "text", view_rows)]
+        return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows)]
 
     def text_block(
         self,
@@ -517,6 +560,11 @@ class Layout:
         prefix = prefix or []
         pw = sum(2 if c.wide else 1 for c in prefix)
         advance = self.p.cell[0] * scale[0] + self.p.tracking_gap(tracking, scale[0])  # as the printer spaces them
+        gutter = indent  # columns at 1x: quote gutters and list indents
+        quoted = bool(self.bars_in(gutter))
+        drawn_bars = quoted and scale[0] > 1  # a 2x line cannot hold a 1x │: drawn into it as an image
+        if drawn_bars:  # the same gutter in wider columns: only as much as it takes, not 2x of it
+            indent = -(-indent // scale[0])
         if indent_dots:
             indent += indent_dots if indent_is_columns else round(indent_dots / advance)
         cap = self.W // advance - indent
@@ -532,7 +580,14 @@ class Layout:
         for i, lc in enumerate(lines):
             if align == "justify" and i < len(lines) - 1:
                 lc = _justify(lc, cap - pw)
-            lead = [Cell(" ")] * indent + (prefix if i == 0 else [Cell(" ")] * pw)
+            lead = (self.lead(indent, gutter) if not drawn_bars else [Cell(" ")] * indent) + (
+                prefix if i == 0 else [Cell(" ")] * pw
+            )
+            row_align = "left" if align == "justify" else align
+            if quoted and row_align != "left":  # centred in the room after the bar, never the bar with it
+                free = max(0, cap - pw - sum(2 if c.wide else 1 for c in lc))
+                lead += [Cell(" ")] * (free // 2 if row_align == "center" else free)
+                row_align = "left"
             cells_line = lead + lc
             reason = self.native_ok(cells_line)
             if reason.startswith("glyph"):
@@ -549,7 +604,7 @@ class Layout:
                 TextRow(
                     cells_line,
                     scale,
-                    "left" if align == "justify" else align,
+                    row_align,
                     line,
                     native=not reason,
                     reason=reason,
@@ -558,7 +613,19 @@ class Layout:
                 )
             )
         if attrs.has("invert"):
-            return [self.band(rows, line)]
+            band = self.band(rows, line)
+            self.draw_bars(band.image, gutter, 255)  # white, from edge to edge of the band (its margins too)
+            return [band]
+        if drawn_bars:
+            return [
+                BitmapRow(
+                    self.draw_bars(self.em.render_row(r, self.W), gutter, 0),
+                    line,
+                    "text",
+                    [TextRow([*self.lead(gutter), *r.cells[indent:]], (1, 1), "left", line)],
+                )
+                for r in rows
+            ]
         return rows
 
     def band(self, rows: list[TextRow], line: int) -> BitmapRow:
@@ -673,14 +740,13 @@ class Layout:
             return self.text_block(b.runs, line=b.line, attrs=b.attrs, indent=indent)
         if isinstance(b, ListBlock):
             return self.list_block(b, indent)
-        if isinstance(b, Quote):
-            rows = []
-            for c in b.children:
-                for r in self.block(c, indent):
-                    if isinstance(r, TextRow) and r.scale == (1, 1):
-                        r.cells = [Cell("│"), Cell(" ")] + r.cells
-                    rows.append(r)
-            return rows
+        if isinstance(b, Quote):  # the children wrap QUOTE_GUTTER columns in; the bar goes in the first of them
+            outer = self.bars
+            self.bars = (*outer, indent)
+            try:
+                return [r for c in b.children for r in self.block(c, indent + QUOTE_GUTTER)]
+            finally:
+                self.bars = outer
         if isinstance(b, Divider):
             return [self.divider(b)]
         if isinstance(b, Fence):
@@ -771,7 +837,7 @@ class Layout:
                         break
                     piece.append(c)
                     w += cw
-                cl = [Cell(" ")] * indent + piece
+                cl = self.lead(indent) + piece
                 reason = self.native_ok(cl)
                 rows.append(TextRow(cl, (1, 1), "left", f.line, native=not reason, reason=reason))
                 if not rest:
@@ -1148,7 +1214,7 @@ class Layout:
                         else s.ljust(widths[i])
                     )
                     line += s + (" " if i < ncol - 1 else "")
-                cells = [Cell(" ")] * indent + [Cell(ch, bold=bold) for ch in line.rstrip()]
+                cells = self.lead(indent) + [Cell(ch, bold=bold) for ch in line.rstrip()]
                 reason = self.native_ok(cells)
                 rows.append(TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason))
 

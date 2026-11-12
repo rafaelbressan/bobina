@@ -301,3 +301,102 @@ def test_tracking_widths_accept_one_number():
     odd = Profile("x", "x", 384, 203, {"native": {"tracking_unscaled_at": "2"}})
     assert one.tracking_gap(4, 2) == 4 and one.tracking_gap(4, 3) == 12
     assert odd.tracking_gap(4, 2) == 8  # not a width: the spec
+
+
+LONG = "a quoted line that keeps going well past the edge of the paper roll, word after word"
+
+
+def test_quote_wraps_inside_its_bar():
+    rows = [line_text(r) for r in text_rows(build(f"> {LONG}"))]
+    assert len(rows) > 1 and all(len(t) <= 32 for t in rows)
+    assert all(t.startswith("│ ") for t in rows)
+    assert " ".join(t[2:] for t in rows) == LONG
+
+
+def test_nested_quote_and_quote_in_list_keep_to_the_paper():
+    rows = [line_text(r) for r in text_rows(build(f"> > {LONG}\n\n- item\n  > {LONG}"))]
+    nested = [t for t in rows if t.startswith("│ │ ")]
+    in_list = [t for t in rows if t.startswith("  │ ")]
+    assert len(nested) > 1 and len(in_list) > 1
+    assert all(len(t) <= 32 for t in rows)
+    assert " ".join(t[4:] for t in nested) == " ".join(t[4:] for t in in_list) == LONG
+
+
+def test_quote_on_a_wider_paper_uses_its_columns():
+    res = build(f"> {LONG} {LONG}", profile_name="epson-tm-t20iii")  # 48 columns
+    rows = [line_text(r) for r in text_rows(res)]
+    assert all(len(t) <= 48 for t in rows) and max(len(t) for t in rows) > 40
+
+
+def test_quote_in_a_raster_font_has_its_bar_drawn():
+    res = build(f'> {LONG} {{font="Atkinson Hyperlegible"}}\n\n> > nested {{font="Atkinson Hyperlegible"}}')
+    outer, nested = [r for r in res.rows if isinstance(r, BitmapRow)]
+    px = outer.image.load()
+    assert all(px[x, y] == 0 for y in range(outer.image.height) for x in (5, 6))  # the bar, as │ prints
+    assert all(px[x, y] for y in range(outer.image.height) for x in range(8, 24))  # the gap before the words
+    assert all(line_text(v).startswith("│ ") for v in outer.text_rows)
+    npx = nested.image.load()
+    assert all(npx[5, y] == 0 and npx[29, y] == 0 for y in range(nested.image.height))
+    assert [line_text(v) for v in nested.text_rows] == ["│ │ nested"]
+
+
+def test_inverted_quote_gets_a_white_bar():
+    (band,) = [r for r in build("> inverted {.invert}").rows if isinstance(r, BitmapRow)]
+    px = band.image.load()
+    assert all(px[5, y] and px[6, y] and not px[2, y] for y in range(band.image.height))
+
+
+def bar_columns(im, y):
+    px = im.load()
+    return [x for x in range(im.width) if px[x, y] == 0]
+
+
+def test_right_to_left_quote_has_its_bar_where_the_text_starts():
+    res = build('> שלום עולם, זהו ציטוט ארוך מספיק כדי לעבור לשורה הבאה בנייר {font="Atkinson Hyperlegible"}')
+    (row,) = [r for r in res.rows if isinstance(r, BitmapRow)]
+    w, px = row.image.width, row.image.load()
+    assert all(px[w - 6, y] == 0 and px[w - 7, y] == 0 for y in range(row.image.height))  # the bar, mirrored
+    assert all(px[x, y] for y in range(row.image.height) for x in range(w - 24, w - 8))  # its gap: no letter
+    assert not any(px[x, y] == 0 for y in range(row.image.height) for x in (5, 6))  # nothing on the left
+    assert all(line_text(v).endswith(" │") for v in row.text_rows)
+
+
+def test_a_heading_in_a_quote_keeps_the_bar_where_the_text_has_it():
+    res = build("> # Big\n> text\n\n> > # Nested\n> > nested text")
+    big, text, nested, nested_text = [r for r in res.rows if isinstance(r, (TextRow, BitmapRow))]
+    assert isinstance(big, BitmapRow) and isinstance(nested, BitmapRow)  # 2x: the 1x bar is drawn in
+    assert [line_text(text), line_text(nested_text)] == ["│ text", "│ │ nested text"]
+    mid = big.image.height // 2
+    assert bar_columns(big.image, mid)[:2] == [5, 6]  # the bar of the 1x rows, 1x wide
+    assert min(x for x in bar_columns(big.image, mid) if x > 6) >= 24  # the heading starts after the gutter only
+    nmid = nested.image.height // 2
+    assert bar_columns(nested.image, nmid)[:4] == [5, 6, 29, 30]  # both bars, where │ │ nested text has them
+    assert min(x for x in bar_columns(nested.image, nmid) if x > 30) >= 48
+    assert [line_text(v) for v in nested.text_rows] == ["│ │ Nested"]
+
+
+def test_centred_text_in_a_quote_is_centred_after_the_bar():
+    (row,) = text_rows(build("> centred {.center}"))
+    assert row.align == "left" and line_text(row).startswith("│ ") and line_text(row).strip("│ ") == "centred"
+    assert line_text(row).index("c") == 2 + (30 - 7) // 2
+
+
+def test_a_centred_caption_or_cells_outside_a_quote_get_no_bar():
+    res = build('```qr {caption="  centred caption"}\nhttps://example.com\n```\n\n| a | b |\n|--:|--:|\n| 1 | 2 |')
+    assert not any("│" in line_text(r) for r in text_rows(res))
+
+
+def test_a_code_caption_inside_a_quote_gets_no_bar_over_its_text():
+    res = build('> ```qr {caption="caption"}\n> https://example.com\n> ```')
+    assert [line_text(r) for r in text_rows(res)] == ["caption"]
+
+
+def test_a_printer_without_the_bar_glyph_prints_the_line_as_an_image(monkeypatch):
+    from bobina.profile import Profile
+
+    real = Profile.native_glyph
+    monkeypatch.setattr(Profile, "native_glyph", lambda self, ch: ch != "│" and real(self, ch))
+    res = build("> quoted")
+    (row,) = text_rows(res)
+    assert not row.native and row.reason == "glyph │"
+    assert "F301" in {n.code for n in res.nudges}
