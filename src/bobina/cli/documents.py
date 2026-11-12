@@ -378,11 +378,18 @@ def _stored_nudge(p: dict):
 
 def cmd_check(args):
     res, source, base, _ = load_job(args)
+    sources = getattr(res, "data_sources", [])  # what {{ }} can use, per part with --data (agents asked for it)
     if args.json:
-        print_json(job_json(res), indent=2, ensure_ascii=False)  # problems as --problems json
+        out = job_json(res) | ({"data_columns": sources} if sources else {})
+        print_json(out, indent=2, ensure_ascii=False)  # problems as --problems json
     else:
         for line in summary(res):
             print(line.strip())
+        many = len({d["part"] for d in sources}) > 1 or any(d["part"] > 1 for d in sources)
+        for d in sources:
+            files = ", ".join(_file_name(s) for s in d["data"])
+            where = f", part {d['part']} ({d['document']}: {files})" if many else f" ({files})"
+            print(f"data columns{where}: {', '.join(d['columns'])}")
     return report_nudges(res, args)
 
 
@@ -521,3 +528,9 @@ def cmd_edit(args):
         _keep_last(res, str(path.resolve().parent), str(path))
         err(f"printed: ~{res.length_mm / 10:.1f} cm")
         return job_code(res)
+
+
+def _file_name(spec: str) -> str:
+    """--data a=/long/path/prices.csv -> a=prices.csv (the name the source is used by, then its file)."""
+    name, eq, path = spec.rpartition("=") if "=" in spec else ("", "", spec)
+    return f"{name}{eq}{Path(path).name}"

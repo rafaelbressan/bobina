@@ -328,6 +328,7 @@ A counter is an integer kept between prints; its appearance is formatting.
 ```yaml
 counters:
   ticket: { start: 1, step: 1, format: "A-{:03}" }   # A-001, A-002 …  (one {:spec}, Python format)
+  senha:  { format: "Senha {:d}" }                   # Senha 1, Senha 2 …  (the text goes in the format)
   box:    { start: 1, stop: 26, style: letters }     # A … Z, then M140 (wrap: true restarts)
   code:   { start: 255, style: hex }                 # FF, 100 …
 ```
@@ -343,7 +344,8 @@ it is built, so the confirmation screen shows the numbers that will be printed a
 get the same number. If the job is then not printed (you quit, the printer is unreachable, the build fails), the
 values go back, unless another print took numbers after them: then they stay skipped. A number is never printed
 twice; a cancelled job may leave a gap (a job that stopped halfway also keeps its numbers). The CLI adds
-`--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them.
+`--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them,
+and `bobina seq set NAME N` starts one at N, even before its first print.
 
 ### 7.4 Data is literal
 
@@ -442,7 +444,7 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E401` | error | no printer configured or unknown printer |
 | `E402` | error | printer unreachable |
 | `E403` | error | printer not ready (paper, cover, error) |
-| `E404` | error | operation not supported by this printer's transport |
+| `E404` | error | retired: no longer reported |
 | `E405` | error | printer busy: another bobina job kept it too long |
 | `E406` | error | `bobina init` found no printer to set up |
 | `E501` | error | document error |

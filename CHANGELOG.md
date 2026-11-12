@@ -58,6 +58,21 @@
   as written). Suggestions to try a command by hand give it an empty job (`printf '' | …`). Before: `command
   failed (1):` and nothing else. Bluetooth printers, devices and files say what to check too (by the error), and a
   device that fails half way keeps "part of the job may have printed".
+- `bobina status` on a file or command printer says what it is and that it has no live status (only a Bluetooth
+  printer answers one), where its jobs go and, through ssh to a bobina, the command that asks the printer there
+  (`ssh tower 'bobina status --printer gold'`: its printer options kept, quoted so `~` expands over there); exit 0
+  (before: `E404`, now retired, exit 1, which read as a broken printer). `--json` has one shape for every printer
+  (`bobina.status/1`: kind, where, `live_status`). The ssh hints of `E402` quote the remote command the same way.
+- `bobina check --data` lists the data columns a `{{ }}` can use, per part of the job and its data files
+  (`data_columns` in `--json`); Jinja words (`if`, `none`, `loop` …) are left out: they are only `row['if']`.
+- A file printer on `COM3` or `\\.\COM10` counts paper like one on `/dev/…`.
+- `E501` for a block left open names the line where it opens (`line 6: {% if %} is not closed`), not the end.
+- `bobina init` with a test file printer: `P402` says it has no model and `--profile ID` changes it (before: "no
+  printer name to go by"). `init --help` lists every form `--printer` takes.
+- `--problems` help says where they go: always stderr, stdout keeps the command's own output.
+- Fixed: a header with a space in a named source (`--data a=…`, `--join b=…`) is reachable as `{{ a.unit_price }}`,
+  as the bare `{{ unit_price }}` is (it printed empty). `M130` names the source (`a.nope`) and points a bare name
+  to the source that has it.
 
 ## 0.1.2 — 2026-11-11
 

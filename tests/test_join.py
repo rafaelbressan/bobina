@@ -213,3 +213,34 @@ def test_each_join_takes_its_own_on_right_after_it(ab, capsys, tail, words):
     with pytest.raises(SystemExit):
         cargs.parse_args(cargs.make_parser(), ["print", "e.bob.md", "--data", "a=A.xlsx", *tail])
     assert words in capsys.readouterr().err
+
+
+def test_a_header_with_a_space_is_reachable_under_its_source_name(tmp_path, capsys):
+    """'Unit Price' in --data a=… and 'Item Code' in --join b=… are {{ a.unit_price }} and {{ b.item_code }}, as the
+    bare {{ unit_price }} and {{ item_code }} are (they printed empty, with an M130 naming the wrong variable)."""
+    (tmp_path / "p.csv").write_text("name,Unit Price\nRice,5\n")
+    (tmp_path / "c.json").write_text('[{"name": "rice", "Item Code": "7"}]')
+    out = tmp_path / "o.bin"
+    doc = "{{ a.unit_price }}|{{ unit_price }}|{{ b.item_code }}|{{ item_code }}|{{ row['Unit Price'] }}"
+    argv = ["--data", f"a={tmp_path / 'p.csv'}", "--join", f"b={tmp_path / 'c.json'}", "--on", "name"]
+    assert cli.main(["print", doc, *argv, "-o", str(out)]) == cli.OK
+    assert b"5|5|7|7|5" in out.read_bytes()
+    e = capsys.readouterr().err
+    assert "M130" not in e and "under a source's name too: a.unit_price" in e
+
+
+def test_m130_names_the_source_of_a_missing_column(tmp_path, capsys):
+    (tmp_path / "p.csv").write_text("name,Unit Price\nRice,5\n")
+    assert cli.main(["check", "{{ a.nope }}", "--data", f"a={tmp_path / 'p.csv'}"]) == cli.OK
+    assert "variable 'a.nope' is not defined" in capsys.readouterr().err
+
+
+def test_m130_points_a_bare_name_to_the_source_that_has_it():
+    from bobina.nudges import Nudges
+    from bobina.templating import render
+
+    n = Nudges()
+    render("{{ unit_price }}", {}, n, fields={"a": {"unit_price": "5", "name": "Rice"}})
+    (m130,) = [x for x in n if x.code == "M130"]
+    assert m130.message == "variable 'unit_price' is not defined"
+    assert m130.suggestion.startswith("write {{ a.unit_price }}")

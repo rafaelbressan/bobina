@@ -446,8 +446,17 @@ def normalize_columns(rows: list[dict], notes: list, sources: set[str] | None = 
             continue
         alias[c] = a
         taken.add(a)
+    bare = len(alias)
+    for c in columns(rows):  # the same alias under a source's name: a.Unit Price -> {{ a.unit_price }}
+        src, dot, col = c.partition(".")
+        if dot and src in sources and (a := f"{src}.{ident(col)}") != c and a not in taken:
+            alias[c] = a
+            taken.add(a)
     if alias:
-        shown = ", ".join(f"{c} → {a}" for c, a in list(alias.items())[:6]) + (" …" if len(alias) > 6 else "")
+        pairs = list(alias.items())[:bare] or list(alias.items())  # the bare names; the source's when only those
+        shown = ", ".join(f"{c} → {a}" for c, a in pairs[:6]) + (" …" if len(pairs) > 6 else "")
+        under = next((a for a in list(alias.values())[bare:]), "")
+        shown += f" (under a source's name too: {under})" if under and bare else ""
         notes.append(("M158", f"columns usable in {{{{ }}}} as: {shown}", "row['Original Name'] keeps the exact name"))
     if clashes:
         notes.append(("M159", f"two columns would get the same name ({', '.join(clashes)}): the first keeps it",

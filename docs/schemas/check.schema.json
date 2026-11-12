@@ -49,6 +49,39 @@
       "items": {
         "$ref": "problem.schema.json"
       }
+    },
+    "data_columns": {
+      "type": "array",
+      "description": "with --data: per part of the job, its data files and the columns {{ }} can use",
+      "items": {
+        "type": "object",
+        "required": [
+          "part",
+          "document",
+          "data",
+          "columns"
+        ],
+        "properties": {
+          "part": {
+            "type": "integer"
+          },
+          "document": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

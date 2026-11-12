@@ -260,9 +260,9 @@ def test_paper_new_uses_the_servers_profile_allow_and_strict(file_printer):
 
 
 @needs_mcp
-def test_status_of_a_file_printer_is_e404(file_printer):
+def test_status_of_a_file_printer_is_no_live_status_not_an_error(file_printer):
     r = call("status")
-    assert r.is_error and "E404" in "\n".join(texts(r))
+    assert not r.is_error and output(r)["live_status"] is False
 
 
 @needs_mcp

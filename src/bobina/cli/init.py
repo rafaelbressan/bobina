@@ -355,9 +355,13 @@ def _choose_profile(args, st: Setup, d: Dialog | None) -> None:
             st.profile, st.profile_by = st.pr["profile"], "config"
         else:
             st.profile, st.profile_by = profiles.BUILTIN, "default"
-            what = f"no profile matches '{st.device}'" if st.device else "no printer name to go by"
-            _note(st, "P402", f"{what}: {profiles.BUILTIN} was taken ({_profile_line(profiles.BUILTIN)})",
-                  "another: bobina init --profile ID (bobina profile list)")  # fmt: skip
+            if not st.device and st.pr and not common.counts_paper(st.pr):  # a plain file: no model to go by
+                _note(st, "P402", f"a test printer (a file) has no model: the default profile {profiles.BUILTIN} is"
+                      " used", "--profile ID changes it (bobina profile list)")  # fmt: skip
+            else:
+                what = f"no profile matches '{st.device}'" if st.device else "no printer name to go by"
+                _note(st, "P402", f"{what}: {profiles.BUILTIN} was taken ({_profile_line(profiles.BUILTIN)})",
+                      "another: bobina init --profile ID (bobina profile list)")  # fmt: skip
         return
     if match and len(ws) > 1:
         d.say(f"Profile: '{st.device}' fits profiles for {' and '.join(f'{w:g}' for w in sorted(ws))} mm paper.")

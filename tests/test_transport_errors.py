@@ -158,7 +158,7 @@ def test_ssh_127_does_not_guess_the_program_and_uses_the_remote_path_given():
         str(e)
         == "a program was not found on tower (exit 127): bash: line 1: ~/.local/bin/bobina: No such file or directory"
     )
-    assert e.hint.endswith("Try: ssh -p 2222 -i ~/.ssh/key me@tower ~/.local/bin/bobina --version")
+    assert e.hint.endswith("Try: ssh -p 2222 -i ~/.ssh/key me@tower '~/.local/bin/bobina --version'")  # ~ over there
     other = transport.command_failed("ssh tower 'lp -d label'", 127, b"sh: lp: not found\n")
     assert str(other).startswith("a program was not found on tower (exit 127): sh: lp: not found")
     assert "bobina" not in other.hint and "installed on tower" in other.hint
@@ -167,7 +167,7 @@ def test_ssh_127_does_not_guess_the_program_and_uses_the_remote_path_given():
 def test_a_failure_on_the_other_side_points_to_the_remote_bobina_as_given():
     off = transport.command_failed(SSH, 4, b"x [E402] printer unreachable: AA did not answer\n")
     assert str(off) == "the command on tower exited with 4: x [E402] printer unreachable: AA did not answer"
-    assert off.hint.endswith("ssh -p 2222 -i ~/.ssh/key me@tower ~/.local/bin/bobina status asks it")
+    assert off.hint.endswith("ssh -p 2222 -i ~/.ssh/key me@tower '~/.local/bin/bobina status' asks it")
     other = transport.command_failed("ssh tower lp -d label", 1, b"lp: printer not found\n")
     assert other.hint.endswith("printf '' | ssh tower lp -d label")  # never a command left waiting on stdin
 
@@ -222,3 +222,28 @@ def test_a_write_that_fails_half_way_keeps_the_part_may_have_printed_warning(cap
     err = capsys.readouterr().err
     assert "[E402] printer 'full': cannot write to /dev/full" in err
     assert "part of the job may have printed" in err and "the disk is full" in err
+
+
+def test_the_remote_status_keeps_the_options_that_pick_the_printer_there():
+    import shlex
+
+    def status(cmd):
+        return transport.remote_bobina_command(shlex.split(cmd), "status")
+
+    assert status("ssh pi@kiosk ~/.local/bin/bobina send --yes --printer goldensky -") == (
+        "ssh pi@kiosk '~/.local/bin/bobina status --printer goldensky'"
+    )
+    assert status("ssh tower 'bobina send --yes --printer=gold --profile mtp-ii-58 -'") == (
+        "ssh tower 'bobina status --printer=gold --profile mtp-ii-58'"
+    )
+    assert status("ssh tower lp -d label") == "" and status("nc printer 9100") == ""
+    hint = transport.command_failed("ssh tower bobina send --printer gold -", 4, b"x").hint
+    assert hint.endswith("ssh tower 'bobina status --printer gold' asks it")
+
+
+def test_com_ports_are_devices_with_a_roll():
+    from bobina.cli import common
+
+    for path in ("COM3", "\\\\.\\COM10", "/dev/usb/lp0"):
+        assert transport.is_device(path) and common.counts_paper({"transport": "file", "path": path}), path
+    assert not common.counts_paper({"transport": "file", "path": "out.bin"})
