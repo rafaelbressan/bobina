@@ -2,9 +2,15 @@
 
 ## Unreleased
 
-- The chat screen's colours: `--theme dark|light|mono|contrast` (`chat_theme`; by default the terminal's background
-  when `COLORFGBG` says it, else dark), `/theme NAME` in the chat, and colours of one's own per element in
-  `[chat.colors]` (a wrong one is a note and the theme's stays). `NO_COLOR` and `--no-color` win. When bobina
+- Two names that say what they change: the paper style (how the answers look on paper: `--paper-style`,
+  `chat_paper_style`, `/paper-style`) and the screen colours (the chat screen: `--screen-colors`,
+  `chat_screen_colors`, `[chat.screen_colors]`, `/screen-colors`). `/paper-style` and `/screen-colors` alone list
+  each choice with what it looks like, the one in use marked, and `bobina chat --help` lists them too. The older
+  `--style`, `--theme`, `/style`, `/theme`, `chat_style`, `chat_theme` and `[chat.colors]` point to the new names
+  (options as typing hints; commands and config keys still work, with a note).
+- The screen colours: `dark`, `light`, `mono`, `contrast` (by default the terminal's background when `COLORFGBG`
+  says it, else dark), and colours of one's own per part of the screen in `[chat.screen_colors]` (a wrong one is a
+  note and the preset's stays). `NO_COLOR` and `--no-color` win. When bobina
   rewrites config.toml it keeps every table, array of tables, date and multi-line string (before, only
   `[printers.*]` and plain values), and a config it cannot write back the same is left as it is, with a problem.
 - `bobina init`: the first run in one command. It finds the printer (a Bluetooth scan, USB printers on Linux with
@@ -31,11 +37,11 @@
   then cut with "…" (said in the terminal). A note at each metre of paper. The ticket's problems and the roll
   check (P101/P102) are said before printing.
 - Layouts (`--layout`, `chat_layout`, `/strip`, `/tickets`): one strip, or one ticket per answer fed to the tear
-  bar. Styles (`--style`, `chat_style`; default `labels-underline`): your name (`--name`, `chat_name`; "you") and ✦ with
-  the AI's name over each message, with short marks by each speaker (`labels-underline`, `labels-dashes`,
-  `labels-hook`), a small mark between exchanges (`labels-dots`), or a bubble (`labels-outline`, `labels-filled`);
-  earlier looks too (`labels-ruled`, `labels-exchange`, `bubbles`, `boxes`, `plain`…). `--questions` (`chat_questions`) prints your messages too, on the right, about 3 lines at most: a longer
-  one is not sent, never cut. Icons are bundled as 1-bit bitmaps (Lucide, ISC; `tools/gen_icons.py`,
+  bar. Paper styles (`--paper-style`, `chat_paper_style`; default `labels-underline`): your name (`--name`,
+  `chat_name`; "you") and ✦ with the AI's name over each message, with short marks by each speaker
+  (`labels-underline`, `labels-dashes`, `labels-hook`), a small mark between exchanges (`labels-dots`), or a bubble
+  (`labels-outline`, `labels-filled`); earlier looks too. `--questions` (`chat_questions`) prints your messages
+  too, on the right, about 3 lines at most: a longer one is not sent, never cut. Icons are bundled as 1-bit bitmaps (Lucide, ISC; `tools/gen_icons.py`,
   `bobina.icons`), the start of a reusable icon set.
 - `bobina ai list | use NAME [--model MODEL]`: the AIs this machine has, best first: Claude Code, Codex and Gemini
   CLI with their own login and no tools, a local Ollama, then `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (their HTTP

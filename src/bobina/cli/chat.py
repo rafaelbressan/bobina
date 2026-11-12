@@ -14,11 +14,12 @@ import sys
 
 from .. import ai, config, engine
 from .. import profile as profiles
-from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
+from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, LOOKS, STYLES, Conversation, Ticket
 from ..fileio import StateError
 from . import chat_theme
-from .chat_theme import THEMES
-from .chat_theme import WORDS as THEME_WORDS
+from .chat_theme import ABOUT as SCREEN_ABOUT
+from .chat_theme import THEMES as SCREEN_COLORS
+from .chat_theme import WORDS as SCREEN_WORDS
 from .common import (
     CONFIRM,
     OK,
@@ -42,6 +43,7 @@ from .common import (
 )
 
 DEFAULT_STYLE = "labels-underline"  # D1: a short mark under each name (chosen 11/11)
+OLD_COMMANDS = {"/style": "/paper-style", "/theme": "/screen-colors"}  # the names before 11/11: work, with a note
 COMMANDS = {  # slash command -> what it does (completion and /help)
     "/print": "print the last answer, if it is not on paper yet (p for short)",
     "/again": "print another copy of the last answer",
@@ -52,11 +54,10 @@ COMMANDS = {  # slash command -> what it does (completion and /help)
     "/questions on": "print your messages too, on the right",
     "/questions off": "print only the answers",
     "/say": "/say TEXT sends TEXT as it is (the letter p, or a line that starts with /)",
-    "/theme": "the colours of this screen: /theme lists them, /theme NAME switches",
-    "/theme dark": "light text on a dark terminal",
-    "/theme light": "dark text on a light terminal",
-    "/theme mono": "no colours (bold and dim stay)",
-    "/theme contrast": "high contrast",
+    "/paper-style": "how the answers look on paper: alone lists them, with a NAME the next answers use it",
+    **{f"/paper-style {k}": look.about for k, look in LOOKS.items()},
+    "/screen-colors": "the colours of this screen: alone lists them, with a NAME it switches",
+    **{f"/screen-colors {k}": about for k, about in SCREEN_ABOUT.items()},
     "/help": "this list",
     "/quit": "end the chat (also Ctrl-D)",
 }
@@ -72,8 +73,23 @@ STYLE_WORDS = {"label": "labels", "c": "labels", "c1": "labels-ruled", "c2": "la
                "filled": "labels-filled", "hook": "labels-hook", "dots": "labels-dots"}  # fmt: skip
 
 
-def _value(kind: str, valid: tuple, words: dict):
-    """An option value with its synonyms and typos: the valid name, or an error that suggests one and lists all."""
+def _about_style(name: str) -> str:
+    return LOOKS[name].about
+
+
+def listing(title: str, names, about, current: str = "") -> str:
+    """Each choice with what it looks like, one per line, the one in use marked (the lists in the chat, --help)."""
+    width = max(len(n) for n in names)
+    lines = [title] if title else []
+    for n in names:
+        mark = "▸" if n == current else " "
+        lines.append(f" {mark} {n:<{width}}  {about(n)}" + ("  (in use)" if n == current else ""))
+    return "\n".join(lines)
+
+
+def _value(kind: str, valid: tuple, words: dict, about=None):
+    """An option value with its synonyms and typos: the valid name, or an error that suggests one and lists all
+    (with what each looks like, when about(name) says it)."""
 
     def convert(text: str) -> str:
         k = chat_theme.normalise(text)  # one rule for every chat option value, /theme too
@@ -83,6 +99,8 @@ def _value(kind: str, valid: tuple, words: dict):
             return words[k]
         near = difflib.get_close_matches(k, [*valid, *words], n=1, cutoff=0.6)
         hint = f" (did you mean {words.get(near[0], near[0])}?)" if near else ""
+        if about:
+            raise argparse.ArgumentTypeError(f"unknown {kind} '{text}'{hint}; one of:\n" + listing("", valid, about))
         raise argparse.ArgumentTypeError(f"unknown {kind} '{text}'{hint}: {', '.join(valid)}")
 
     convert.__name__ = kind
@@ -108,7 +126,7 @@ def register(sub, cmd) -> None:
             'bobina chat "why is the sky blue?" --yes',
             'echo "a haiku about paper" | bobina chat --yes --json',
             "bobina chat --manual --questions --limit 6cm",
-            "bobina chat --layout tickets --style labels-ruled",
+            "bobina chat --layout tickets --paper-style labels-outline",
             "bobina chat --ai ollama --model llama3.2 --dry-run",
         ],
         cmd_chat,
@@ -132,21 +150,30 @@ def register(sub, cmd) -> None:
         " per answer with the AI and time on top, fed to the tear bar (chat_layout in config.toml)",
     )
     p.add_argument(
-        "--style",
-        type=_value("style", STYLES, STYLE_WORDS),
+        "--paper-style",
+        type=_value("paper style", STYLES, STYLE_WORDS, _about_style),
         choices=STYLES,
-        help=f"how the two speakers look on paper (default {DEFAULT_STYLE}; chat_style in config.toml)",
+        metavar="NAME",
+        help=f"how the answers look on paper (default {DEFAULT_STYLE}; chat_paper_style in config.toml; the list"
+        " below)",
     )
     p.add_argument("--name", metavar="NAME", help='your name over your messages, on paper and on screen (default'
                    ' "you"; chat_name in config.toml)')  # fmt: skip
     p.add_argument(
-        "--theme",
-        type=_value("theme", THEMES, THEME_WORDS),
-        choices=THEMES,
-        help="the chat screen's colours: dark, light, mono, contrast (default: the terminal's, else dark;"
-        " chat_theme and [chat.colors] in config.toml)",
+        "--screen-colors",
+        type=_value("screen colours", SCREEN_COLORS, SCREEN_WORDS, SCREEN_ABOUT.get),
+        choices=SCREEN_COLORS,
+        metavar="NAME",
+        help="the colours of the chat screen (default: the terminal's, else dark; chat_screen_colors and"
+        " [chat.screen_colors] in config.toml; the list below)",
     )
     p.add_argument("--manual", action="store_true", help="the chat screen: print an answer only on /print (p)")
+    p.epilog += (
+        "\n\n"
+        + listing("PAPER STYLES (--paper-style)", STYLES, _about_style)
+        + "\n\n"
+        + listing("SCREEN COLOURS (--screen-colors)", SCREEN_COLORS, SCREEN_ABOUT.get)
+    )
     p = cmd(
         sub,
         "ai",
@@ -454,39 +481,67 @@ class Session:
             ui.note(f"your messages print too, at most {self.question_limit} characters" if self.questions
                     else "only the answers print")  # fmt: skip
             return True
-        if words[0] == "/theme":
-            self.theme(words[1] if len(words) > 1 else "")
+        if words[0] in OLD_COMMANDS:
+            ui.note(f"{words[0]} is now called {OLD_COMMANDS[words[0]]}")
+            words[0] = OLD_COMMANDS[words[0]]
+        if words[0] == "/screen-colors":
+            self.screen_colors(words[1] if len(words) > 1 else "")
+            return True
+        if words[0] == "/paper-style":
+            self.paper_style(words[1] if len(words) > 1 else "")
             return True
         if line in ("/help", "/?"):
-            ui.note("\n  ".join(f"{c:15s} {d}" for c, d in COMMANDS.items()))
+            main = {c: d for c, d in COMMANDS.items() if not c.startswith(("/paper-style ", "/screen-colors "))}
+            ui.note("\n  ".join(f"{c:15s} {d}" for c, d in main.items()))
             return True
         if line.startswith("/"):
             ui.note(f"unknown command {words[0]}; /help lists them (/say TEXT sends a line that starts with /)")
             return True
         return False
 
-    def theme(self, wanted: str) -> None:
-        """/theme: the themes, the one in use marked; /theme NAME: switch (one's own [chat.colors] stay on top)."""
+    def paper_style(self, wanted: str) -> None:
+        """/paper-style: each one with what it looks like, the one in use marked; /paper-style NAME: the next
+        answers print with it."""
+        ticket = self.conv.ticket
+        if not wanted:
+            self.ui.note(listing("paper styles (/paper-style NAME switches; chat_paper_style in config.toml keeps"
+                                 " one):", STYLES, _about_style, ticket.style))  # fmt: skip
+            return
+        try:
+            name = _value("paper style", STYLES, STYLE_WORDS)(wanted)
+        except argparse.ArgumentTypeError as e:
+            self.ui.note(f"no change: {e}")
+            return
+        if name == ticket.style:
+            self.ui.note(f"already printing with: {LOOKS[name].about} ({name})")
+            return
+        ticket.style = name
+        self.ui.note(f"the next answers print with: {LOOKS[name].about} ({name})")
+
+    def screen_colors(self, wanted: str) -> None:
+        """/screen-colors: each one with what it looks like, the one in use marked; /screen-colors NAME: switch
+        (one's own [chat.screen_colors] stay on top)."""
         current = getattr(getattr(self.ui, "theme", None), "name", "")
         if not wanted:
-            self.ui.note("themes: " + ", ".join(f"{t} (in use)" if t == current else t for t in THEMES)
-                         + " · /theme NAME switches; chat_theme in config.toml keeps one")  # fmt: skip
+            self.ui.note(listing("screen colours (/screen-colors NAME switches; chat_screen_colors in config.toml"
+                                 " keeps one):", SCREEN_COLORS, SCREEN_ABOUT.get, current))  # fmt: skip
             return
         name = chat_theme.name_of(wanted)
         if not name:
-            self.ui.note(f"no theme '{wanted}': {', '.join(THEMES)}")
+            self.ui.note(f"no screen colours '{wanted}': {', '.join(SCREEN_COLORS)}")
             return
         try:
             cfg = config.load()
-        except StateError as e:  # a config damaged since the chat began: the theme without one's own colours
-            self.ui.note(f"[chat.colors] not read ({e})")
+        except StateError as e:  # a config damaged since the chat began: the preset without one's own colours
+            self.ui.note(f"[chat.screen_colors] not read ({e})")
             cfg = {}
         off = getattr(getattr(self.ui, "theme", None), "off", "")  # --no-color and NO_COLOR stay as they were
         theme = chat_theme.pick(name, cfg, off=off)
         self.ui.set_theme(theme)
         for n in theme.notes:
             self.ui.note(n)
-        self.ui.note(f"theme {name}" + (f" ({theme.off}: no colours)" if theme.off else ""))
+        self.ui.note(f"screen colours: {name} ({SCREEN_ABOUT[name]})" + (f"; {theme.off}: no colours"
+                                                                         if theme.off else ""))  # fmt: skip
 
     def turn(self, question: str) -> None:
         conv, ui = self.conv, self.ui
@@ -640,7 +695,7 @@ def _ui(args, cfg):
     from ..view import colors_off
     from .chat_tui import TerminalUI
 
-    theme = chat_theme.pick(args.theme, cfg, off=colors_off(flag=args.no_color))
+    theme = chat_theme.pick(args.screen_colors, cfg, off=colors_off(flag=args.no_color))
     for n in theme.notes:
         err(f"note: {n}")
     return TerminalUI(theme)
@@ -722,7 +777,10 @@ def cmd_chat(args):
     # the printer's measured tear bar and the marks setting, as print uses them
     prof = engine.apply_overrides(prof, {**printer_overrides(pr), "marks": marks_setting(args, cfg)})
     layout = _setting(args, cfg, "chat_layout", "layout", LAYOUTS, "strip")
-    style = _setting(args, cfg, "chat_style", "style", STYLES, DEFAULT_STYLE)
+    if cfg.get("chat_paper_style") is None and cfg.get("chat_style") is not None:  # the name before 11/11
+        err("note: chat_style in config.toml is now called chat_paper_style (it was read; rename it)")
+        cfg = {**cfg, "chat_paper_style": cfg["chat_style"]}
+    style = _setting(args, cfg, "chat_paper_style", "paper_style", STYLES, DEFAULT_STYLE)
     ticket = Ticket(prof, style=style, name=_name(args, cfg))
     try:
         qlimit = int(cfg.get("chat_question_limit") or ticket.question_chars())
@@ -740,8 +798,8 @@ def one_question(args, conv, printer, pr, question: str, qlimit: int, questions:
     """bobina chat "QUESTION": asks once, writes the answer, exits. It prints only with --yes (as print)."""
     if args.manual:
         err("note: --manual does nothing with one question: it prints only with --yes")
-    if args.theme:
-        err("note: --theme does nothing with one question: it is the chat screen's")
+    if args.screen_colors:
+        err("note: --screen-colors does nothing with one question: they are the chat screen's")
     if args.dry_run and args.yes:
         err("note: --dry-run wins over --yes: nothing prints")
     if args.layout == "strip":

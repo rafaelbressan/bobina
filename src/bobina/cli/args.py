@@ -361,8 +361,18 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--questions": ["--perguntas", "--print-questions", "--with-questions"],
     "--layout": ["--layout-chat", "--tickets", "--ticket", "--strip-layout", "--leiaute"],
     "--manual": ["--on-demand", "--no-auto-print", "--imprimir-manual"],
-    "--style": ["--estilo", "--look", "--bubbles"],
-    "--theme": ["--tema", "--colors", "--colours", "--cores", "--color-scheme", "--palette"],
+    "--paper-style": ["--style", "--estilo", "--look", "--bubbles", "--paper-look", "--paperstyle"],
+    "--screen-colors": [
+        "--theme",
+        "--tema",
+        "--colors",
+        "--colours",
+        "--cores",
+        "--color-scheme",
+        "--palette",
+        "--screen-colours",
+        "--screen-theme",
+    ],
     "--name": ["--nome", "--my-name", "--username", "--usuario", "--user-name", "--apelido"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to

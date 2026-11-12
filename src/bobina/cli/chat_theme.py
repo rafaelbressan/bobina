@@ -1,8 +1,9 @@
-"""The colours of the chat screen: presets, the terminal's background, and colours of one's own in config.toml.
+"""The screen colours of bobina chat: presets, the terminal's background, and colours of one's own in config.toml.
 
-Which theme: --theme, else chat_theme in config.toml, else the terminal's background when it says it (COLORFGBG),
-else dark. Then [chat.colors] in config.toml overrides elements of it. Colours off (NO_COLOR, --no-color,
-TERM=dumb: view.colors_off) win over everything: no colour words, but bold, italic, underline and dim stay."""
+Which: --screen-colors, else chat_screen_colors in config.toml, else the terminal's background when it says it
+(COLORFGBG), else dark. Then [chat.screen_colors] in config.toml overrides parts of it. Colours off (NO_COLOR,
+--no-color, TERM=dumb: view.colors_off) win over everything: no colour words, but bold, italic, underline and dim
+stay."""
 
 from __future__ import annotations
 
@@ -20,6 +21,12 @@ PRESETS: dict[str, dict[str, str]] = {
     "mono": {name: "" for name in ELEMENTS},
 }  # fmt: skip
 THEMES = tuple(PRESETS)
+ABOUT = {  # what each looks like, in one line (the one source for the lists, --help, completion and the docs)
+    "dark": "light text on a dark terminal",
+    "light": "dark text on a light terminal",
+    "mono": "no colours; bold and dim only",
+    "contrast": "bright, high-contrast colours",
+}
 WORDS = {"black": "dark", "night": "dark", "white": "light", "bright": "light", "day": "light",
          "high-contrast": "contrast", "hc": "contrast", "high": "contrast", "none": "mono", "plain": "mono",
          "monochrome": "mono", "no-color": "mono", "nocolor": "mono", "bw": "mono", "escuro": "dark",
@@ -109,39 +116,54 @@ def valid(value: str) -> bool:
 
 
 def build(name: str, own: dict | None = None, off: str = "") -> Theme:
-    """A preset with one's own colours over it ([chat.colors]); a wrong element or colour is a note, and the
+    """A preset with one's own colours over it ([chat.screen_colors]); a wrong element or colour is a note, and the
     preset's colour stays. off: why colours are off ("" when they are on)."""
     colors, notes = dict(PRESETS[name]), []
     for element, value in (own or {}).items():
         if element not in ELEMENTS:
-            notes.append(f"[chat.colors] {element}: not an element of the chat screen ({', '.join(ELEMENTS)})")
+            notes.append(f"[chat.screen_colors] {element}: not a part of the chat screen ({', '.join(ELEMENTS)})")
         elif not isinstance(value, str) or not valid(value):
-            notes.append(f"[chat.colors] {element} = {value!r}: not a colour (#00afaf, #0af, ansired, red);"
-                         f" the {name} theme's is used")  # fmt: skip
+            notes.append(f"[chat.screen_colors] {element} = {value!r}: not a colour (#00afaf, #0af, ansired, red);"
+                         f" the one of {name} is used")  # fmt: skip
         else:
             colors[element] = value
     return Theme(name, colors, off=off, notes=notes)
 
 
+OLD_KEY = "chat_theme"  # read too, with a note: the name before chat_screen_colors
+
+
 def pick(option: str | None, cfg: dict, env=None, off: str | None = None) -> Theme:
-    """--theme (already a valid name), else chat_theme, else the terminal's background, else dark. off: why colours
-    are off (default: view.colors_off of env)."""
+    """--screen-colors (already a valid name), else chat_screen_colors (or the older chat_theme), else the
+    terminal's background, else dark; then [chat.screen_colors] (or the older [chat.colors]) over it. off: why
+    colours are off (default: view.colors_off of env)."""
     from ..view import colors_off
 
     env = os.environ if env is None else env
     off = colors_off(env=env) if off is None else off
     notes = []
     name = option
-    if not name and cfg.get("chat_theme") is not None:
-        name = name_of(str(cfg["chat_theme"]))
+    key = "chat_screen_colors" if cfg.get("chat_screen_colors") is not None else OLD_KEY
+    if key == OLD_KEY and cfg.get(OLD_KEY) is not None:
+        notes.append(f"{OLD_KEY} in config.toml is now called chat_screen_colors (it was read; rename it)")
+    if not name and cfg.get(key) is not None:
+        name = name_of(str(cfg[key]))
         if not name:
-            notes.append(f"chat_theme = {cfg['chat_theme']!r} in config.toml: not a theme ({', '.join(THEMES)});"
-                         " the terminal's (or dark) is used")  # fmt: skip
+            notes.append(f"{key} = {cfg[key]!r} in config.toml: not one of {', '.join(THEMES)}; the terminal's (or"
+                         " dark) is used")  # fmt: skip
     name = name or background(env) or "dark"
-    own = ((cfg.get("chat") or {}).get("colors")) if isinstance(cfg.get("chat"), dict) else None
-    if own is not None and not isinstance(own, dict):
-        notes.append('[chat.colors] in config.toml must be a table: you = "#00afaf"')
-        own = None
+    chat = cfg.get("chat") if isinstance(cfg.get("chat"), dict) else {}
+    own: dict = {}
+    for table in ("colors", "screen_colors"):  # the newer name wins where both say the same element
+        value = chat.get(table)
+        if value is None:
+            continue
+        if table == "colors":
+            notes.append("[chat.colors] in config.toml is now called [chat.screen_colors] (it was read; rename it)")
+        if isinstance(value, dict):
+            own.update(value)
+        else:
+            notes.append(f'[chat.{table}] in config.toml must be a table: you = "#00afaf"')
     theme = build(name, own, off)
     theme.notes[:0] = notes
     return theme
