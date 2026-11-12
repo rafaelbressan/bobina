@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import config, discover, engine, locales, paper, transport
+from .. import config, discover, engine, locales, paper
 from .. import profile as profiles
 from ..nudges import Nudge
 from . import common
@@ -71,13 +71,6 @@ class Setup:
 
 def _note(st: Setup, code: str, message: str, hint: str = "") -> None:
     st.notes.append(Nudge(code, message, None, hint))
-
-
-def _no_model(pr: dict | None) -> bool:
-    """A printer with no model to choose a profile by: a test file (not a device), or a command."""
-    pr = pr or {}
-    t = pr.get("transport")
-    return t == "command" or (t == "file" and not transport.is_device(str(pr.get("path") or "")))
 
 
 def _slug(text: str, fallback: str) -> str:
@@ -362,7 +355,10 @@ def _choose_profile(args, st: Setup, d: Dialog | None) -> None:
             st.profile, st.profile_by = st.pr["profile"], "config"
         else:
             st.profile, st.profile_by = profiles.BUILTIN, "default"
-            if st.device or not _no_model(st.pr):  # a test file or a command has no model: the summary says it
+            if not st.device and st.pr and not common.counts_paper(st.pr):  # a plain file: no model to go by
+                _note(st, "P402", f"a test printer (a file) has no model: the default profile {profiles.BUILTIN} is"
+                      " used", "--profile ID changes it (bobina profile list)")  # fmt: skip
+            else:
                 what = f"no profile matches '{st.device}'" if st.device else "no printer name to go by"
                 _note(st, "P402", f"{what}: {profiles.BUILTIN} was taken ({_profile_line(profiles.BUILTIN)})",
                       "another: bobina init --profile ID (bobina profile list)")  # fmt: skip
@@ -729,8 +725,6 @@ def _report(args, st: Setup, d: Dialog | None, prof, loc: dict, roll: dict) -> i
     if st.picked:
         say(f"            {st.picked}; another: bobina init --yes --printer ADDRESS")
     say(f"  profile   {prof.id}: {_profile_line(prof.id)}")
-    if st.profile_by == "default" and _no_model(st.pr):
-        say("            the default: a test or command printer has no model; --profile ID changes it")
     say(f"  locale    {loc['value']}: {' · '.join(loc['example'].values())}")
     if common.counts_paper(st.pr or {}):
         r = roll

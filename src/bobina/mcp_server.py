@@ -469,8 +469,8 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
 
     @mcp.tool(annotations=reads)
     async def status(printer: PrinterArg = None):
-        """The printer's state (bobina status --json): online, paper, cover, error (Bluetooth printers;
-        a file or command printer has none: live_status false, where its jobs go)."""
+        """The printer's state (bobina status --json): online, paper, cover, error. Every printer: printer,
+        transport, kind, where, live_status (true: Bluetooth, which answers; false: a file or command printer)."""
         return await s.status(printer)
 
     @mcp.tool(annotations=reads)

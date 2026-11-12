@@ -93,6 +93,31 @@ def remote_bobina(remote: list[str]) -> str:
     return next((w for w in words if os.path.basename(w) == "bobina"), "")
 
 
+PICKS_PRINTER = ("--printer", "--profile")  # the options of a remote `bobina send` that choose its printer
+
+
+def remote_bobina_command(cmd: list[str], *action: str, keep: bool = True) -> str:
+    """`ssh … HOST 'BOBINA ACTION …'` for the bobina a command printer runs over ssh: the remote bobina as written,
+    with keep the options that pick its printer there (--printer NAME, --profile ID) and nothing else of `send …
+    -`, quoted as one word so ~ expands on that machine. '' when the command is not ssh to a bobina."""
+    ssh = ssh_target(cmd)
+    if not ssh:
+        return ""
+    reach, remote = ssh[1], " ".join(ssh[2]).split()  # ssh h bobina send, or ssh h 'bobina send'
+    i = next((k for k, w in enumerate(remote) if os.path.basename(w) == "bobina"), None)
+    if i is None:
+        return ""
+    rest, kept, j = remote[i + 1 :], [], 0
+    while keep and j < len(rest):
+        opt, eq, _ = rest[j].partition("=")
+        if opt in PICKS_PRINTER:
+            kept += rest[j : j + (1 if eq else 2)]
+            j += 0 if eq else 1
+        j += 1
+    there = " ".join([remote[i], *action, *(shlex.quote(w) for w in kept)])
+    return f"{reach} {shlex.quote(there)}"
+
+
 def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
     """A printer command that exited with an error -> what failed (its exit code and the end of its stderr) and
     what to try. ssh is read: 255 is ssh itself (what it said tells why), anything else came from the other side.
@@ -124,14 +149,14 @@ def command_failed(typed: str, code: int, stderr: bytes) -> PrinterUnreachable:
             return PrinterUnreachable(f"ssh to {m} failed (exit 255): {said}", hint.format(m=m, reach=reach))
         if code == 127:
             hint = (
-                f"is bobina installed on {m}, in the PATH ssh gives it (not your login shell's)? Try: {reach} {bobina}"
-                " --version"
+                f"is bobina installed on {m}, in the PATH ssh gives it (not your login shell's)? Try: "
+                + remote_bobina_command(cmd, "--version", keep=False)
                 if bobina
                 else f"is the program installed on {m}, in the PATH ssh gives it (not your login shell's)?"
             )
             return PrinterUnreachable(f"a program was not found on {m} (exit 127): {said}", hint)
         hint = (
-            f"is the printer of {m} on and in range? {reach} {bobina} status asks it"
+            f"is the printer of {m} on and in range? {remote_bobina_command(cmd, 'status')} asks it"
             if bobina
             else f"{m} answered; what ran there failed. Try it with an empty job: printf '' | {typed}"
         )

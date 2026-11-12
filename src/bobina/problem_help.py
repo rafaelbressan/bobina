@@ -86,7 +86,8 @@ FIX = {
     "E402": "Is the printer on and in range? Through a command (ssh): is that machine on? The message names the printer"
     " and what the command said. Look at the paper before printing again: part of the job may be there.",
     "E403": "Load paper or close the cover (bobina status); a printer without a cover sensor reports both as no paper.",
-    "E404": "This printer's transport (a file or a command) cannot do that; printing works the same.",
+    "E404": "Nothing to do: bobina no longer reports it. bobina status on a file or command printer says it has no"
+    " live status (exit 0), and printing works the same.",
     "E405": "Wait for the other job, or raise busy_timeout for the printer in config.toml.",
     "E406": "Turn the printer on (Bluetooth: in range; USB: plugged in), or name it: bobina init --printer ADDRESS"
     " (or DEVICE), --command 'ssh HOST bobina send --yes -' for one on another machine.",

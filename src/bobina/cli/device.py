@@ -66,7 +66,9 @@ def cmd_status(args):
         return _no_live_status(args, name, pr)
     st = printer_status(pr)
     if args.json:
-        print_json({"printer": name, **st}, indent=2)
+        head = {"schema": STATUS_SCHEMA, "printer": name, "transport": "bluetooth", "kind": "a Bluetooth printer",
+                "where": pr.get("address", ""), "live_status": True}  # fmt: skip
+        print_json({**head, **st}, indent=2)
     else:
         print(
             f"{name}: "
@@ -85,6 +87,9 @@ def cmd_status(args):
     return OK
 
 
+STATUS_SCHEMA = "bobina.status/1"  # docs/schemas/status.schema.json: the same head for every kind of printer
+
+
 def _no_live_status(args, name: str, pr: dict) -> int:
     """`bobina status` on a file or command printer: it has no live status (only a Bluetooth printer answers
     one), which is normal; say where its jobs go and, through ssh to a bobina, how to ask the printer there."""
@@ -92,19 +97,18 @@ def _no_live_status(args, name: str, pr: dict) -> int:
     path, cmd = str(pr.get("path", "")), str(pr.get("command", ""))
     ask_there = ""
     if transport_name == "file":
-        kind = "a device printer" if transport.is_device(path) else "a file printer (a test printer)"
+        kind = "a device printer" if common.counts_paper(pr) else "a file printer (a test printer)"
         where = f"writes to {path}"
     else:
         kind, where = "a command printer", f"runs {cmd}"
         try:
-            ssh = transport.ssh_target(shlex.split(cmd))
+            ask_there = transport.remote_bobina_command(shlex.split(cmd), "status")
         except ValueError:  # a quote left open: config.toml edited by hand
-            ssh = None
-        if ssh and (bobina := transport.remote_bobina(ssh[2])):
-            ask_there = f"{ssh[1]} {bobina} status"
+            ask_there = ""
     note = f"{kind}: no live status (only a Bluetooth printer answers one); printing works the same"
     if args.json:
-        out = {"printer": name, "transport": transport_name, "live_status": False, "where": path or cmd, "note": note}
+        out = {"schema": STATUS_SCHEMA, "printer": name, "transport": transport_name, "kind": kind,
+               "where": path or cmd, "live_status": False, "note": note}  # fmt: skip
         print_json({**out, **({"status_there": ask_there} if ask_there else {})}, indent=2)
         return OK
     print(f"{name}: {note}")

@@ -28,7 +28,7 @@ def test_status_of_a_command_printer_says_how_to_ask_the_printer_over_there(caps
     assert run("status", "--json") == cli.OK
     out = json.loads(capsys.readouterr().out)
     assert out["live_status"] is False and out["transport"] == "command"
-    assert out["status_there"] == "ssh -p 2222 tower ~/.local/bin/bobina status"
+    assert out["status_there"] == "ssh -p 2222 tower '~/.local/bin/bobina status'"  # ~ expands over there
     run("printer", "add", "lp", "--command", "lp -d label")
     assert run("status", "--printer", "lp") == cli.OK
     o = capsys.readouterr().out
@@ -137,10 +137,11 @@ def test_check_lists_the_data_columns_usable_in_braces(tmp_path, capsys):
     prices.write_text("name,Unit Price\nRice,5\n")
     catalog.write_text('[{"name": "Rice", "id": "7"}]')
     assert run("check", "x", "--data", str(prices)) == cli.OK
-    assert "data columns: name, unit_price" in capsys.readouterr().out  # 'Unit Price' only as row['Unit Price']
+    assert "data columns (prices.csv): name, unit_price" in capsys.readouterr().out  # 'Unit Price': row['…'] only
     assert run("check", "x", "--data", f"a={prices}", "--join", f"b={catalog}", "--on", "name", "--json") == cli.OK
-    cols = json.loads(capsys.readouterr().out)["data_columns"]
-    assert {"a.name", "b.id", "unit_price"} <= set(cols) and not any(" " in c for c in cols)
+    (src,) = json.loads(capsys.readouterr().out)["data_columns"]
+    assert src["part"] == 1 and src["data"] == [f"a={prices}", f"b={catalog}"]
+    assert {"a.name", "b.id", "unit_price"} <= set(src["columns"]) and not any(" " in c for c in src["columns"])
     assert run("check", "x") == cli.OK and "data columns" not in capsys.readouterr().out
 
 
@@ -160,3 +161,48 @@ def test_an_unclosed_block_that_cannot_be_placed_says_to_look_for_it(monkeypatch
     assert run("check", "a\n{% if x %}\nb") == cli.DOC
     e = capsys.readouterr().err
     assert "an {% if %} opened earlier is not closed (look for the {% if %} without {% endif %})" in e
+
+
+def test_status_json_has_one_shape_for_every_printer(tmp_path, monkeypatch, capsys):
+    import json
+
+    from test_schemas import _check, _schema
+
+    from bobina.cli import device
+
+    run("printer", "add", "test", "--path", str(tmp_path / "t.bin"))
+    run("printer", "add", "tower", "--command", "ssh tower bobina send --yes --printer gold -")
+    run("printer", "add", "mtp", "AA:BB:CC:DD:EE:FF")
+    monkeypatch.setattr(device, "printer_status", lambda pr: {"answered": True, "online": True, "paper_out": False})
+    capsys.readouterr()
+    shapes = {}
+    for name in ("test", "tower", "mtp"):
+        assert run("status", "--printer", name, "--json") == cli.OK
+        doc = json.loads(capsys.readouterr().out)
+        _check(doc, _schema("status"))
+        shapes[name] = (doc["kind"], doc["live_status"], doc["where"])
+    assert shapes["mtp"] == ("a Bluetooth printer", True, "AA:BB:CC:DD:EE:FF")
+    assert shapes["test"] == ("a file printer (a test printer)", False, str(tmp_path / "t.bin"))
+    assert shapes["tower"][:2] == ("a command printer", False)
+
+
+def test_data_columns_per_part_of_a_job_with_then(tmp_path, capsys):
+    import json
+
+    a, b = tmp_path / "a.csv", tmp_path / "b.csv"
+    a.write_text("name,price\nRice,5\n")
+    b.write_text("code\n7\n")
+    assert run("check", "x", "--data", str(a), "--then", "y", "--then", "z", "--data", str(b)) == cli.OK
+    out = capsys.readouterr().out
+    assert "data columns, part 1 (x: a.csv): name, price" in out and "data columns, part 3 (z: b.csv): code" in out
+    assert "part 2" not in out
+    assert run("check", "x", "--data", str(a), "--then", "z", "--data", str(b), "--json") == cli.OK
+    doc = json.loads(capsys.readouterr().out)
+    assert [(d["part"], d["columns"]) for d in doc["data_columns"]] == [(1, ["name", "price"]), (2, ["code"])]
+
+
+def test_jinja_words_are_not_listed_as_names(tmp_path, capsys):
+    rows = tmp_path / "k.csv"
+    rows.write_text("name,if,None,true,loop\nRice,1,2,3,4\n")
+    assert run("check", "{{ row['if'] }}", "--data", str(rows)) == cli.OK
+    assert "data columns (k.csv): name\n" in capsys.readouterr().out

@@ -52,10 +52,36 @@
     },
     "data_columns": {
       "type": "array",
+      "description": "with --data: per part of the job, its data files and the columns {{ }} can use",
       "items": {
-        "type": "string"
-      },
-      "description": "with --data: the columns {{ }} can use"
+        "type": "object",
+        "required": [
+          "part",
+          "document",
+          "data",
+          "columns"
+        ],
+        "properties": {
+          "part": {
+            "type": "integer"
+          },
+          "document": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   }
 }

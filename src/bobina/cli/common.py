@@ -677,11 +677,19 @@ def _build(args, source, base_dir, counters=None, machine=None):
 
     # what {{ }} can use (a.price for a named source; a header with spaces only as row['Unit Price']): bobina check
     names = (n for r in data_rows or [] for n in given_names(r))
-    b.data_columns = [n for n in dict.fromkeys(names) if IDENT_PATH.fullmatch(n)]
+    b.data_columns = [n for n in dict.fromkeys(names) if IDENT_PATH.fullmatch(n) and n not in NOT_A_NAME]
+    specs = getattr(args, "data", None) or []
+    b.data_specs = [*([specs] if isinstance(specs, str) else specs), *(getattr(args, "join", None) or [])]
     return b
 
 
 IDENT_PATH = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)?")
+NOT_A_NAME = {  # words {{ }} reads as Jinja, not as a column: a column called 'if' or 'none' is only row['if']
+    "and", "or", "not", "in", "is", "if", "else", "elif", "endif", "for", "endfor", "recursive", "set", "endset",
+    "block", "endblock", "macro", "endmacro", "call", "endcall", "filter", "endfilter", "with", "endwith",
+    "without", "context", "import", "include", "extends", "from", "as", "pluralize", "raw", "endraw", "do",
+    "true", "false", "none", "True", "False", "None", "loop", "self", "caller", "varargs", "kwargs",
+}  # fmt: skip
 
 
 JOB_FLAGS = (
@@ -811,6 +819,9 @@ def _load_job(args, store):
                 if label and not n.source:
                     n.source, n.part, n.file = label, g + 1, _short(a.target)
         store = res.first.rendered.counters if res.first.rendered else store  # counters continue
+        cols = getattr(res, "data_columns", [])  # bobina check lists them, per part and its data files
+        res.data_sources = [{"part": g + 1, "document": _short(a.target), "data": res.data_specs, "columns": cols}]
+        res.data_sources = res.data_sources if cols else []
         compact = getattr(a, "compact", None)
         compact = compact if compact is not None else compact_all
         built.append((res, g, compact, s, b, origin))
@@ -838,6 +849,7 @@ def _load_job(args, store):
         raise Fail(DOC, f"error: {e}", problem=getattr(e, "code", "E305")) from None
     job.source_text = first_src[0]
     job.label_meta = metas
+    job.data_sources = [d for r, *_ in built for d in r.data_sources]
     return job, first_src[0], first_src[1], "(chain)"
 
 
@@ -1069,9 +1081,9 @@ def printer_name(args) -> str | None:
 
 
 def counts_paper(pr: dict) -> bool:
-    """A roll is counted for every printer but a plain file (--path out.bin); a device path (/dev/usb/lp0,
-    /dev/rfcomm0) is a real printer with a real roll."""
-    return pr.get("transport") != "file" or str(pr.get("path", "")).startswith("/dev/")
+    """A roll is counted for every printer but a plain file (--path out.bin): a device (/dev/usb/lp0, COM3,
+    \\\\.\\COM10) is a real printer with a real roll. A plain file is also the one printer with no model."""
+    return pr.get("transport") != "file" or transport.is_device(str(pr.get("path", "")))
 
 
 def where(name: str) -> str:

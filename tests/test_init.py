@@ -362,14 +362,20 @@ def test_profiles_are_read_once_per_run(bt, monkeypatch, capsys):
     assert len(ids) == len(set(ids))  # each other profile once, whatever the number of devices and lookups
 
 
-def test_a_test_file_printer_takes_the_default_profile_without_a_p402(no_bt, tmp_path, capsys):
-    """An agent read 'no printer name to go by' (P402) as a mistake: a test file has no model, the summary says so."""
-    assert run("--yes", "--printer", str(tmp_path / "test.bin")) == cli.OK
-    out, e = capsys.readouterr()
-    assert "P402" not in e and "the default: a test or command printer has no model; --profile ID changes it" in out
+def test_a_test_file_printer_says_it_has_no_model(no_bt, tmp_path, capsys):
+    """An agent read 'no printer name to go by' (P402) as a mistake: a test file has no model, and the note says so
+    with what changes the profile."""
     assert run("--yes", "--printer", str(tmp_path / "test.bin"), "--json") == cli.OK
     doc = json.loads(capsys.readouterr().out)
-    assert doc["profile"]["by"] == "default" and "P402" not in [p["code"] for p in doc["problems"]]
+    (p402,) = [p for p in doc["problems"] if p["code"] == "P402"]
+    assert p402["severity"] == "note" and "a test printer (a file) has no model" in p402["message"]
+    assert p402["suggestion"].startswith("--profile ID changes it") and doc["profile"]["by"] == "default"
+
+
+def test_a_command_printer_keeps_the_p402_of_a_printer_with_no_name(no_bt, capsys):
+    assert run("--yes", "--command", "ssh tower bobina send --yes -") == cli.OK
+    out, e = capsys.readouterr()
+    assert "P402" in e and "no printer name to go by" in e and "no model" not in out + e
 
 
 def test_init_help_lists_every_form_of_printer():

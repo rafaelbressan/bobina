@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.status/1",
+  "title": "bobina status --json",
+  "type": "object",
+  "required": [
+    "schema",
+    "printer",
+    "transport",
+    "kind",
+    "where",
+    "live_status"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.status/1"
+    },
+    "printer": {
+      "type": "string"
+    },
+    "transport": {
+      "enum": [
+        "bluetooth",
+        "file",
+        "command"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "description": "a Bluetooth printer, a device printer, a file printer, a command printer"
+    },
+    "where": {
+      "type": "string",
+      "description": "the Bluetooth address, the path or the command"
+    },
+    "live_status": {
+      "type": "boolean",
+      "description": "true: the fields below come from the printer itself"
+    },
+    "note": {
+      "type": "string",
+      "description": "live_status false: why, and that printing works the same"
+    },
+    "status_there": {
+      "type": "string",
+      "description": "a command printer over ssh to a bobina: how to ask there"
+    },
+    "answered": {
+      "type": "boolean"
+    },
+    "online": {
+      "type": "boolean"
+    },
+    "cover_open": {
+      "type": "boolean"
+    },
+    "paper_out": {
+      "type": "boolean"
+    },
+    "paper_near_end": {
+      "type": "boolean"
+    },
+    "error": {
+      "type": "boolean"
+    }
+  }
+}
