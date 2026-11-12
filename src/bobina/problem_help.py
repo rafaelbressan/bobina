@@ -58,6 +58,8 @@ FIX = {
     "I105": 'Install the optional support: pip install "bobina[pdf]" or "bobina[svg]".',
     "I107": "Write the path between < >: ![alt](<my image.png>).",
     "I106": "Use a public https address or a local file.",
+    "I108": 'Trust that folder? Add it to image_dirs in config.toml (image_dirs = ["~/Pictures"]), or move the image'
+    " next to the document.",
     # E errors
     "E101": "Read the hint in the message and bobina COMMAND --help.",
     "E102": "Give this command one document.",

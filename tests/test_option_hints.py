@@ -36,6 +36,8 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("print", "--allowall", "--allow-all"),
     ("print", "--allow-network", "--allow-net"),
     ("print", "--allownet", "--allow-net"),
+    ("print", "--untrusted", "--sandbox"),
+    ("check", "--sandbx", "--sandbox"),
     ("print", "--impressora", "--printer"),
     ("print", "--lastt", "--last"),
     ("print", "--agian", "--again"),

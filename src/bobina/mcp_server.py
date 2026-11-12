@@ -5,7 +5,8 @@ Each tool runs the CLI in a child process (`python -m bobina … --json`) and re
 - keeps stdout clean (here it is the protocol channel) and holds no state between calls (the CLI is not
   thread-safe, docs/CLI.md "Two commands at the same time");
 - never reaches the user's terminal: no stdin, BOBINA_NONINTERACTIVE=1 and a session of its own;
-- has the CLI's safety as it is: sandboxed templates, no network images without allow_net, the size limits;
+- has the CLI's safety as it is, with --sandbox: sandboxed templates, a document's images only from its own
+  folder and image_dirs (config.toml), no network images without allow_net, the size limits;
 - can be stopped with everything it started (its process group): on a timeout, and when the client cancels the
   call. A stopped print may be partly on paper, and the result says so.
 print without confirm: true is a dry run (--dry-run): nothing is sent to the printer.
@@ -39,6 +40,7 @@ IMAGES_MAX_BYTES = 8_000_000  # all of them
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
                ".webp": "image/webp"}  # fmt: skip
 ROLL_UNITS = {"length": "30m, 1500cm or 50ft", "diameter": "40mm", "core": "12mm", "width": "57mm, 80mm or 2 1/4in"}
+SANDBOX = "--sandbox"  # document tools: images only from the document folder and image_dirs (config.toml)
 PAPER_WARNING = "part of the job may already be on paper: check the paper and bobina history before printing again"
 
 INSTRUCTIONS = """\
@@ -243,12 +245,12 @@ class Server:
 
     async def check(self, text=None, path=None, **opts):
         target, stdin = _target(text, path)
-        return result(await run(["check", target, "--json", *self.options(**opts)], stdin))
+        return result(await run(["check", target, "--json", SANDBOX, *self.options(**opts)], stdin))
 
     async def preview(self, text=None, path=None, output=None, **opts):
         target, stdin = _target(text, path)
         out = output or str(self.preview_dir() / f"preview-{next(self.n)}.png")
-        r = await run(["preview", target, f"--output={out}", "--json", *self.options(**opts)], stdin)
+        r = await run(["preview", target, f"--output={out}", "--json", SANDBOX, *self.options(**opts)], stdin)
         try:
             files = json.loads(r.stdout).get("files") or []
         except (ValueError, AttributeError):
@@ -259,7 +261,7 @@ class Server:
         target, stdin = _target(text, path)
         mode = ["--yes"] if confirm is True else ["--dry-run"]  # only a real true prints
         copies_ = [f"--copies={copies}"] if copies != 1 else []
-        argv = ["print", target, *mode, "--json", *copies_, *self.options(**opts)]
+        argv = ["print", target, *mode, "--json", SANDBOX, *copies_, *self.options(**opts)]
         r = await run(argv, stdin, TIMEOUT)
         if confirm is not True and r.code in (OK, LEFT_OUT):
             from mcp.types import TextContent

@@ -168,7 +168,7 @@ no length, and the confirmation screen says which ones go on paper.
 
 | Kind | Options | Rule |
 |---|---|---|
-| Part | `--set`, `--data`, `--sheet`, `--rows`, `--where`, `--copies-from`, `--repeat`, `--copies`, `--ask`, `--page`, `--plain`, `--allow-net`, `--allow`, `--compact`/`--no-compact` | apply to the files of the part they are written in, never to the next part |
+| Part | `--set`, `--data`, `--sheet`, `--rows`, `--where`, `--copies-from`, `--repeat`, `--copies`, `--ask`, `--page`, `--plain`, `--allow-net`, `--sandbox`, `--allow`, `--compact`/`--no-compact` | apply to the files of the part they are written in, never to the next part |
 | Job flag | `--compact-all`, `--yes`, `--dry-run`, `--strict`, `-q`, `--json`, `--no-color` | may be written in any part, apply to the whole job |
 | Job default | `--set-all KEY=VALUE`, `--allow-all CODES` | every part gets them; a part's own `--set`/`--allow` wins |
 | Job value | `--printer`, `--profile`, `-o`, `--editor` | one value per job; two different values are an error |
@@ -246,7 +246,7 @@ nudges (`I101`) and the rest prints; a document with nothing left to print adds 
 
 `bobina print https://… --allow-net` does the same for an https image. Network images are off unless the command
 line says `--allow-net`, never from a document by itself; private and local addresses are refused (see
-`docs/SECURITY.md`).
+`docs/SECURITY.md`). `--sandbox`: a shared document's images only from its folder and `image_dirs` (config.toml, `I108`).
 
 ## Shape
 

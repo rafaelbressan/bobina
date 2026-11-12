@@ -602,6 +602,15 @@ def build(args, source, base_dir, counters=None, machine=None):
         raise
 
 
+def sandbox_dirs(cfg: dict, base_dir: str, doc_folder: bool = True) -> tuple[str, ...]:
+    """The folders a sandboxed document's images may come from: its own folder (not for stdin or inline text: they
+    have none) and image_dirs in config.toml."""
+    extra = cfg.get("image_dirs") or []
+    if isinstance(extra, str):
+        extra = [extra]
+    return tuple(([base_dir] if doc_folder else []) + [str(d) for d in extra if str(d).strip()])
+
+
 def _build(args, source, base_dir, counters=None, machine=None):
     from .. import locales
 
@@ -626,6 +635,9 @@ def _build(args, source, base_dir, counters=None, machine=None):
             plain=getattr(args, "plain", False),
             allow=allow_set(args),
             net=getattr(args, "allow_net", False),
+            image_dirs=sandbox_dirs(cfg, base_dir, getattr(args, "doc_folder", True))
+            if getattr(args, "sandbox", False)
+            else None,
             locale=machine or locales.Machine(),  # the locale of a document without locale:
             **({"counters": counters} if counters is not None else {}),
         )
@@ -750,6 +762,7 @@ def _load_job(args, store):
         label = f"part {g + 1} ({_short(a.target)})" if many else ""
         try:
             s, b, origin = _read_one(a)
+            a.doc_folder = origin not in ("stdin", "inline")  # --sandbox: stdin and inline text have no folder
             if getattr(a, "ask", False):
                 cache = args.__dict__.setdefault("_asked", {})  # an edit-and-rebuild keeps the answers
                 if (g, a.target) not in cache:

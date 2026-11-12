@@ -52,6 +52,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "I105": ("warning", "PDF/SVG support not installed", ""),
     "I107": ("warning", "image path with a space must be written between < >", ""),
     "I106": ("warning", "network source refused (private address, redirect, type or size)", ""),
+    "I108": ("warning", "image outside the document folder and image_dirs (--sandbox, MCP)", ""),
     # E errors: the job stops, nothing prints (exit code in docs/CLI.md)
     "E101": ("error", "command line usage", ""),
     "E102": ("error", "this command takes one document", ""),

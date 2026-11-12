@@ -226,6 +226,7 @@ from this list.
 | `I105` | warning | PDF/SVG support not installed |  |
 | `I107` | warning | image path with a space must be written between < > |  |
 | `I106` | warning | network source refused (private address, redirect, type or size) |  |
+| `I108` | warning | image outside the document folder and image_dirs (--sandbox, MCP) |  |
 
 ### Drawing
 

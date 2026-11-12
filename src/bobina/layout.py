@@ -55,6 +55,12 @@ def _image_key(src: str, base_dir: str, attrs, extra: tuple):
     return ident, attrs_key, extra
 
 
+def _real(folder):
+    from pathlib import Path
+
+    return Path(folder).expanduser().resolve()
+
+
 def _remember(key, value) -> None:
     if len(_IMAGES) >= _IMAGES_MAX:
         _IMAGES.pop(next(iter(_IMAGES)))
@@ -63,9 +69,11 @@ def _remember(key, value) -> None:
 
 class Layout:
     def __init__(self, profile, doc: Document, rendered: Rendered | None, nudges: Nudges, net: bool = False,
-                 locale=None):  # fmt: skip
+                 locale=None, image_dirs: tuple[str, ...] | None = None):  # fmt: skip
         self.p, self.doc, self.r, self.n = profile, doc, rendered, nudges
         self.net = net  # https images allowed (only from the command line: --allow-net)
+        # --sandbox / MCP: local images only from these folders (None: anywhere)
+        self.image_dirs = None if image_dirs is None else tuple(_real(d) for d in image_dirs)
         self.locale = locale  # the job's locales.Choice (payment captions), the same as its templates use
         self.em = Emulator(profile)
         self.W = profile.width_dots
@@ -1055,6 +1063,10 @@ class Layout:
         if self.r is not None and self.r.tainted_in(src):
             raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
         src = self.text(src)
+        if self.image_dirs is not None:
+            src = self.confined(src, line)
+            if src is None:
+                return []
         width = attrs.kv.get("width")
         if width and str(width).endswith("%"):
             w = int(self.W * float(str(width)[:-1]) / 100)
@@ -1099,6 +1111,30 @@ class Layout:
         if key is not None:
             _remember(key, (im.info.get("bobina.host"), placed))
         return [BitmapRow(placed, line, "image")]
+
+    def confined(self, src: str, line: int) -> str | None:
+        """--sandbox: a local image is read only from the document's folder or image_dirs (config.toml), wherever
+        its path or a symlink points; else it is left out with I108. Returns the path to read (resolved), or the
+        source as it is for data: and https URLs (those have their own rules)."""
+        from pathlib import Path
+
+        if re.match(r"(?i)^[a-z][a-z0-9+.-]+:", src):  # a scheme (not C:, one letter)
+            return src  # data: URIs hold their bytes; https needs --allow-net; other schemes are refused anyway
+        p = Path(src).expanduser()
+        try:
+            real = (p if p.is_absolute() else Path(self.doc.base_dir) / p).resolve()
+        except (OSError, RuntimeError):  # a symlink loop
+            real = None
+        if real is not None and any(real.is_relative_to(d) for d in self.image_dirs):
+            return str(real)
+        folder = str(real.parent) if real is not None else src
+        self.n.add(
+            "I108",
+            f"image '{src[:60]}' is outside the document folder and image_dirs: not read (--sandbox)",
+            line,
+            f'trust that folder? add it to config.toml: image_dirs = ["{folder}"]',
+        )
+        return None
 
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font."""

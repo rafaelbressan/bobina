@@ -231,9 +231,11 @@ def build(
     net: bool = False,
     row: int | None = None,
     locale=None,
+    image_dirs: tuple[str, ...] | None = None,
 ) -> Result:
     """locale: the machine's locale for a document without locale: (a tag, or the CLI's locales.Machine, which
-    infers and saves it on first use); None: such a document is English."""
+    infers and saves it on first use); None: such a document is English. image_dirs: the only folders the
+    document's images are read from (--sandbox, the MCP server); None: anywhere."""
     nudges = Nudges()
     meta, body, fm_lines = templating.split_front_matter(source)
     defaults, labels, schema = {}, None, {}
@@ -284,7 +286,7 @@ def build(
             labels=labels, quiet_names=frozenset(empty_required), locale=choice,
         )  # fmt: skip
         doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta)
-    rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice).run()
+    rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")
     _note_untested(prof, rows, nudges)

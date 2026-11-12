@@ -29,7 +29,9 @@ uses), `allow`, `allow_net`, `strict`, `copies`. Each result starts with the com
 code, then the CLI's JSON (docs/schemas) and stderr, where problems are written as `--problems json`. It is an
 error unless the exit is 0 or 9. Each call is one bobina process with `BOBINA_NONINTERACTIVE=1`, no stdin and a
 session of its own: the safety is the CLI's (sandboxed templates, network images only with `allow_net`, the
-limits in [CLI.md](CLI.md#long-jobs-and-limits)). A call that does not finish in 300 s (a print too) or that the
+limits in [CLI.md](CLI.md#long-jobs-and-limits)), and `check`, `preview` and `print` run with `--sandbox`: a
+document's images come only from its folder and `image_dirs` in config.toml (`text` has no folder: only
+`image_dirs`); others are left out with `I108`. A call that does not finish in 300 s (a print too) or that the
 client cancels is stopped with everything it started (Ctrl-C, then a kill); its result has no exit code and, for a
 print, says that part of the job may already be on paper: check the paper and `bobina history` before printing
 again.

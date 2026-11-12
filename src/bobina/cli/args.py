@@ -343,6 +343,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--strict": ["--estrito", "--fail-on-warning", "--werror"],
     "--verbose": ["--detalhado", "--detail"],
     "--allow-net": ["--internet", "--net", "--network", "--online", "--web"],
+    "--sandbox": ["--untrusted", "--safe-mode", "--seguro", "--isolado", "--confined"],
     "--copies-from": ["--qty-column", "--quantidade", "--qtd", "--copies-column"],
     "--set-all": ["--set-every", "--global-set"],
     "--json": ["--machine"],
@@ -539,6 +540,11 @@ def make_parser():
         p.add_argument("--force", action="store_true", help="-o: replace files that already exist")
         p.add_argument("--page", metavar="N|N-M", help="PDF target: pages to print (default: all)")
         p.add_argument("--allow-net", action="store_true", help="allow https images (public hosts only)")
+        p.add_argument(
+            "--sandbox",
+            action="store_true",
+            help="a document from someone else: its images only from its own folder and image_dirs (config.toml)",
+        )
 
     p = _cmd(
         sub,
@@ -616,6 +622,7 @@ def make_parser():
     p.add_argument("target", nargs="?", help="file to edit (created if missing); none = a new draft")
     p.add_argument("--template", help="start from a template (fields prefilled)")
     p.add_argument("--set", action="append", metavar="KEY=VALUE")
+    p.add_argument("--sandbox", action="store_true", help="images only from the document folder and image_dirs")
     p = _cmd(
         sub,
         "status",
