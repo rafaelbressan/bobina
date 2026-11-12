@@ -41,17 +41,16 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
 | `help [COMMAND \| format \| nudges \| aliases]` | help | — |
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](mcp.md) | — |
+| `chat`, `ai` | an AI whose answers print: [chat.md](chat.md) | — |
 
 Everyday use: `bobina print "buy bread"`, `bobina print list.bob.md`, `echo "hi" | bobina print --yes`.
 
 ## First run (`init`)
 
-`bobina init` finds the printer (Bluetooth, USB `/dev/usb/lp*`, a file, ssh), confirms the profile its
-name suggests and the locale, asks the roll (as `paper new`), then offers one test strip: a sample, the feed test if
-the profile is unmeasured, the tear ruler last; it asks what the paper shows. Answers come from stdin; run again
-to change one part. `--yes` (or `BOBINA_NONINTERACTIVE`) asks and prints nothing: the first printer in a fixed
-order (USB, known model, printer-like name; `--printer ADDRESS` chooses), its profile, the locale. No roll: `P104`;
-no Bluetooth stack: `P401`; nothing found: `E406`. `--json`: `bobina.init/1`.
+`bobina init` finds the printer (Bluetooth, USB, a file, ssh), confirms its profile and the locale, asks the
+roll (as `paper new`), then offers one test strip with the calibration and asks what the paper shows. Run again to
+change one part. `--yes` (or `BOBINA_NONINTERACTIVE`) asks and prints nothing: the first printer found
+(`--printer ADDRESS` chooses), its profile, the locale; the roll stays unset (`P104`). `--json`: `bobina.init/1`.
 
 ## Confirmation screen
 

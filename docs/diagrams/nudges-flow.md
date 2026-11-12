@@ -133,6 +133,13 @@ from this list.
 |---|---|---|---|
 | `E501` | error | document error |  |
 
+### Chat with an AI (errors)
+
+| Code | Severity | Meaning | Evidence |
+|---|---|---|---|
+| `E601` | error | no AI found, or an unknown AI name |  |
+| `E602` | error | the AI did not answer |  |
+
 ### Template and data (security: always stop)
 
 | Code | Severity | Meaning | Evidence |

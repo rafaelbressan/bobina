@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-AGENT_DOCS = ["llms.txt", "skills/bobina/SKILL.md", "AGENTS.md", "README.md", "docs/agents.md"]
+AGENT_DOCS = ["llms.txt", "skills/bobina/SKILL.md", "AGENTS.md", "README.md", "docs/agents.md", "docs/chat.md"]
 
 
 def _gen():

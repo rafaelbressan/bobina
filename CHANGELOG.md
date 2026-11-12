@@ -14,6 +14,28 @@
   `bobina.init/1`. New problems: `E406` (no printer found), `P401` (no Bluetooth stack, or no USB search here:
   said, never waited for), `P402` (the name does not settle the profile: no match, or it fits two paper widths),
   `P403` (a USB printer this user cannot write to, never taken by `--yes`), `P404` (an unknown profile in config.toml).
+- `bobina chat`: talk to an AI; its answers print on the roll ([docs/chat.md](docs/chat.md)). On a terminal, a chat
+  screen that stays open: a welcome block, an input box with a status line under the last message (the printer,
+  the layout, auto or manual, the paper of the chat, the roll left or `roll ?`), your messages on the right, a
+  spinner (Esc stops the answer), slash commands with completion; each answer prints right away (`/manual`: only
+  on `/print`, `p`; `/again` prints another copy; `/say TEXT` sends text as it is). With a question
+  (`bobina chat "QUESTION"`, or on stdin): asks once, writes the answer and exits; it prints only with `--yes`;
+  `--json` (`bobina.chat/1`). prompt_toolkit (pure Python) is a new dependency.
+- Short is a guardrail: every turn the AI is told the paper width, the limit per answer (`--limit`, `chat_limit`;
+  10 cm, with its unit, 1.5 cm to 1 m), the paper used so far and the roll left; a longer answer is rewritten once,
+  then cut with "…" (said in the terminal). A note at each metre of paper. The ticket's problems and the roll
+  check (P101/P102) are said before printing.
+- Layouts (`--layout`, `chat_layout`, `/strip`, `/tickets`): one strip, or one ticket per answer fed to the tear
+  bar. Styles (`--style`, `chat_style`; default `labels-underline`): your name (`--name`, `chat_name`; "you") and ✦ with
+  the AI's name over each message, with short marks by each speaker (`labels-underline`, `labels-dashes`,
+  `labels-hook`), a small mark between exchanges (`labels-dots`), or a bubble (`labels-outline`, `labels-filled`);
+  earlier looks too (`labels-ruled`, `labels-exchange`, `bubbles`, `boxes`, `plain`…). `--questions` (`chat_questions`) prints your messages too, on the right, about 3 lines at most: a longer
+  one is not sent, never cut. Icons are bundled as 1-bit bitmaps (Lucide, ISC; `tools/gen_icons.py`,
+  `bobina.icons`), the start of a reusable icon set.
+- `bobina ai list | use NAME [--model MODEL]`: the AIs this machine has, best first: Claude Code, Codex and Gemini
+  CLI with their own login and no tools, a local Ollama, then `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (their HTTP
+  APIs, with no SDK: every AI works with a plain install). The choice is saved in config.toml; the first chat
+  takes the best one. No AI: `E601` says what to install or set; no answer: `E602`.
 
 ## 0.1.2 — 2026-11-11
 

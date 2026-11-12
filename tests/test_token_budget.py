@@ -13,6 +13,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "README.md": 3000,
     "docs/CLI.md": 9000,
     "docs/agents.md": 1500,  # set on 11/11, when the MCP section moved here from CLI.md
+    "docs/chat.md": 1800,  # set on 11/11, with bobina chat (its terminal screen and paper styles)
     "docs/FORMAT.md": 8500,
     "docs/guides/batch-printing.md": 3500,
     "docs/guides/templates.md": 2500,

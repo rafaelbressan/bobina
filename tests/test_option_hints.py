@@ -93,6 +93,18 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("template", "--output", "belongs:print"),
     ("view", "--pages", "belongs:preview"),
     ("view", "--compat", "--compact"),
+    ("print", "--model", "--profile"),  # the printer model; in chat and ai --model is the AI's
+    ("preview", "--model", "--profile"),
+    ("chat", "--perguntas", "--questions"),
+    ("chat", "--ia", "--ai"),
+    ("chat", "--tickets", "--layout"),
+    ("chat", "--modle", "--model"),
+    ("chat", "--limt", "--limit"),
+    ("chat", "--estilo", "--style"),
+    ("chat", "--nome", "--name"),
+    ("chat", "--username", "--name"),
+    ("ai", "--modelo-ia", "--model"),
+    ("ai", "--llm-model", "--model"),
 ]
 
 
@@ -167,13 +179,19 @@ def test_every_option_was_reviewed_for_synonyms():
     assert not stale, f"options that no longer exist: {stale}: remove them from cli/args.py"
 
 
+REAL_SYNONYMS = {"--model": {"chat", "ai"}}
+
+
 def test_synonyms_do_not_collide():
     seen = {}
     for opt, words in A.ALSO_KNOWN.items():
         for w in words:
             assert w not in seen, f"{w} is a synonym of both {seen[w]} and {opt}"
             seen[w] = opt
-            assert w not in {o for p in A.COMMANDS.values() for o in A._options(p)}, f"{w} is a real option"
+            # a synonym is never a real option, except these, reviewed: --model is the AI's model in chat and ai, and
+            # what people type for --profile everywhere else (a real option never reaches the hint)
+            real = {c for c, p in A.COMMANDS.items() if w in A._options(p)}
+            assert real <= REAL_SYNONYMS.get(w, set()), f"{w} is a real option of {sorted(real)}"
 
 
 def test_every_command_has_hint_cases_and_a_kind():

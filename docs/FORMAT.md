@@ -446,6 +446,8 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E405` | error | printer busy: another bobina job kept it too long |
 | `E406` | error | `bobina init` found no printer to set up |
 | `E501` | error | document error |
+| `E601` | error | no AI found, or an unknown AI name |
+| `E602` | error | the AI did not answer |
 
 Nudges:
 

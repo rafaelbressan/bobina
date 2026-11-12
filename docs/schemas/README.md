@@ -9,6 +9,7 @@
 | [preview.schema.json](preview.schema.json) (`bobina.preview/1`) | `bobina preview … --json`: exit, files, stats, problems |
 | [config.schema.json](config.schema.json) (`bobina.config/1`) | `bobina config locale [TAG] --json`: value, source, prints_as, example |
 | [init.schema.json](init.schema.json) (`bobina.init/1`) | `bobina init --json`: printer, found, profile, locale, roll, test_strip, problems, next |
+| [chat.schema.json](chat.schema.json) (`bobina.chat/1`) | `bobina chat "QUESTION" --json`: answer, AI and model, paper, printed or not, problems |
 
 `bobina help --json` (`bobina.help/1`) describes the commands, their options, the topics and every problem code
 with what to do. tests/test_schemas.py checks real outputs against these files.

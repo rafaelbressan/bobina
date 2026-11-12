@@ -56,6 +56,11 @@ class Bobina < Formula
     sha256 "8f034d9c90e408f60f8b10a273baab81014c9a81c983dc1ebdc31d4ca5ac5582"
   end
 
+  resource "prompt-toolkit" do
+    url "https://files.pythonhosted.org/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz"
+    sha256 "9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6"
+  end
+
   resource "python-barcode" do
     url "https://files.pythonhosted.org/packages/0e/f2/4c0b07f100e1e184ba682021322c336bbba6aa7adfabd2616f70eff917d9/python_barcode-0.16.1.tar.gz"
     sha256 "665ed09516b0088b5593061c5ac8662caa0b08d56bdad328388b1cab39939ac5"
@@ -69,6 +74,11 @@ class Bobina < Formula
   resource "segno" do
     url "https://files.pythonhosted.org/packages/1c/2e/b396f750c53f570055bf5a9fc1ace09bed2dff013c73b7afec5702a581ba/segno-1.6.6.tar.gz"
     sha256 "e60933afc4b52137d323a4434c8340e0ce1e58cec71439e46680d4db188f11b3"
+  end
+
+  resource "wcwidth" do
+    url "https://files.pythonhosted.org/packages/ea/01/e5ac23733628a6bbb91913a765fcf55ee8070d8d991bc88fdaaf805052c7/wcwidth-0.9.4.tar.gz"
+    sha256 "fd8d57d3cdfe570e3265c8fab1885c24e34ef40889c0759c0c304a19e9835954"
   end
 
   def install

@@ -82,6 +82,8 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "E405": ("error", "printer busy: another bobina job kept it too long", ""),
     "E406": ("error", "bobina init found no printer to set up", ""),
     "E501": ("error", "document error", ""),
+    "E601": ("error", "no AI found, or an unknown AI name", ""),
+    "E602": ("error", "the AI did not answer", ""),
     # P printer
     "P101": ("warning", "the paper roll is almost over (estimate)", ""),
     "P102": ("warning", "the print is longer than the paper left on the roll (estimate)", ""),

@@ -276,6 +276,7 @@ COMMAND_KIND = {
     "paper": "reads", "help": "reads", "config": "reads",
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
     "init": "prints",  # the test strip; --yes asks nothing and prints nothing
+    "chat": "prints", "ai": "reads",  # cli/chat.py
 }  # fmt: skip
 _PARENTS: dict = {}
 
@@ -329,7 +330,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--compact": ["--compacto", "--glue", "--join-labels", "--strip", "--tira"],
     "--marks": ["--marcas", "--cut-marks", "--tear-marks", "--marcar", "--guides"],
     "--quiet": ["--silent", "--silencioso"],
-    "--profile": ["--perfil", "--model", "--modelo"],
+    "--profile": ["--perfil", "--model", "--modelo"],  # --model: a real option of chat and ai (the AI model)
     "--on": ["--key", "--chave", "--match", "--by", "--por", "--join-on", "--join-key"],
     "--sheet": ["--aba", "--tab", "--planilha-aba", "--worksheet"],
     "--ask": ["--pergunta", "--perguntar", "--prompt", "--interactive", "--interativo"],
@@ -355,6 +356,13 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--default": ["--padrao", "--main", "--principal"],
     "--command": ["--cmd", "--comando", "--exec"],
     "--width": ["--largura", "--paper-width", "--roll-width"],
+    "--ai": ["--ia", "--llm", "--provider", "--backend"],  # bobina chat
+    "--model": ["--ai-model", "--llm-model"],
+    "--questions": ["--perguntas", "--print-questions", "--with-questions"],
+    "--layout": ["--layout-chat", "--tickets", "--ticket", "--strip-layout", "--leiaute"],
+    "--manual": ["--on-demand", "--no-auto-print", "--imprimir-manual"],
+    "--style": ["--estilo", "--look", "--theme", "--tema", "--bubbles"],
+    "--name": ["--nome", "--my-name", "--username", "--usuario", "--user-name", "--apelido"],
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
@@ -873,6 +881,9 @@ def make_parser():
         ["claude mcp add bobina -- bobina mcp", "bobina mcp --printer test"],
         cmd_mcp,
     )
+    from .chat import register
+
+    register(sub, _cmd)  # chat and ai
     PARSER = ap
     return ap
 

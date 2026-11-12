@@ -9,7 +9,7 @@ description = "Print Markdown on thermal roll printers, with calibrated defaults
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-license-files = ["LICENSE", "src/bobina/fonts/licenses/*"]
+license-files = ["LICENSE", "src/bobina/fonts/licenses/*", "src/bobina/icons/licenses/*"]
 classifiers = [
   "Environment :: Console",
   "Operating System :: POSIX :: Linux",
@@ -28,6 +28,7 @@ dependencies = [
   "python-barcode>=0.15",
   "ppf-datamatrix>=0.2",
   "pdf417gen>=0.7",
+  "prompt_toolkit>=3.0.40",  # bobina chat: the input box, the status line (pure Python)
 ]
 
 [project.optional-dependencies]

@@ -90,6 +90,10 @@ FIX = {
     "E406": "Turn the printer on (Bluetooth: in range; USB: plugged in), or name it: bobina init --printer ADDRESS"
     " (or DEVICE), --command 'ssh HOST bobina send --yes -' for one on another machine.",
     "E501": "The message has the line and the template error; often a block not closed: {% if x %} needs {% endif %}.",
+    "E601": "Install or log in to one of the AIs the message lists (bobina ai list shows what this machine has),"
+    " or use a name from it.",
+    "E602": "Read the AI's own reason in the message: log in to it (run claude, codex login, gemini), check the key"
+    " or the network, or try again; bobina ai list shows the AIs of this machine.",
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
     "P102": "Load a new roll first (bobina paper new LENGTH), or print fewer labels.",

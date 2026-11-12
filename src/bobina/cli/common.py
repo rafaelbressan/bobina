@@ -138,6 +138,7 @@ STOPPED_BY_COMMAND = {  # what an error means for each command: the last words o
     "calibrate": "nothing printed", "mode": "nothing sent to the printer",
     "preview": "nothing saved", "check": "", "view": "", "status": "", "history": "", "help": "", "fonts": "",
     "init": "",  # the steps before the error are kept
+    "chat": "nothing printed",
 }  # fmt: skip
 
 
@@ -999,7 +1000,7 @@ def report_nudges(res, args) -> int:
         cmd = getattr(args, "command", "print")
         if strict:
             outcome = f"{stopped() or 'stopped'} (--strict)"
-        elif cmd not in ("print", "edit"):
+        elif cmd not in ("print", "edit", "chat"):
             outcome = ""  # check, view, preview: the warnings are the answer, nothing was meant to print
         elif getattr(args, "dry_run", False):
             outcome = "nothing printed (dry run)"

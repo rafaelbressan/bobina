@@ -27,6 +27,7 @@ Facts an agent needs first:
 - [README](README.md): install, the document format in one screen, every command in one table
 - [Agents](docs/agents.md): the rules for agents, machine output
 - [MCP server](docs/mcp.md): `bobina mcp`, setup and tools
+- [Chat](docs/chat.md): `bobina chat` (a chat screen) or `bobina chat "QUESTION" --yes` (one printed answer); `bobina ai` chooses the AI
 - [CLI reference](docs/CLI.md): commands and options, problems and exit codes, strips (`--compact`, `--marks`), calibration
 - [Document format](docs/FORMAT.md): the `.bob.md` format and the catalog of problem codes
 - [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
