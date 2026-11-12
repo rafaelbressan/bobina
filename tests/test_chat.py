@@ -907,10 +907,11 @@ def test_limit_from_the_command_line(monkeypatch, capsys, printer):
 
 @pytest.mark.parametrize(
     "argv,want",
-    [(["--layout", "ticket"], None), (["--layout", "continuous"], None), (["--style", "c1"], None),
-     (["--style", "bubble"], None), (["--layout", "tickts"], "did you mean tickets?"),
-     (["--style", "lables"], "did you mean labels?"), (["--layout", "xyz"], "strip, tickets"),
-     (["--style", "zzz"], "labels-underline, labels-dashes, labels-dots")],
+    [(["--layout", "ticket"], None), (["--layout", "continuous"], None), (["--paper-style", "c1"], None),
+     (["--paper-style", "bubble"], None), (["--layout", "tickts"], "did you mean tickets?"),
+     (["--paper-style", "lables"], "did you mean labels?"), (["--layout", "xyz"], "strip, tickets"),
+     (["--paper-style", "zzz"], "your message in a framed bubble"),
+     (["--style", "c1"], "did you mean --paper-style?")],
 )  # fmt: skip
 def test_layout_and_style_values(monkeypatch, capsys, argv, want):
     if want is None:
@@ -930,7 +931,7 @@ def test_a_bad_setting_in_config_lists_the_valid_ones(monkeypatch, capsys):
 
 def test_config_defaults_apply_and_options_win(monkeypatch, capsys, printer):
     config.set_value("chat_questions", True)
-    config.set_value("chat_style", "labels-ruled")
+    config.set_value("chat_paper_style", "labels-ruled")
     code, o = ask_once(monkeypatch, capsys, Fake(["Blue."]), "my question?", "--yes")
     assert code == 0 and b"my question?" in printer.read_bytes()  # chat_questions = true
 
@@ -1099,7 +1100,8 @@ def test_the_outlined_bubble_has_the_name_above_it():
 
 
 def test_style_switches_the_paper_style_inside_the_chat():
-    """/style lists the paper styles with the one in use; /style NAME (or a synonym like d4) changes the next answers."""
+    """/paper-style lists the paper styles, what each looks like and the one in use; /paper-style NAME (or a synonym
+    like d4) changes the next answers; /style (the old name) still works, with a note."""
     from bobina import chat
     from bobina.cli import chat as cli_chat
 
@@ -1115,11 +1117,15 @@ def test_style_switches_the_paper_style_inside_the_chat():
     t = ticket()
     t.style = cli_chat.DEFAULT_STYLE
     s = cli_chat.Session(args, chat.Conversation(Fake([]), t), None, None, ui, 80)
-    s.handle("/style")
-    assert "labels-underline (in use)" in ui.notes[-1] and "labels-outline" in ui.notes[-1]
-    s.handle("/style d4")
-    assert t.style == "labels-outline" and "labels-outline" in ui.notes[-1]
-    s.handle("/style outlnie")
+    s.handle("/paper-style")
+    listed = ui.notes[-1]
+    assert "▸ labels-underline   a short line under each name  (in use)" in listed
+    assert "   labels-outline     your message in a framed bubble" in listed
+    s.handle("/paper-style d4")
+    assert t.style == "labels-outline"
+    assert ui.notes[-1] == "the next answers print with: your message in a framed bubble (labels-outline)"
+    s.handle("/paper-style outlnie")
     assert t.style == "labels-outline" and "did you mean" in ui.notes[-1]
     s.handle("/style labels-outline")
-    assert ui.notes[-1] == "already: labels-outline"
+    assert ui.notes[-2] == "/style is now called /paper-style"
+    assert ui.notes[-1] == "already printing with: your message in a framed bubble (labels-outline)"

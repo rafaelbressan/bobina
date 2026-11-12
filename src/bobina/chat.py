@@ -62,8 +62,10 @@ def paragraphs(text: str) -> list[Block]:
 
 @dataclass(frozen=True)
 class Look:
-    """How the two speakers look on paper (a --style)."""
+    """How the two speakers look on paper (a --paper-style). about: what it looks like, in one line (the one source
+    for the lists in the chat, --help, completion and docs/chat.md)."""
 
+    about: str
     person: str = "label"  # label: name line, then the text on the right · text: the text only · bubble: a black
     # bubble with the icon by it · box: a framed bubble with the icon · named-bubble / named-box: the name line,
     # then the bubble or box (fitted to the text, on the right)
@@ -80,21 +82,37 @@ class Look:
 
 LOOKS = {
     # the D set (11/11): one continuous conversation; short marks only, by the speaker they belong to
-    "labels-underline": Look(under_person="solid", under_ai="solid"),  # D1
-    "labels-dashes": Look(under_person="dashed", under_ai="dashed"),  # D2
-    "labels-dots": Look(between="dots"),  # D3
-    "labels-outline": Look(person="named-box"),  # D4
-    "labels-filled": Look(person="named-bubble", under_ai="dotted"),  # D5
-    "labels-hook": Look(under_person="hook", under_ai="hook", between="ornament"),  # D6
-    # earlier ones, kept behind --style
-    "labels": Look(between="dashed-full"),
-    "labels-ruled": Look(above_names=True),
-    "labels-underlined": Look(under_messages=True),
-    "labels-exchange": Look(between="double", inside="dashed"),
-    "labels-bubble": Look(person="bubble", full=True, between="dotted-full"),
-    "bubbles": Look(person="bubble", full=True),
-    "boxes": Look(person="box", ai_icon="bot", between="dashed-full"),
-    "plain": Look(person="text", ai_label=False, between="dashed-full"),
+    "labels-underline": Look("a short line under each name", under_person="solid", under_ai="solid"),  # D1
+    "labels-dashes": Look("a short dashed line under each name", under_person="dashed", under_ai="dashed"),  # D2
+    "labels-dots": Look("no lines; a small · · · between exchanges", between="dots"),  # D3
+    "labels-outline": Look("your message in a framed bubble", person="named-box"),  # D4
+    "labels-filled": Look("your message in a black bubble", person="named-bubble", under_ai="dotted"),  # D5
+    "labels-hook": Look(
+        "a hooked line under each name, — ✦ — between exchanges",
+        under_person="hook",
+        under_ai="hook",
+        between="ornament",
+    ),  # D6  # fmt: skip
+    # earlier ones, kept behind --paper-style
+    "labels": Look("names over the messages, a dashed line across between exchanges", between="dashed-full"),
+    "labels-ruled": Look("a line across over each name", above_names=True),
+    "labels-underlined": Look("a line across under each message", under_messages=True),
+    "labels-exchange": Look(
+        "a double line between exchanges, a dashed one inside", between="double", inside="dashed"
+    ),  # fmt: skip
+    "labels-bubble": Look(
+        "your message in a black bubble across the paper, dotted lines between",
+        person="bubble",
+        full=True,
+        between="dotted-full",
+    ),  # fmt: skip
+    "bubbles": Look("your message in a black bubble across the paper", person="bubble", full=True),
+    "boxes": Look(
+        "your message in a framed box, a robot by the answer", person="box", ai_icon="bot", between="dashed-full"
+    ),  # fmt: skip
+    "plain": Look(
+        "no names nor icons, a dashed line between exchanges", person="text", ai_label=False, between="dashed-full"
+    ),  # fmt: skip
 }
 STYLES = tuple(LOOKS)
 SPEAKER_ICON = {"ai": "sparkles", "person": "user-round", "ai-boxes": "bot"}
