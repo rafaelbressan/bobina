@@ -231,7 +231,7 @@ class TerminalUI:
     def answer(self, who: str, text: str) -> None:
         cols = width() - 1
         wrapped = "\n".join(textwrap.fill(p, cols) if p.strip() else "" for p in text.split("\n"))
-        self.out([("class:ai", f"✦ {who}\n"), *rich_text(wrapped), ("", "\n")])
+        self.out([("class:ai", f"✦ {who}\n"), *rich_text(wrapped, "class:ai-text"), ("", "\n")])
 
     def note(self, text: str) -> None:
         self.out([("class:note", f"  › {text}")])

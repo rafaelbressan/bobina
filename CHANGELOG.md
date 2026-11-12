@@ -4,8 +4,9 @@
 
 - The chat screen's colours: `--theme dark|light|mono|contrast` (`chat_theme`; by default the terminal's background
   when `COLORFGBG` says it, else dark), `/theme NAME` in the chat, and colours of one's own per element in
-  `[chat.colors]` (a wrong one is a note and the theme's stays). `NO_COLOR` wins. bobina keeps every table of
-  config.toml when it rewrites the file (before, only `[printers.*]`).
+  `[chat.colors]` (a wrong one is a note and the theme's stays). `NO_COLOR` and `--no-color` win. When bobina
+  rewrites config.toml it keeps every table, array of tables, date and multi-line string (before, only
+  `[printers.*]` and plain values), and a config it cannot write back the same is left as it is, with a problem.
 - `bobina init`: the first run in one command. It finds the printer (a Bluetooth scan, USB printers on Linux with
   their model), or takes a test file printer or one on another machine (ssh); suggests the profile from the name
   the printer gives itself ("looks like a Goldensky MTP-II, 58 mm paper: right?"); shows the locale with a date and

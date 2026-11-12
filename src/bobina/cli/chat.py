@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import os
 import re
 import sys
 
 from .. import ai, config, engine
 from .. import profile as profiles
 from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, STYLES, Conversation, Ticket
+from ..fileio import StateError
 from . import chat_theme
 from .chat_theme import THEMES
 from .chat_theme import WORDS as THEME_WORDS
@@ -76,7 +76,7 @@ def _value(kind: str, valid: tuple, words: dict):
     """An option value with its synonyms and typos: the valid name, or an error that suggests one and lists all."""
 
     def convert(text: str) -> str:
-        k = text.strip().lower().replace("_", "-")
+        k = chat_theme.normalise(text)  # one rule for every chat option value, /theme too
         if k in valid:
             return k
         if k in words:
@@ -476,12 +476,17 @@ class Session:
         if not name:
             self.ui.note(f"no theme '{wanted}': {', '.join(THEMES)}")
             return
-        theme = chat_theme.pick(name, config.load())
+        try:
+            cfg = config.load()
+        except StateError as e:  # a config damaged since the chat began: the theme without one's own colours
+            self.ui.note(f"[chat.colors] not read ({e})")
+            cfg = {}
+        off = getattr(getattr(self.ui, "theme", None), "off", "")  # --no-color and NO_COLOR stay as they were
+        theme = chat_theme.pick(name, cfg, off=off)
         self.ui.set_theme(theme)
         for n in theme.notes:
             self.ui.note(n)
-        no_color = "" if theme.color or name == "mono" else " (NO_COLOR is set: no colours)"
-        self.ui.note(f"theme {name}{no_color}")
+        self.ui.note(f"theme {name}" + (f" ({theme.off}: no colours)" if theme.off else ""))
 
     def turn(self, question: str) -> None:
         conv, ui = self.conv, self.ui
@@ -632,10 +637,10 @@ def terminal() -> bool:
 
 def _ui(args, cfg):
     """The chat screen, with its theme (--no-color as NO_COLOR); notes about the theme first."""
+    from ..view import colors_off
     from .chat_tui import TerminalUI
 
-    env = {**os.environ, **({"NO_COLOR": "1"} if args.no_color else {})}
-    theme = chat_theme.pick(args.theme, cfg, env)
+    theme = chat_theme.pick(args.theme, cfg, off=colors_off(flag=args.no_color))
     for n in theme.notes:
         err(f"note: {n}")
     return TerminalUI(theme)

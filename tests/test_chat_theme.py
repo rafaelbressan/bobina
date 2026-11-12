@@ -12,9 +12,9 @@ LIGHT_TERM = {"COLORFGBG": "0;15"}
 
 def test_every_preset_styles_every_element():
     for name in T.THEMES:
-        styles = T.build(name, env={}).styles()
+        styles = T.build(name).styles()
         assert {"you", "ai", "dim", "frame", "status", "note", "over"} <= set(styles)
-    assert "bold" in T.build("mono", env={}).styles()["you"] and not T.build("mono", env={}).color
+    assert "bold" in T.build("mono").styles()["you"] and not T.build("mono").color
 
 
 @pytest.mark.parametrize(
@@ -78,7 +78,7 @@ def test_theme_inside_the_chat(monkeypatch):
     from bobina.cli import chat as cli_chat
 
     class UI(LinesUI):
-        theme = T.build("dark", env={})
+        theme = T.build("dark")
         notes: list = []
 
         def set_theme(self, theme):
@@ -100,3 +100,88 @@ def test_theme_inside_the_chat(monkeypatch):
     assert ui.theme.name == "light" and ui.notes[-1].startswith("theme light")
     s.handle("/theme neon")
     assert "no theme 'neon'" in ui.notes[-1] and ui.theme.name == "light"
+
+
+# ------------------------------------------------------------------------------------------------ review fixes
+
+
+def _session_with(ui):
+    from test_chat import Fake, ticket
+
+    from bobina import chat
+    from bobina.cli import chat as cli_chat
+
+    args = type("A", (), {"manual": False, "questions": False, "dry_run": True, "argv": ["chat"], "printer": None,
+                          "strict": False, "quiet": False})()  # fmt: skip
+    return cli_chat.Session(args, chat.Conversation(Fake([]), ticket()), None, None, ui, 80)
+
+
+class ThemeUI:
+    def __init__(self, theme):
+        self.theme, self.notes = theme, []
+
+    def set_theme(self, theme):
+        self.theme = theme
+
+    def note(self, text):
+        self.notes.append(text)
+
+
+def test_theme_in_the_chat_keeps_no_color(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    ui = ThemeUI(T.pick("dark", {}, off="--no-color"))
+    _session_with(ui).handle("/theme light")
+    assert ui.theme.name == "light" and ui.theme.off == "--no-color" and not ui.theme.color
+    assert ui.notes[-1] == "theme light (--no-color: no colours)"
+
+
+def test_theme_in_the_chat_with_a_damaged_config():
+    config.path().write_text("this is = = not toml\n")
+    ui = ThemeUI(T.build("dark"))
+    s = _session_with(ui)
+    s.handle("/theme light")
+    assert ui.theme.name == "light" and "[chat.colors] not read" in ui.notes[0]
+    s.handle("/theme")  # the chat goes on
+    assert "light (in use)" in ui.notes[-1]
+
+
+@pytest.mark.parametrize(
+    "env,flag,why",
+    [({"NO_COLOR": "1"}, False, "NO_COLOR is set"), ({}, True, "--no-color"), ({"TERM": "dumb"}, False, "TERM=dumb"),
+     ({"NO_COLOR": "1"}, True, "NO_COLOR is set"), ({}, False, "")],
+)  # fmt: skip
+def test_why_colours_are_off(env, flag, why):
+    from bobina.view import colors_off
+
+    assert colors_off(env=env, flag=flag) == why
+
+
+def test_no_colour_keeps_the_attributes_of_ones_own_colours():
+    cfg = {"chat": {"colors": {"you": "italic #ff8700", "ai-text": "underline ansiblue", "frame": "#123456"}}}
+    styles = T.pick("dark", cfg, off="NO_COLOR is set").styles()
+    assert styles["you"] == "bold italic" and styles["ai-text"] == "underline" and styles["frame"] == ""
+    assert "#" not in " ".join(styles.values()) and "ansi" not in " ".join(styles.values())
+
+
+def test_the_text_of_each_speaker_has_its_own_element():
+    assert T.build("dark").styles()["you-text"] == "#87d7d7"
+    styles = T.pick("dark", {"chat": {"colors": {"you-text": "#ffd700", "ai-text": "#c0c0c0"}}}, env={}).styles()
+    assert styles["you-text"] == "#ffd700" and styles["ai-text"] == "#c0c0c0" and styles["you"] == "bold #00afaf"
+
+
+@pytest.mark.parametrize(
+    "value,want",
+    [("15;0", "dark"), ("0;15", "light"), ("0;7", "light"), ("15;default;0", "dark"), ("0;231", "light"),
+     ("0;255", "light"), ("0;250", "light"), ("0;16", "dark"), ("0;232", "dark"), ("0;17", "dark"),
+     ("0;bright", None), ("", None)],
+)  # fmt: skip
+def test_the_terminal_background(value, want):
+    assert T.background({"COLORFGBG": value}) == want
+
+
+def test_one_normaliser_for_theme_names(capsys):
+    from bobina.cli import chat as cli_chat
+
+    assert T.name_of(" High_Contrast ") == "contrast"
+    convert = cli_chat._value("theme", T.THEMES, T.WORDS)
+    assert convert(" High_Contrast ") == "contrast" and convert("LIGHT") == "light"
