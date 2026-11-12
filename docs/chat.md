@@ -1,22 +1,39 @@
 # Chat with an AI on paper (`bobina chat`, `bobina ai`)
 
-`bobina chat` is a conversation in the terminal: you type, an AI answers, and each answer also prints on the
-roll. Everything shows in the terminal too.
+Two ways:
+
+- **`bobina chat`** on a terminal opens the chat and keeps it open until you leave (`/quit` or Ctrl-D). Each answer
+  shows and prints right away; entering the chat is the consent (`/manual`: print only on `/print`).
+- **`bobina chat "QUESTION"`** (or the question on stdin) asks once, writes the answer to stdout and exits, like
+  `claude -p`. It prints only with `--yes`, as `bobina print` does; without it, it says `not printed: ~4 cm; add
+  --yes to print`. `--json` writes the answer, the AI and model, the paper and whether it printed
+  ([schema](schemas/chat.schema.json)).
 
 ```bash
-bobina chat                      # the first time, it asks which AI (and saves the choice)
-bobina chat --questions          # print your messages too, on the right; the answers stay on the left
-bobina chat --layout tickets     # one ticket per answer, to tear off
-bobina chat --style bubbles      # how the two speakers look on paper
-bobina chat --manual             # print only when you type p
-bobina chat --dry-run            # nothing prints; the paper each answer would take is shown
+bobina chat                                   # the first time, it asks which AI (and saves the choice)
+bobina chat --questions --layout tickets      # your messages print too; one ticket per answer
+bobina chat "why is the sky blue?" --yes      # one answer, printed
+echo "a haiku about paper" | bobina chat --json --dry-run
 ```
+
+| Option | What | config.toml |
+|---|---|---|
+| `--ai NAME`, `--model MODEL` | the AI and its model for this run | `ai`, `ai_model` |
+| `--printer NAME` | where answers print (shown in the welcome block and the status line) | `default_printer` |
+| `--layout strip\|tickets` | one strip (default), or one ticket per answer fed to the tear bar | `chat_layout` |
+| `--style STYLE` | how the two speakers look on paper (below); default `labels` | `chat_style` |
+| `--questions` | print your messages too, on the right (about 3 lines at most; never cut: a longer one is not sent) | `chat_questions` |
+| `--limit LENGTH` | paper per answer, with its unit: `10cm` (default), `100mm`, `4in`; 1.5 cm to 1 m | `chat_limit` |
+| `--manual` | the chat: print only on `/print` (`p`) | |
+| `--dry-run` | never print; show the paper each answer would take | |
+| `--yes` | one question: print the answer | |
+
+Options apply to that run only. Values have synonyms and typo hints (`--layout ticket`, `--style c1`).
 
 ## Which AI (`bobina ai`)
 
-`bobina ai list` shows what this machine already has, best first, and `bobina ai use NAME [--model MODEL]`
-saves the choice in config.toml (`ai`, `ai_model`); `bobina chat --ai NAME --model MODEL` overrides it for one
-chat. `bobina ai list --json` has every AI, found or not, and what each one needs.
+`bobina ai list` shows what this machine already has, best first; `bobina ai use NAME [--model MODEL]` saves the
+choice; `bobina ai list --json` has every AI, found or not, and what each one needs.
 
 | NAME | What | Needs |
 |---|---|---|
@@ -24,63 +41,53 @@ chat. `bobina ai list --json` has every AI, found or not, and what each one need
 | `codex` | Codex CLI, with its own login | `codex login` |
 | `gemini` | Gemini CLI, with its own login | `gemini`, logged in once |
 | `ollama` | a local chat model through Ollama (`OLLAMA_HOST`; embedding models are skipped) | `ollama pull llama3.2` |
-| `anthropic` | the Claude API (default model `claude-opus-5-5`) | `ANTHROPIC_API_KEY` and `pip install 'bobina[ai]'` |
-| `openai` | the OpenAI API (default model `gpt-5`) | `OPENAI_API_KEY` and `pip install 'bobina[ai]'` |
+| `anthropic` | the Claude API (default model `claude-opus-5-5`) | `ANTHROPIC_API_KEY` |
+| `openai` | the OpenAI API (default model `gpt-5`) | `OPENAI_API_KEY` |
 
 AI programs only answer: they run in an empty folder, with the conversation on stdin and nothing that reaches the
 machine. Claude Code runs without tools and without your settings, hooks, plugins, CLAUDE.md or MCP servers,
 saving no session; Codex without its shell, image, web search and agent tools or MCP servers, in a read-only
-sandbox, saving nothing; Gemini CLI with every tool denied by a policy and no extensions. No AI on the machine:
-the chat stops with `E601` and lists what to install or set.
+sandbox; Gemini CLI with every tool denied by a policy and no extensions. The APIs are called over HTTPS with no
+SDK: every AI works with a plain install. No AI: `E601` lists what to install or set; no answer: `E602`.
 
 ## Short answers are a guardrail
 
 Every turn, the AI is told the paper width and characters per line (from the printer profile), the limit per
 answer in characters, the paper this conversation has used and the roll left (when `bobina paper` knows it); and
-to write short plain sentences, with no Markdown but **bold**.
-
-- The limit is about 10 cm of paper per answer: `--limit 6cm`, or `chat_limit = "6cm"` in config.toml.
-- A longer answer: the AI is asked once to rewrite it shorter. Still too long: it prints cut at the limit with
-  "…", the terminal says so and shows all of it. Paper never asks to "continue".
-- With `--questions`, your message prints too and has a limit of about 3 printed lines (`chat_question_limit`):
-  a longer one is not sent, and the terminal says why; it is never cut.
-- At each metre of paper in one conversation, a note in the terminal (never on paper). Problems of the ticket
-  (a letter the printer lacks, the roll running out) are said before it prints, as `bobina print` says them.
-
-An answer is printed as plain text: never as a `.bob.md` document (no templates, raw bytes, images or files).
+to write short plain sentences, with no Markdown but **bold**. A longer answer is rewritten once; still too long,
+it prints cut at the limit with "…" (the terminal shows all of it). Paper never asks to "continue". At each metre
+of paper in one conversation, a note in the terminal. Problems of the ticket (a letter the printer lacks, the roll
+running out) are said before it prints, as `bobina print` says them. An answer is printed as plain text: never as
+a `.bob.md` document (no templates, raw bytes, images or files).
 
 ## On paper: layouts and styles
 
-- `--layout strip` (default): one strip for the whole conversation. The AI and model (`Claude · Opus 5.5`) and
-  the date on top once, no paper fed between answers; the end of the chat (or `/tickets`) feeds the strip to the
-  tear bar.
-- `--layout tickets`: each answer is its own ticket, with the AI, the model and the time on top, fed to the tear
-  bar (with the tear mark when `marks` is on) to tear off.
-- `--style plain` (default): your message right-aligned, the answer left-aligned, a dashed line between answers.
-  `bubbles`: your message white on black in a bubble on the right, by a person icon; the answer under a ✦ and
-  the AI's name. `boxes`: your message in a framed box, the answer under a robot icon. `labels`: "you" and a
-  person icon over your message, ✦ and the AI's name over the answer. The icons are Lucide (ISC license).
+- `strip`: the AI and model (`Claude · Opus 5.5`) and the date on top once, the answers one after the other, no
+  paper fed between them; the end of the chat (or `/tickets`) feeds the strip to the tear bar.
+- `tickets`: each answer is its own ticket, with the AI, the model and the time on top, fed to the tear bar (with
+  the tear mark when `marks` is on) to tear off. One question is always one ticket.
 
-`--layout` and `--style`, or `chat_layout` and `chat_style` in config.toml; `/strip` and `/tickets` in the chat.
-Paper counts include the header, the icons, the dashed lines and the feeds, measured as `bobina check` measures a
-document; printed answers go to `bobina history`.
+Styles: `labels` ("you" and a person icon over your message, ✦ and the AI's name over the answer), and with rules:
+`labels-ruled` (a rule over each name), `labels-underlined` (a rule under each message), `labels-exchange` (a
+double rule between exchanges, a dashed one inside); `labels-bubble` (your message white on black across the paper, a dotted rule between exchanges);
+`bubbles`, `boxes`, `plain` (no icons). Icons: Lucide (ISC license).
 
-## In the terminal
+## The chat screen
 
-On a terminal, with `pip install 'bobina[ai]'`, the chat opens with a welcome block, keeps the terminal's
-scrollback, and keeps a framed input box under the last message with a status line under it (the AI, the
-printer, the layout, auto or manual, the paper of this chat and the roll left). Your messages show on the right,
-the AI's under ✦ and its name, and what each answer took on paper in a dim line. Without a terminal (a pipe, an
-agent) or without prompt_toolkit, the chat reads and writes plain lines. `NO_COLOR` turns the colours off.
+It opens with a welcome block, keeps the terminal's scrollback, and keeps a framed input box under the last message
+with a status line: the AI, the printer, the layout, auto or manual, the paper of this chat and the roll (`roll
+7.4 m left`, or `roll ?` until `bobina paper new 30m` says its length). Your messages show on the right, the AI's
+under ✦ and its name, what each answer took on paper in a dim line. `NO_COLOR` turns colours off. The screen needs
+a terminal: without one (or with `BOBINA_NONINTERACTIVE`), ask one question instead (`E107` says so).
 
 | Type | Does |
 |---|---|
-| `p` | print the last answer (manual mode, or again after the printer failed) |
-| `/manual`, `/auto` | print only on `p`, or every answer right away (the default) |
-| `/strip`, `/tickets` | switch the layout |
-| `/questions on`, `/questions off` | print your messages too, or not |
+| `/print` (`p`) | print the last answer if it is not on paper yet (manual mode, or after the printer failed) |
+| `/again` | print another copy of the last answer |
+| `/manual`, `/auto` | print only on `/print`, or every answer right away (the default) |
+| `/strip`, `/tickets`, `/questions on\|off` | switch the layout; print your messages too, or not |
+| `/say TEXT` | send TEXT as it is: the single letter p, or a line that starts with / |
 | `/help`, `/quit` | the commands (Tab completes them); end (also Ctrl-D) |
 | Esc or Ctrl-C | stop the answer being written; the chat goes on |
 
-The printer off or out of reach: the chat goes on in the terminal, says the answer was not printed, and `p`
-tries again.
+The printer off or out of reach: the chat goes on, says the answer was not printed, and `p` tries again.

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.chat/1",
+  "title": "bobina chat \"QUESTION\" --json: one question, its answer and what it took on paper",
+  "type": "object",
+  "required": [
+    "schema",
+    "question",
+    "answer",
+    "ai",
+    "model",
+    "paper_mm",
+    "printed",
+    "printer",
+    "rewritten",
+    "cut",
+    "problems"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.chat/1"
+    },
+    "question": {
+      "type": "string"
+    },
+    "answer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paper_answer": {
+      "type": "string"
+    },
+    "ai": {
+      "type": "string"
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paper_mm": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "printed": {
+      "enum": [
+        true,
+        false
+      ]
+    },
+    "printer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rewritten": {
+      "enum": [
+        true,
+        false
+      ]
+    },
+    "cut": {
+      "enum": [
+        true,
+        false
+      ]
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "$ref": "problem.schema.json"
+      }
+    }
+  }
+}

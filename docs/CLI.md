@@ -40,7 +40,7 @@ Status: **implemented in v0.x** (see Implementation notes). Language: **English 
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
 | `help [COMMAND \| format \| nudges \| aliases]` | help | — |
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](mcp.md) | — |
-| `chat`, `ai list \| use` | talk to an AI, its answers print: [chat.md](chat.md) | — |
+| `chat`, `ai` | an AI whose answers print: [chat.md](chat.md) | — |
 
 Everyday use: `bobina print "buy bread"`, `bobina print list.bob.md`, `echo "hi" | bobina print --yes`.
 
