@@ -58,11 +58,12 @@ bobina init                   # printer, profile, locale, roll, test strip
 bobina init --yes             # agents, scripts: no questions, no print
 ```
 
-Bluetooth printing needs Linux and the system Python (uv's and Homebrew's Pythons have no Bluetooth sockets;
-`get.sh` picks the right one). The .deb, pipx, the boot service, extras and a checkout
-(`./install.sh`): [docs/INSTALL.md](docs/INSTALL.md).
+Bluetooth printing needs Linux and the system Python (`get.sh` picks it). The .deb, pipx, the boot service and a
+checkout: [docs/INSTALL.md](docs/INSTALL.md).
 Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
 `bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
+Dates and money: the first `check`, `preview` or `print` takes the locale from the time zone and saves it
+(`M203`); `bobina config locale en-US` changes it.
 
 ## The format in one screen
 
@@ -132,7 +133,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `seq list \| set \| reset` | persistent counters (`{{ seq.NAME }}`); `seq set ticket 100`: the next print uses 100 |
 | `init` | first run; again to change one part |
 | `printer scan \| add \| list \| use \| remove` | printers live in `~/.config/bobina/config.toml` |
-| `config locale [TAG]` | the locale of documents without `locale:` (first run: from the time zone, saved) |
+| `config locale [TAG]` | the locale of documents without `locale:` |
 | `status`, `mode [esc\|tspl\|cpcl]` | printer state; command language |
 | `calibrate compare PHOTO FILE` | how close the preview is to the paper |
 | `calibrate tear` / `calibrate feed` | where the tear bar is; whether feeds after images need the safe mode |
