@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageOps
 
+from . import imaging
+
 
 @dataclass
 class Report:
@@ -61,7 +63,7 @@ def paper_candidates(g: Image.Image) -> list[tuple[int, int, int, int]]:
     k = max(1, max(g.width, g.height) // 600)  # ~600 px finds a ticket, fast
     small = g.resize((max(1, g.width // k), max(1, g.height // k)))
     w, h = small.size
-    thr = _otsu(small.histogram())
+    thr = imaging.otsu(small.histogram())
     bits = small.point(lambda v: 255 if v > thr else 0).tobytes()
     edges = [_row_edges(bits[y * w : (y + 1) * w], w) for y in range(h)]
     r, tol = max(1, w // 100), max(2, w // 25)
@@ -153,21 +155,6 @@ def _content(paper: Image.Image, exact: Image.Image, profile, paper_mm: float):
     side = (paper.width - printable * px_per_mm) / 2  # the printable area is centred on the paper
     content = paper.crop((int(side), 0, int(paper.width - side), paper.height)).resize((W, exact.height))
     return content, measured_mm, expected_mm
-
-
-def _otsu(hist: list[int]) -> int:
-    """The grey level that best splits the photo in two (paper and table)."""
-    total, everything, below, below_sum, best = sum(hist), sum(i * c for i, c in enumerate(hist)), 0, 0, (0.0, 128)
-    for t in range(256):
-        below += hist[t]
-        if not below or below == total:
-            continue
-        below_sum += t * hist[t]
-        m0, m1 = below_sum / below, (everything - below_sum) / (total - below)
-        spread = below * (total - below) * (m0 - m1) ** 2
-        if spread > best[0]:
-            best = (spread, t)
-    return best[1]
 
 
 def _runs(flags: list[bool]) -> list[tuple[int, int]]:

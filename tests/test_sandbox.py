@@ -103,7 +103,7 @@ def test_sandbox_keeps_data_uris_and_leaves_the_network_to_allow_net(place):
 
 def test_the_sandbox_option_on_the_command_line(place, capsys):
     d = doc(place, f"![](in.png)\n\n![]({place / 'elsewhere' / 'secret.png'})")
-    assert check([d], capsys)[1] == set()
+    assert check([d], capsys)[1] == {"I109"}  # only the note on how the image was read
     code, found = check([d, "--sandbox"], capsys)
     assert "I108" in found and code == cli.OK  # a warning: the rest of the document is still checked
     image_dirs(place, str(place / "elsewhere"))
@@ -152,7 +152,7 @@ def test_the_mcp_document_tools_run_sandboxed(place):
 
     secret = place / "elsewhere" / "secret.png"
     d = doc(place, f"![](in.png)\n\n![]({secret})")
-    assert call("check", {"path": d}) == {"I108"}  # in.png (its folder) is read, secret.png is not
+    assert call("check", {"path": d}) == {"I108", "I109"}  # in.png (its folder) is read, secret.png is not
     assert "I108" in call("check", {"text": "![](in.png)"})  # text: no folder, and no image_dirs yet
     image_dirs(place, str(place / "elsewhere"))
     assert "I108" not in call("check", {"text": f"![]({secret})"})

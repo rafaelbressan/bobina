@@ -34,6 +34,7 @@ def is_wide(ch: str) -> bool:
 
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
 _IMAGES_MAX = 64
+IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
 
 
 def _image_key(src: str, base_dir: str, attrs, extra: tuple):
@@ -665,22 +666,32 @@ class Layout:
         a = getattr(b, "attrs", None)
         if a is None or not rows:
             return rows
-        rot = a.kv.get("rotate")
-        if a.has("flip") and not rot:
-            if all(isinstance(r, TextRow) and r.native for r in rows):
-                for r in rows:
-                    r.upside_down = True
-                return list(reversed(rows))
-            rot = "180"
-        if rot:
-            try:
-                ang = float(rot)
-            except ValueError:
-                self.n.add("M101", f"rotate={rot}", b.line, "0, 90, 180, 270 or degrees")
-                return rows
-            if ang % 360:
-                return [self.rotate(rows, ang, a, b.line)]
-        return rows
+        if isinstance(b, ImageBlock) or (isinstance(b, Fence) and (b.kind or "").lower() == "image"):
+            return rows  # images turn their source (Layout.turn): the paper width applies after the turn
+        for name in IMAGE_ONLY:
+            if a.has(name) or name in a.kv:
+                self.n.add("M101", f"'{name}' works on images only: it does nothing here", b.line, "remove it")
+        if a.has("flip") and not a.kv.get("rotate") and all(isinstance(r, TextRow) and r.native for r in rows):
+            for r in rows:
+                r.upside_down = True
+            return list(reversed(rows))
+        ang = self.angle(a, b.line)
+        return [self.rotate(rows, ang, a, b.line)] if ang % 360 else rows
+
+    def angle(self, attrs, line: int) -> float:
+        """rotate= (clockwise, like CSS; any angle, B102 when not a right angle) or .flip (180), in degrees."""
+        rot = attrs.kv.get("rotate")
+        if not rot:
+            return 180.0 if attrs.has("flip") else 0.0
+        try:
+            ang = float(rot)
+        except ValueError:
+            self.n.add("M101", f"rotate={rot}", line, "0, 90, 180, 270 or degrees")
+            return 0.0
+        if ang % 90:
+            self.n.add("B102", f"rotate={ang:g}: slanted strokes look jagged at {self.p.dpi} dpi", line,
+                       "prefer 90/180/270")  # fmt: skip
+        return ang
 
     def compose(self, rows) -> Image.Image:
         from . import preview
@@ -714,10 +725,6 @@ class Layout:
                 "shorten the lines or use rotate=90/270",
             )
             im = im.crop(((im.width - self.W) // 2, 0, (im.width - self.W) // 2 + self.W, im.height))
-        if ang % 90:
-            self.n.add(
-                "B102", f"rotate={ang:g}: slanted strokes look jagged at {self.p.dpi} dpi", line, "prefer 90/180/270"
-            )
         align = attrs.kv.get("align") or next((x for x in ("left", "right", "center") if attrs.has(x)), "center")
         bw = im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
         return BitmapRow(imaging.place(bw, self.W, align), line, "rotated")
@@ -1147,14 +1154,24 @@ class Layout:
         extra = (w, page, self.W, self.net, self.image_dirs, repr(self.img), settings)  # --sandbox: its own entry
         key = _image_key(src, self.doc.base_dir, attrs, extra)
         if key is not None and key in _IMAGES:  # a batch of 1000 labels with the same logo decodes it once
-            host, row_im = _IMAGES[key]
+            host, row_im, notes = _IMAGES[key]
             if host:
                 self.n.add("I104", f"fetched {host}", line, "that server can see when you print")
+            for code, msg, hint in notes:
+                self.n.add(code, msg, line, hint)
             return [BitmapRow(row_im, line, "image")]
+        mark = len(self.n)  # the notes of this image, said again when its cached dots are reused
+        ang = self.angle(attrs, line) % 360
+        sideways = ang in (90, 270)
         try:
             im = imaging.open_image(
                 src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
             )
+            if sideways and im.info.get("bobina.kind") == "vector":  # drawn again so its height becomes w dots
+                tall = min(4096, max(8, round(w * im.width / max(1, im.height))))
+                im = imaging.open_image(
+                    src, self.doc.base_dir, width=tall, page=page, allow_net=self.net, confine=self.image_dirs
+                )
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []
@@ -1163,19 +1180,75 @@ class Layout:
             return []
         if im.info.get("bobina.host"):
             self.n.add("I104", f"fetched {im.info['bobina.host']}", line, "that server can see when you print")
-        vector = im.info.get("bobina.kind") == "vector"
-        default_dither = "threshold" if vector else self.img.get("dither", self.p.get("image.dither", "fs"))
-        kind = imaging.DITHERS.get(str(attrs.kv.get("dither", default_dither)), "fs")
+        vector, host = im.info.get("bobina.kind") == "vector", im.info.get("bobina.host")
+        im = imaging.flatten(im)
+        side = im.height if sideways else im.width  # the side that runs across the paper after the turn
+        if side > 2 * w and min(im.size) > 1:  # a 40 MP photo: turned and sampled small, never at full size
+            f = max(1, side // (2 * w))
+            im = im.reduce(f) if f > 1 else im
+        im = self.turn(im, ang, attrs)
+        kind, level = self.treatment(im, attrs, vector, line, src)
         default_gamma = (
             self.p.get("image.gamma_atkinson", 1.5) if kind == "atkinson" else self.p.get("image.gamma", 1.8)
         )
         gamma = float(attrs.kv.get("gamma", self.img.get("gamma", default_gamma)))
         align = next((a for a in ("left", "right", "center") if attrs.has(a)), attrs.kv.get("align", "center"))
-        bw = imaging.photo(im, max(8, w), gamma, kind)
+        bw = imaging.photo(im, max(8, w), gamma, kind, level=level, flat=True)
         placed = imaging.place(bw, self.W, align)
+        notes = tuple((n.code, n.message, n.suggestion) for n in list(self.n)[mark:] if n.code != "I104")
         if key is not None:
-            _remember(key, (im.info.get("bobina.host"), placed))
+            _remember(key, (host, placed, notes))
         return [BitmapRow(placed, line, "image")]
+
+    def turn(self, im, ang: float, attrs) -> Image.Image:
+        """The source turned clockwise by `ang` (rotate=, .flip) and mirrored (.mirror) before it is fitted to the
+        paper, so a tall photo turned sideways still fills the width."""
+        if ang:
+            exact = ang % 90 == 0
+            im = im.rotate(-ang, expand=True, fillcolor=(255, 255, 255),
+                           resample=Image.NEAREST if exact else Image.BICUBIC)  # fmt: skip
+        return ImageOps.mirror(im) if attrs.has("mirror") else im
+
+    def treatment(self, im, attrs, vector: bool, line: int, src: str) -> tuple[str, int | None]:
+        """(dither kind, threshold level; None: the level between ink and paper, from the image). Written wins:
+        threshold=N%, .threshold (level from the image), .dither (always a photo dither), dither=KIND; then the
+        document's image: dither; vectors are line art; otherwise bobina looks (imaging.line_art): a logo prints
+        sharp, a photo is dithered. dither=threshold written anywhere keeps its fixed cut at 128."""
+        default = imaging.DITHERS.get(str(self.img.get("dither", self.p.get("image.dither", "fs"))), "fs")
+        given = attrs.kv.get("threshold")
+        if given is not None:
+            try:
+                pct = float(str(given).strip().removesuffix("%"))
+                if not 0 < pct < 100:
+                    raise ValueError
+            except ValueError:
+                self.n.add("M101", f"threshold={given}", line, "a percentage from 1% to 99% (higher: more black)")
+                return "threshold", None
+            return "threshold", round(255 * pct / 100)
+        if attrs.has("threshold"):
+            return "threshold", None
+        if attrs.has("dither"):  # the photo look, even when the default is a threshold
+            return (default if default != "threshold" else "fs"), None
+        if "dither" in attrs.kv:
+            name = str(attrs.kv["dither"])
+            if name not in imaging.DITHERS:
+                self.n.add("M101", f"dither={name}", line, "floyd-steinberg, atkinson, bayer or threshold")
+            kind = imaging.DITHERS.get(name, "fs")
+            return kind, 128 if kind == "threshold" else None
+        if vector:
+            return "threshold", 128  # rendered at the paper width: crisp edges already
+        if "dither" in self.img or default == "threshold":  # the document or the profile chose for every image
+            return default, 128 if default == "threshold" else None
+        from pathlib import PurePosixPath
+
+        name = PurePosixPath(src).name if not src.startswith("data:") else "the image"
+        name = name if len(name) <= 40 else "the image"
+        if imaging.line_art(im):  # what bobina saw, what it did, and how to get the other look
+            self.n.add("I109", f"{name} looks like a drawing: printed in black and white", line,
+                       "{.dither} to dither it; {threshold=60%} moves the cut")  # fmt: skip
+            return "threshold", None
+        self.n.add("I109", f"{name} looks like a photo: dithered", line, "{.threshold} for black and white")
+        return default, None
 
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font."""

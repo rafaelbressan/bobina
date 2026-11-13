@@ -251,6 +251,9 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
   no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
 - `width=` dots or `%` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
   `gamma=` (defaults from front matter `image:`, then the profile — tuned on printed ramps).
+- bobina looks at the ink (a plain background does not count): a drawing prints in black and white, a photo is
+  dithered, and `I109` says which. `.dither` and `.threshold` choose; `threshold=60%` sets the cut.
+- `rotate=90|180|270`, `.flip`, `.mirror` (left-right) turn the image before it is fitted to the paper.
 - Images above 40 megapixels are refused (`I101`), unreadable ones give `I101` and the rest prints.
 
 ### 6.6 Text ✓
@@ -492,6 +495,7 @@ Nudges:
 | `I106` | warning | network source refused (private address, redirect, type, size) |
 | `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
 | `I108` | warning | image outside its folder and `image_dirs` (`--sandbox`, MCP) |
+| `I109` | note | an image read as a drawing (black and white) or a photo (dithered) |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |

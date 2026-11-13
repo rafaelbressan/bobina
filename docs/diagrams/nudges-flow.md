@@ -234,6 +234,7 @@ from this list.
 | `I107` | warning | image path with a space must be written between < > |  |
 | `I106` | warning | network source refused (private address, redirect, type or size) |  |
 | `I108` | warning | image outside the document folder and image_dirs (--sandbox, MCP) |  |
+| `I109` | note | what an image looks like (drawing or photo) and how it was printed; the other look is one class away |  |
 
 ### Drawing
 
