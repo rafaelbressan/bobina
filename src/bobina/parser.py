@@ -32,6 +32,9 @@ KNOWN_CLASSES = {
     "double",
     "wavy",
     "cut",
+    "mirror",  # images: left-right
+    "threshold",  # images: sharp black and white, the cut between ink and paper
+    "dither",  # images: dithered like a photo, even if bobina sees a logo
 }
 KNOWN_KEYS = {
     "size",
@@ -48,6 +51,7 @@ KNOWN_KEYS = {
     "width",
     "dither",
     "gamma",
+    "threshold",
     "type",
     "text",
     "height",

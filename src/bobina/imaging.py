@@ -52,12 +52,74 @@ def open_image(
     return im
 
 
-def dither(im: Image.Image, kind: str) -> Image.Image:
-    """'L' -> '1'. kind: fs | atkinson | bayer | threshold."""
+def flatten(im: Image.Image) -> Image.Image:
+    """The image as the paper sees it: EXIF orientation applied, transparency over white, RGB."""
+    im = ImageOps.exif_transpose(im)
+    if im.mode in ("RGBA", "LA", "P", "PA"):
+        im = im.convert("RGBA")
+        bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        im = Image.alpha_composite(bg, im)
+    return im.convert("RGB")
+
+
+LINE_ART_INK = 0.70  # the 3 main ink colours cover this much of the ink (flat colours, not shading) …
+LINE_ART_SPREAD = 64  # … and the main ink differs from the paper in brightness (not a foggy photo)
+
+
+def line_art(im: Image.Image) -> bool:
+    """A logo, a drawing or flat text rather than a photo, decided on the ink only: the commonest colour is the
+    paper (a plain background, transparency already white) and does not count, so a product photographed on
+    white is still a photo. Sampled on a 64-dot copy without blending (NEAREST keeps the real colours), 16 levels
+    per channel; measured on logos (also as JPEG, up to 4 colours), text and products on a white background."""
+    scale = min(1.0, 64 / max(im.size))
+    small = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.NEAREST)
+    q = small.convert("RGB").point(lambda v: v & 0xF0)  # the copy is small, never the whole photo
+    colors = sorted(q.getcolors(64 * 64) or [], reverse=True)
+    paper, ink = colors[0] if colors else None, colors[1:]
+    total_ink = sum(n for n, _ in ink)
+    if paper is None or not total_ink:
+        return False  # one colour: nothing drawn on it
+    if sum(n for n, _ in ink[:3]) / total_ink < LINE_ART_INK:
+        return False
+
+    def light(rgb):
+        r, g, b = rgb
+        return (299 * r + 587 * g + 114 * b) / 1000
+
+    return abs(light(paper[1]) - light(ink[0][1])) >= LINE_ART_SPREAD
+
+
+def otsu(hist: list[int]) -> int:
+    """Otsu's cut on a 256-level histogram: levels up to it are the dark class (ink), above it the light one
+    (paper). 128 when there are not two levels to split."""
+    total, everything, below, below_sum, best = sum(hist), sum(i * c for i, c in enumerate(hist)), 0, 0, (0.0, 128)
+    for t in range(256):
+        below += hist[t]
+        if not below or below == total:
+            continue
+        below_sum += t * hist[t]
+        m0, m1 = below_sum / below, (everything - below_sum) / (total - below)
+        spread = below * (total - below) * (m0 - m1) ** 2
+        if spread > best[0]:
+            best = (spread, t)
+    return best[1]
+
+
+def threshold_level(im: Image.Image) -> int:
+    """The level for a threshold chosen from the image ('L'): black below it. One grey level only: nothing to
+    split, so it stays paper (a flat grey square must not print solid black)."""
+    hist = im.histogram()[:256]
+    if sum(1 for c in hist if c) < 2:
+        return 0
+    return otsu(hist) + 1
+
+
+def dither(im: Image.Image, kind: str, level: int = 128) -> Image.Image:
+    """'L' -> '1'. kind: fs | atkinson | bayer | threshold (black below `level`)."""
     if kind == "fs":
         return im.convert("1")
     if kind == "threshold":
-        return im.point(lambda p: 255 if p >= 128 else 0).convert("1", dither=Image.NONE)
+        return im.point(lambda p: 255 if p >= level else 0).convert("1", dither=Image.NONE)
     w, h = im.size
     px = list(im.tobytes())
     if kind == "bayer":
@@ -93,14 +155,18 @@ def dither(im: Image.Image, kind: str) -> Image.Image:
     return o.convert("1", dither=Image.NONE)
 
 
-def photo(im: Image.Image, width: int, gamma: float, kind: str, brightness: float = 1.0) -> Image.Image:
-    """Prepared like the R6 winners: autocontrast, gamma, unsharp, dither."""
-    im = ImageOps.exif_transpose(im)
-    if im.mode in ("RGBA", "LA", "P"):
-        im = im.convert("RGBA")
-        bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
-        im = Image.alpha_composite(bg, im)
-    im = im.convert("L")
+def photo(
+    im: Image.Image,
+    width: int,
+    gamma: float,
+    kind: str,
+    brightness: float = 1.0,
+    level: int | None = None,
+    flat: bool = False,
+) -> Image.Image:
+    """Prepared like the R6 winners: autocontrast, gamma, unsharp, dither. threshold: black below `level`
+    (0-255); None picks the level between ink and paper on the resized image. flat: already through flatten()."""
+    im = (im if flat else flatten(im)).convert("L")
     h = max(1, round(im.height * width / im.width))
     im = im.resize((width, h), Image.LANCZOS)
     if kind != "threshold":
@@ -111,7 +177,8 @@ def photo(im: Image.Image, width: int, gamma: float, kind: str, brightness: floa
         if brightness != 1.0:
             im = ImageEnhance.Brightness(im).enhance(brightness)
         im = im.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
-    return dither(im, kind)
+        return dither(im, kind)
+    return dither(im, kind, threshold_level(im) if level is None else level)
 
 
 def place(im: Image.Image, width: int, align: str = "center") -> Image.Image:

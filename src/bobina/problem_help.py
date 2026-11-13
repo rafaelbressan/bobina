@@ -64,6 +64,8 @@ FIX = {
     "I106": "Use a public https address or a local file.",
     "I108": 'Trust that folder? Add it to image_dirs in config.toml (image_dirs = ["~/Pictures"]), or move the image'
     " next to the document.",
+    "I109": "Nothing to do if it looks right. Otherwise add {.dither} (photo look) or {.threshold} (black and"
+    " white); {threshold=60%} sets the cut (higher: more black).",
     # E errors
     "E101": "Read the hint in the message and bobina COMMAND --help.",
     "E102": "Give this command one document.",
