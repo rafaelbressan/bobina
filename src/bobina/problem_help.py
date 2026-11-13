@@ -94,6 +94,7 @@ FIX = {
     " or use a name from it.",
     "E602": "Read the AI's own reason in the message: log in to it (run claude, codex login, gemini), check the key"
     " or the network, or try again; bobina ai list shows the AIs of this machine.",
+    "E701": "Try again when online; the releases are also listed at https://github.com/rafaelbressan/bobina/releases.",
     # P printer and paper
     "P101": "Have a new roll ready; after loading it: bobina paper new LENGTH.",
     "P102": "Load a new roll first (bobina paper new LENGTH), or print fewer labels.",

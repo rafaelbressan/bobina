@@ -139,6 +139,12 @@ from this list.
 | `E601` | error | no AI found, or an unknown AI name |  |
 | `E602` | error | the AI did not answer |  |
 
+### Updates (errors)
+
+| Code | Severity | Meaning | Evidence |
+|---|---|---|---|
+| `E701` | error | could not check for a new bobina (no network, or PyPI did not answer) |  |
+
 ### Template and data (security: always stop)
 
 | Code | Severity | Meaning | Evidence |

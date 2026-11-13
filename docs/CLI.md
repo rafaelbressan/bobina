@@ -308,10 +308,7 @@ A wrong option shows the usage of that command, not of bobina, and one hint:
 | Typed | Hint |
 |---|---|
 | `print --copies-form 2` | did you mean --copies-from? |
-| `print --dryrun`, `--dry_run`, `--DRY-RUN`, `-dry-run` | did you mean --dry-run? |
 | `print --planilha x.xlsx` (a synonym, also Portuguese) | did you mean --data? |
-| `print --jon` (equally close to three) | did you mean --join, --json or --on? |
-| `print --pages` | did you mean --page? (… --pages is an option of bobina preview) |
 | `check --output x` | --output belongs to bobina print or bobina preview, not bobina check |
 | `preview --yes` (also `-n`, `--editor`) | not an error: runs, with `note: --yes does nothing in bobina preview: it never prints` |
 
@@ -436,13 +433,13 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 | 7 | confirmation required (no terminal and no `--yes`) or declined |
 | 8 | security error (template sandbox violation, see FORMAT.md §7) |
 | 9 | the job went out (printed, saved, shown) without a part it exists for: a payment code that was not built (`Q111`). The rest printed; `--allow Q111` makes it 0 |
+| 10 | `bobina update --check`: a newer release exists |
 
 ## Install and files
 
-- `uv tool install bobina` (or `pipx`) → `bobina` and `bob`.
-- Implementation: Python + Pillow (reuses the test tooling), `jinja2` (sandboxed), `babel` (CLDR). Modules: parser → layout → render → transport.
-- Config: `~/.config/bobina/config.toml` (default profile, printers, editor, locale, preferences).
-- Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
+- Install and upgrade: [INSTALL.md](INSTALL.md) (`bobina update`).
+- Config: `~/.config/bobina/config.toml` (`bobina config list`).
+- Profiles: built-in + `~/.config/bobina/profiles/*.toml` (`bobina profile show NAME`).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
 - Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `bobina config set font_downloads off` (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 

@@ -42,6 +42,8 @@ CASES = [  # (command, typed, expected option or "belongs:CMD" or "printing")
     ("print", "--lastt", "--last"),
     ("print", "--agian", "--again"),
     ("print", "--stpe", "--step"),
+    ("update", "--chek", "--check"),
+    ("update", "--outdated", "--check"),
     ("print", "--wait", "--step"),
     ("print", "--one-at-a-time", "--step"),
     ("print", "--nonstop", "--no-step"),

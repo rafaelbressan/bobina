@@ -127,6 +127,8 @@ KEYS: dict[str, Key] = {
         Key("history", "bool", True, "record each print in bobina history"),
         Key("history_max", "int", 5000, "jobs kept in the history", minimum=1, example="2000", advanced=True),
         Key("font_downloads", "bool", True, "download the font of another script on first use", example="off"),
+        Key("update_check", "bool", True, "once a day, say at the end of a command when a newer bobina exists",
+            example="off"),
         Key("image_dirs", "folders", [], "folders --sandbox may read images from, besides the document's",
             example="~/Pictures/labels"),
         Key("default_printer", "text", None, "the printer used without --printer",

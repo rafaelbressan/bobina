@@ -13,6 +13,13 @@ bobina needs Python 3.11 or newer. Pick one way:
 
 Then `bobina init` (printer, profile, locale, roll, a test strip).
 
+## Upgrading
+
+`bobina update` shows the upgrade command of whatever installed bobina (uv, pipx, pip, Homebrew) and asks before
+running it; for the .deb and git installs it says the steps. `--check` exits 10 when a release is newer. Once a
+day a command at a terminal ends with `bobina 0.1.4 is available (you have 0.1.3): uv tool upgrade bobina`, never
+for agents, scripts or pipes (`bobina config set update_check off`).
+
 ## Bluetooth needs the system Python
 
 bobina talks to Bluetooth printers through RFCOMM sockets (`socket.AF_BLUETOOTH`), which only Linux has and
@@ -49,11 +56,11 @@ Uninstall: `uv tool uninstall bobina`; the service: `systemctl --user disable bt
 
 Each [release](https://github.com/rafaelbressan/bobina/releases) has `bobina_X.Y.Z_amd64.deb` and `_arm64.deb`
 (64-bit Raspberry Pi OS too): `sudo apt install ./bobina_X.Y.Z_arm64.deb`. It runs on the system `python3` (3.11
-to 3.14) with its own copies of the dependencies, not Debian's. There is no apt repository: upgrade by installing
-the next release's .deb. No extras: for them use pipx from apt (above), which upgrades with `pipx upgrade bobina`.
+to 3.14) with its own copies of the dependencies, not Debian's. No apt repository (`bobina update` says the next
+.deb) and no extras: for them, pipx from apt (above).
 
 ## Homebrew
 
-This repository is the tap; install with the full name (Homebrew 7 trusts a tap only then). The formula has no extras (`pdf`, `svg`, `xlsx`, `mcp`): for them, `get.sh --extras`
-or `uv tool install 'bobina[pdf,svg,xlsx,mcp]'`. Homebrew's Python has no Bluetooth sockets: on Linux prefer
-`get.sh` or the .deb.
+This repository is the tap; install with the full name (Homebrew 7 trusts a tap only then). No extras (`pdf`,
+`svg`, `xlsx`, `mcp`): for them, `get.sh --extras`. No Bluetooth sockets (above): on Linux prefer `get.sh` or the
+.deb.

@@ -450,6 +450,7 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E501` | error | document error |
 | `E601` | error | no AI found, or an unknown AI name |
 | `E602` | error | the AI did not answer |
+| `E701` | error | could not check for a new bobina (`bobina update`) |
 
 Nudges:
 

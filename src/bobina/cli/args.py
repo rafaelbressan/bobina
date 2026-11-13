@@ -19,6 +19,7 @@ from .history import cmd_history
 from .init import cmd_init
 from .library import cmd_fonts, cmd_library, cmd_profile, cmd_seq, cmd_template
 from .settings import cmd_config
+from .update import cmd_update
 
 
 def cmd_mcp(args):
@@ -294,6 +295,7 @@ COMMAND_KIND = {
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
     "init": "prints",  # the test strip; --yes asks nothing and prints nothing
     "chat": "prints", "ai": "reads",  # cli/chat.py
+    "update": "reads",  # it may run the installer's upgrade, after asking; it never prints
 }  # fmt: skip
 _PARENTS: dict = {}
 
@@ -369,6 +371,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--json": ["--machine"],
     "--last": ["--ultimo", "--reprint", "--repeat-last"],
     "--again": ["--de-novo", "--novamente", "--rerender"],
+    "--check": ["--check-only", "--outdated", "--available", "--is-latest"],  # bobina update
     "--step": ["--stop", "--wait", "--one-at-a-time", "--each", "--tear-each", "--stop-each"],
     "--no-step": ["--nonstop", "--no-stop", "--no-wait", "--all-together", "--at-once", "--no-stops"],
     "--realistic": ["--realista", "--ink"],
@@ -784,6 +787,18 @@ def make_parser():
     p.add_argument("--all", action="store_true", help="list: the advanced settings too")
     p = _cmd(
         sub,
+        "update",
+        "is there a newer bobina, and how to upgrade it",
+        "asks PyPI for the latest release, finds out what installed this bobina (uv tool, pipx, pip, Homebrew, the"
+        " .deb, a git checkout) and shows that installer's upgrade command; at a terminal it asks before running it."
+        " bobina never replaces its own files. Once a day, the end of a command says when a newer release exists"
+        " (bobina config set update_check off)",
+        ["bobina update", "bobina update --check", "bobina update --json"],
+        cmd_update,
+    )
+    p.add_argument("--check", action="store_true", help="only say: exit 0 up to date, 10 a newer release exists")
+    p = _cmd(
+        sub,
         "profile",
         "printer profiles",
         "measured capabilities per printer model",
@@ -1095,6 +1110,22 @@ def main(argv=None) -> int:
         from ..fileio import limit_memory
 
         limit_memory()  # untrusted input: a hard ceiling under bobina's own size checks
+    check = _update_check(args, cmd)
+    code = None
+    try:
+        code = _run(args, cmd)
+        return code
+    finally:
+        if check is not None and code is not None and code != 130:
+            line = check.finish()
+            if line:
+                err(line)
+
+
+def _run(args, cmd: str) -> int:
+    """The command, its stops turned into messages and exit codes."""
+    from .common import json_written
+
     try:
         code = args.func(args) or OK
         if getattr(args, "json", False) and not json_written() and code in (OK, LEFT_OUT):
@@ -1130,3 +1161,15 @@ def main(argv=None) -> int:
         msg = f"the document needs more than {why}: nothing was printed"
         err("\n".join(render_problems([Nudge("M313", msg)], stopped())))
         return SECURITY
+
+
+def _update_check(args, cmd: str):
+    """The once-a-day check for a newer release, started now in the background (update.Check), or None."""
+    from .. import update
+    from .common import _FMT
+
+    if not update.wanted(args, cmd, _FMT[0]):
+        return None
+    check = update.Check()
+    check.start()
+    return check

@@ -22,4 +22,10 @@ def isolated(tmp_path, monkeypatch):
 
     monkeypatch.setattr(scriptfonts, "fetch", no_network)
     scriptfonts._FAILED.clear()
+    from bobina import update
+
+    def no_pypi(timeout=update.TIMEOUT):  # PyPI is never asked in tests (tests/test_update.py fakes the answer)
+        raise update.UpdateError("no network in tests")
+
+    monkeypatch.setattr(update, "fetch", no_pypi)
     yield tmp_path

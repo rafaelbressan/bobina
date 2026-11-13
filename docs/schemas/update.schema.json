@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.update/1",
+  "title": "bobina update --json",
+  "type": "object",
+  "required": [
+    "schema",
+    "version",
+    "latest",
+    "newer",
+    "development",
+    "kind",
+    "installed_by",
+    "command",
+    "runnable",
+    "note"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.update/1"
+    },
+    "version": {
+      "type": "string"
+    },
+    "latest": {
+      "type": "string"
+    },
+    "newer": {
+      "type": "boolean"
+    },
+    "development": {
+      "type": "boolean"
+    },
+    "kind": {
+      "enum": ["uv", "pipx", "pip", "homebrew", "deb", "git", "dev", "unknown"]
+    },
+    "installed_by": {
+      "type": "string"
+    },
+    "command": {
+      "type": "string"
+    },
+    "runnable": {
+      "type": "boolean"
+    },
+    "note": {
+      "type": "string"
+    }
+  }
+}
