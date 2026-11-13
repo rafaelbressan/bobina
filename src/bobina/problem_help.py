@@ -44,6 +44,10 @@ FIX = {
         "The message names the attribute and gives a working example; bobina help pay lists every scheme. The rest "
         "prints and the exit code is 9 (--allow Q111: 0)."
     ),
+    "Q112": (
+        "The message says what the network takes, with an example; bobina help contact lists every network. The rest "
+        "prints and the exit code is 9 (--allow Q112: 0)."
+    ),
     # L layout
     "L101": "Add a space or a hyphen to the long word, or use a smaller size.",
     "L102": "Nothing to fix: check the length on the confirmation screen before printing.",
@@ -102,6 +106,7 @@ FIX = {
     " rolls), or record it for the printer it fits (--printer).",
     "P301": "The bytes follow the ESC/POS spec but nobody has seen them on paper: look at the result (docs/TESTED.md).",
     "P302": "Scan a printed code with the real app before customers use it, and tell us (docs/TESTED.md).",
+    "P303": "Scan a printed code with the real app before you hand it out, and tell us (docs/TESTED.md).",
     "P201": "Raw bytes are sent as they are: make sure they are meant for this printer.",
     "P104": "When you know the roll: bobina paper new 30m (its length) or bobina paper new --diameter 40mm.",
     "P105": "Cut them apart after printing; to tear each one off, print without --compact.",

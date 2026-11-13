@@ -64,6 +64,9 @@ TASK_RE = re.compile(r"^\[([ xX])\]\s+")
 TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)""")
 
 
+WORD_BLOCKS = {"contact"}  # blocks that take a word after their kind: ```contact whatsapp
+
+
 def parse_attrs(s: str) -> Attrs | None:
     """Pandoc attribute list -> Attrs, or None if `s` is not a well-formed attribute list."""
     s = s.strip()
@@ -267,17 +270,23 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
             out.append(Divider(line=ln))
         elif t in ("fence", "code_block"):
             info = (n.info or "").strip()
-            kind, a = info, Attrs()
-            m = re.match(r"^([\w-]*)\s*(?:\{(.*)\})?\s*$", info)
-            if m:
-                kind = m.group(1)
-                if m.group(2) is not None:
-                    a = parse_attrs(m.group(2)) or Attrs()
-            k = kind.lower()  # pay checks its own keys; the old pix gets one clear warning in the layout
+            kind, a, arg = info, Attrs(), ""
+            m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
+            if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
+                kind, arg = m.group(1), m.group(2) or ""
+                if m.group(3) is not None:
+                    a = parse_attrs(m.group(3)) or Attrs()
+            elif info.split(maxsplit=1)[0].lower() in WORD_BLOCKS:  # ```contact whatsapp business: the block
+                kind, rest = info.split(maxsplit=1)  # still says what is wrong (Q112), never prints as text
+                attrs = re.search(r"\{(.*)\}\s*$", rest)
+                arg = rest[: attrs.start()].strip() if attrs else rest.strip()
+                a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
+            k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
             check_attrs(
-                a, ln, nudges, keys=k not in ("pay", "pix"), extra=frozenset({"caption"}) if k == "qr" else frozenset()
-            )
-            out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content))
+                a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
+                extra=frozenset({"caption"}) if k == "qr" else frozenset(),
+            )  # fmt: skip
+            out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":
             out.append(_table(n, ln))
         elif n.children:

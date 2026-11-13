@@ -136,8 +136,8 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 
 `bob` is the same binary. Short aliases exist for typing (`bobina help aliases`); docs always use
 full names. Exit codes: 0 ok · 1 usage · 2 document · 3 strict nudges · 4 unreachable · 5 printer
-not ready · 6 language · 7 confirmation needed/declined · 8 security · 9 a payment code left out (Q111) · 10
-newer release.
+not ready · 6 language · 7 confirmation needed/declined · 8 security · 9 a payment or contact code left out (Q111,
+Q112) · 10 newer release.
 
 ## Repository
 

@@ -268,10 +268,22 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
 
 The escape hatch: no checks, no preview (`P201`). Never accepted from variables (§7.4).
 
-### 6.8 Planned objects ◇
+### 6.8 Contact codes (`contact`) ✓
 
-` ```table {columns="auto,4ch,8ch" header=invert} ` (tables with explicit widths and styles), ` ```pay {scheme=…} `
-(UPI, SEPA/EPC, PromptPay, PayNow, profile links), shapes and icons.
+````markdown
+```contact whatsapp
++55 11 90000-0000
+```
+````
+
+The network after `contact`; the value in the body: a phone with its country code, a user name or the app's link.
+It prints a QR of the network's public link and a caption. `vcard` and `mecard` take `key: value` lines. A value
+that makes no link is `Q112` (code left out, exit 9); every network gives `P303` until scanned with its app.
+Networks and values: `bobina help contact` and [contact.md](contact.md).
+
+### 6.9 Planned objects ◇
+
+` ```table {columns="auto,4ch,8ch" header=invert} ` (tables with explicit widths and styles), shapes and icons.
 
 ## 7. Variables (Jinja) ✓
 
@@ -480,6 +492,7 @@ Nudges:
 | `Q109` | warning | invalid barcode content |
 | `Q110` | warning | barcode turned vertical to fit the paper |
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (the code is left out, the rest prints, exit 9) |
+| `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
 | `L103` | warning | preformatted line longer than the paper was wrapped |
@@ -502,6 +515,7 @@ Nudges:
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |
+| `P303` | note | a contact code nobody has scanned with its app yet |
 | `P401` | note | no Bluetooth or USB search here (says why) |
 | `P402` | note | the name does not settle the profile: one was taken |
 | `P403` | warning | a USB printer this user cannot write to |

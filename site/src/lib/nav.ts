@@ -24,6 +24,7 @@ export const NAV: NavItem[] = [
   item('printers', 'Printers'),
   existsSync(join(TREE, 'docs/agents.md')) ? item('agents', 'Agents') : item('agents', 'Agents', '/cli/#agents-bobina-mcp'),
   item('pay', 'Pay codes'),
+  ...(existsSync(join(TREE, 'docs/contact.md')) ? [item('contact', 'Contact codes')] : []), // releases since contact
   item('problems', 'Problems'),
   item('changelog', 'Changelog'),
 ];

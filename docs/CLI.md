@@ -432,7 +432,7 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 | 6 | printer language mismatch (e.g. printer in TSPL, document needs ESC/POS) |
 | 7 | confirmation required (no terminal and no `--yes`) or declined |
 | 8 | security error (template sandbox violation, see FORMAT.md §7) |
-| 9 | the job went out (printed, saved, shown) without a part it exists for: a payment code that was not built (`Q111`). The rest printed; `--allow Q111` makes it 0 |
+| 9 | the job went out (printed, saved, shown) without a part it exists for: a payment or contact code that was not built (`Q111`, `Q112`). The rest printed; `--allow Q111,Q112` makes it 0 |
 | 10 | `bobina update --check`: a newer release exists |
 
 ## Install and files

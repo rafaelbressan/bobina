@@ -46,6 +46,7 @@ OBJECTS (fenced blocks)
   ```barcode {type=code128|ean13|… width=full orientation=auto|vertical}
   ```datamatrix {module=4}      ```pdf417 {module=2 columns=4}
   ```pay {scheme=pix|upi|epc|… to=… amount=10.00}  (bobina help pay)      ```text {rotate=90}
+  ```contact whatsapp|instagram|vcard|…  + the value in the body  (bobina help contact)
   ```raw   (hex bytes, bypasses every check)
 
 FRONT MATTER
@@ -127,7 +128,7 @@ EXIT_CODES = {  # bobina help --json and the tools of bobina mcp say what each e
     common.MODE: "command language",
     common.CONFIRM: "confirmation needed or declined",
     common.SECURITY: "security",
-    common.LEFT_OUT: "part of the job left out (a payment code, Q111)",
+    common.LEFT_OUT: "part of the job left out (a payment or contact code, Q111, Q112)",
     common.NEWER: "a newer release exists (bobina update --check)",
 }  # fmt: skip
 
@@ -147,7 +148,8 @@ def _help_code(code: str, as_json: bool) -> int:
     return OK
 
 
-TOPICS = ("commands", "format", "data", "pay", "nudges", "problems", "aliases")
+TOPICS = ("commands", "format", "data", "pay", "contact", "nudges", "problems", "aliases")
+NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pix, bobina help contact x
 
 
 def _help_text(topic: str, name: str | None = None) -> str:
@@ -163,6 +165,10 @@ def _help_text(topic: str, name: str | None = None) -> str:
         from ..pay import help_text
 
         return help_text(name)
+    if topic == "contact":
+        from ..contact import help_text as contact_help
+
+        return contact_help(name)
     if topic in ("nudges", "problems"):  # problems: the name the docs use for the catalog
         return "\n".join(
             f"{code}  {sev:8s} {CATEGORY.get(code[0], ''):17s} {title}" + (f"  (evidence: {ev})" if ev else "")
@@ -177,10 +183,11 @@ def _help_text(topic: str, name: str | None = None) -> str:
 
 def cmd_help(args):
     topic, as_json, name = args.topic, getattr(args, "json", False), getattr(args, "name", None)
-    topic = topic.lower() if topic and topic.lower() in (*TOPICS, "pay") else topic
-    if name and topic != "pay":
-        raise Fail(USAGE, f"only 'bobina help pay SCHEME' takes a second word (got '{name}')", problem="E101")
-    if name:
+    topic = topic.lower() if topic and topic.lower() in TOPICS else topic
+    if name and topic not in NAMED:
+        raise Fail(USAGE, f"only 'bobina help pay SCHEME' and 'bobina help contact NETWORK' take a second word "
+                   f"(got '{name}')", problem="E101")  # fmt: skip
+    if name and topic == "pay":
         from ..pay import SCHEMES, closest
 
         name = name.lower()
@@ -188,6 +195,15 @@ def cmd_help(args):
             near = closest(name)
             raise Fail(USAGE, f"unknown pay scheme '{name}'" + (f" (did you mean {near}?)" if near else "")
                        + ": " + ", ".join(SCHEMES), problem="E207")  # fmt: skip
+    if name and topic == "contact":
+        from .. import contact
+
+        found = contact.find(name)
+        if found is None:
+            near = contact.closest(name)
+            raise Fail(USAGE, f"unknown contact network '{name}'" + (f" (did you mean {near}?)" if near else "")
+                       + ": " + ", ".join(contact.NETWORKS), problem="E207")  # fmt: skip
+        name = found.name
     if topic and topic.upper() in CATALOG:
         return _help_code(topic, as_json)
     if as_json:  # every topic has a structured form, each marked with the schema (an agent may parse any of them)
@@ -203,6 +219,13 @@ def cmd_help(args):
             out = {"schema": "bobina.help/1", "kind": "pay", "schemes": schemes_json()}
             if name in SCHEMES:
                 out = {"schema": "bobina.help/1", "kind": "pay-scheme", **scheme_json(SCHEMES[name])}
+        elif topic == "contact":
+            from .. import contact
+
+            out = {"schema": "bobina.help/1", "kind": "contact", "networks": contact.networks_json()}
+            if name in contact.NETWORKS:
+                out = {"schema": "bobina.help/1", "kind": "contact-network",
+                       **contact.network_json(contact.NETWORKS[name])}  # fmt: skip
         elif topic in TOPICS:
             out = {"schema": "bobina.help/1", "kind": "topic", "topic": topic, "text": _help_text(topic)}
         else:
@@ -221,7 +244,8 @@ def cmd_help(args):
         return OK
     raise Fail(
         USAGE,
-        f"unknown help topic '{topic}': commands, format, data, pay, nudges (or problems), aliases, a problem code"
+        f"unknown help topic '{topic}': commands, format, data, pay, contact, nudges (or problems), aliases, a "
+        "problem code"
         " (e.g. E302), or a command name",
         problem="E207",
     )
@@ -958,7 +982,7 @@ def make_parser():
         cmd_help,
     )
     p.add_argument("topic", nargs="?")
-    p.add_argument("name", nargs="?", help="with pay: one scheme (bobina help pay pix)")
+    p.add_argument("name", nargs="?", help="with pay or contact: one scheme or network (bobina help pay pix)")
     _cmd(
         sub,
         "mcp",

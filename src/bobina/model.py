@@ -74,6 +74,7 @@ class Divider(Block):
 class Fence(Block):
     kind: str = ""  # qr, raw, text, image, ... or a code language
     content: str = ""
+    arg: str = ""  # the word after the kind: ```contact whatsapp -> "whatsapp"
 
 
 @dataclass
