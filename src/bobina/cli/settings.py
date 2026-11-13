@@ -7,7 +7,8 @@ import tomllib
 
 from .. import config, config_keys, fileio, locales
 from ..config_keys import KEYS, SCHEMA, KeyError_, entry, shown
-from .common import OK, USAGE, Fail, err, open_editor, print_json, render_problems
+from . import common
+from .common import CONFIRM, OK, USAGE, Fail, ask, err, open_editor, print_json, render_problems
 
 
 def _examples(loc) -> dict:
@@ -60,6 +61,8 @@ def cmd_config(args):
         return config_list(args)
     if action == "edit":
         return config_edit(args)
+    if action == "unset" and args.key and config_keys.group(args.key):
+        return config_unset_group(args, args.key)
     key = _key(args.key)
     if action == "get":
         if args.value:
@@ -76,6 +79,9 @@ def cmd_config(args):
             value = config_keys.parse(key, args.value)
         except KeyError_ as e:
             raise Fail(USAGE, str(e), problem=e.code) from None
+        if args.dry_run:
+            print(f"{key.name} = {shown(value)} would be saved (dry run: nothing written)")
+            return OK
         _write(config.set_value, key.name, value)
         if key.name == "locale":
             return _locale(args, saved=True)
@@ -83,7 +89,12 @@ def cmd_config(args):
     if action == "unset":
         if args.value:
             raise Fail(USAGE, f"bobina config unset {key.name} takes no value", problem="E101")
-        _load()  # a file that does not read: E209, never a traceback
+        cfg = _load()  # a file that does not read: E209, never a traceback
+        if args.dry_run:
+            present, value = config_keys.lookup(cfg, key.name)
+            print(f"{key.name} = {shown(value)} would be removed (dry run: nothing written)" if present else
+                  f"{key.name} is not set: nothing to remove")  # fmt: skip
+            return OK
         try:
             removed = config.unset_value(key.name)
         except (OSError, fileio.StateError) as e:
@@ -94,17 +105,71 @@ def cmd_config(args):
     return USAGE
 
 
-def _problems(messages: list[str]) -> list[dict]:
+def _problems(messages: list[str], notes: list[str] = ()) -> list[dict]:
     from ..nudges import Nudge
 
-    return [Nudge("E304", m, None, "bobina config get KEY says what it accepts").as_dict() for m in messages]
+    return [Nudge("E304", m, None, "bobina config get KEY says what it accepts").as_dict() for m in messages] + [
+        Nudge("E304", m, None, "kept as written: check the code (bobina help CODE)", severity="note").as_dict()
+        for m in notes
+    ]
+
+
+def config_unset_group(args, group: str) -> int:
+    """bobina config unset problems: every GROUP.key back to its default in one go, saying what was removed and the
+    command that sets it back exactly as it was."""
+    import shlex
+
+    if args.value:
+        raise Fail(USAGE, f"bobina config unset {group} takes no value", problem="E101")
+    cfg = _load()
+    removed = {}
+    for key in config_keys.group(group):
+        present, value = config_keys.lookup(cfg, key.name)
+        if present:
+            removed[key.name] = value
+    restore = " && ".join(
+        f"bobina config set {name} {shlex.quote(config_keys.typed(KEYS[name], v))}" for name, v in removed.items()
+    )
+    what = " and ".join(f"{n} {config_keys.typed(KEYS[n], v)}" for n, v in removed.items())
+    if removed and args.dry_run:
+        print(f"{what} would be removed (dry run: nothing written)")
+        return OK
+    if removed and not args.yes:  # a whole group: asked first, as bobina history clear does
+        tty = common.open_tty()
+        if tty is None:
+            raise Fail(CONFIRM, f"confirmation required: no terminal attached. Re-run with --yes to remove {what} "
+                       "(nothing changed)", problem="E107")  # fmt: skip
+        with tty:
+            if ask(tty, f" remove {what}? [y/n] ") not in ("y", "yes"):
+                err("nothing removed")
+                return CONFIRM
+    done = []
+    for name in removed:
+        try:
+            config.unset_value(name)
+        except (OSError, fileio.StateError) as e:
+            back = " && ".join(f"bobina config set {n} {shlex.quote(config_keys.typed(KEYS[n], removed[n]))}"
+                               for n in done)  # fmt: skip
+            again = f"\n→ {', '.join(done)} already removed; to restore them: {back}" if done else ""
+            raise Fail(USAGE, f"{getattr(e, 'strerror', None) or e}{again}", problem="E209") from None
+        done.append(name)
+    if args.json:
+        print_json({"schema": SCHEMA, "key": group, "removed": removed, "restore": restore,
+                    "path": str(config.path()), "problems": []}, indent=2, ensure_ascii=False)  # fmt: skip
+        return OK
+    if not removed:
+        print(f"nothing to remove: every {group} setting is already the default")
+        return OK
+    print(f"{what} removed: back to the defaults")
+    print(f"to restore them: {restore}")
+    return OK
 
 
 def config_get(args, key, said: str = "") -> int:
     cfg = _load()
     e = entry(key, cfg)
     if args.json:
-        problems = _problems([e["problem"]] if e["problem"] else [])
+        problems = _problems([e["problem"]] if e["problem"] else [], e["notes"])
         print_json({"schema": SCHEMA, **e, "path": str(config.path()), "problems": problems}, indent=2,
                    ensure_ascii=False, default=str)  # fmt: skip
         return OK
@@ -122,6 +187,8 @@ def config_get(args, key, said: str = "") -> int:
         print(f"  default: {key.default_shown()} (bobina config unset {key.name})")
     if e["problem"] and not args.quiet:
         err(f"note: config.toml: {e['problem']}; the default is used")
+    for n in e["notes"] if not args.quiet else ():
+        err(f"note: {n}: kept as written, it silences or stops nothing until bobina has that code")
     return OK
 
 
@@ -135,7 +202,8 @@ def config_list(args) -> int:
     others = [m for w, m in config_keys.problems(cfg) if w not in shown_keys]  # unknown keys, printers, [chat.*]
     if args.json:
         print_json({"schema": SCHEMA, "path": str(config.path()), "keys": rows, "printers": printers,
-                    "problems": _problems([r["problem"] for r in rows if r["problem"]] + others)},
+                    "problems": _problems([r["problem"] for r in rows if r["problem"]] + others,
+                                          [n for r in rows for n in r["notes"]])},
                    indent=2, ensure_ascii=False, default=str)  # fmt: skip
         return OK
     width = max(len(r["key"]) for r in rows)
@@ -145,7 +213,7 @@ def config_list(args) -> int:
             value, where = shown(r["value"]), ""
         else:
             value, where = r["default_shown"], " (default)"
-        flag = "  ← " + r["problem"] if r["problem"] else ""
+        flag = "  ← " + (r["problem"] or "; ".join(r["notes"])) if r["problem"] or r["notes"] else ""
         print(f"  {r['key']:<{width}}  {value}{where}{flag}")
     for line in others:
         print(f"  ! {line}")
@@ -175,7 +243,7 @@ def config_edit(args) -> int:
         cfg = config.load()
     except fileio.StateError:  # the file is broken: that is why it is being edited
         cfg = {}
-    code = open_editor(p, None, cfg)  # config never prints, so it takes no --editor
+    code = open_editor(p, getattr(args, "editor", None), cfg)
     if code:
         err(f"note: the editor exited with {code}")
     text = p.read_text(encoding="utf-8")

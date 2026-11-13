@@ -77,9 +77,12 @@ def cmd_print(args):
         raise
     if code == STRICT:  # --last/--again -o set "saved" before the stop: nothing was written
         rec.outcome, rec.saved_to = "", ""
-    outcome = {OK: "printed", LEFT_OUT: "printed", CONFIRM: "cancelled", STRICT: "nothing printed (--strict)"}.get(
-        code, "failed"
-    )
+    outcome = {
+        OK: "printed",
+        LEFT_OUT: "printed",
+        CONFIRM: "cancelled",
+        STRICT: f"nothing printed ({common.last_stop()})",
+    }.get(code, "failed")
     rec.finish(outcome, code, rec.problems if rec.res is None else None)  # --last: the stored job's problems
     if args.json:
         print_json(_print_json(rec, outcome, code), indent=2, ensure_ascii=False, default=str)
@@ -409,9 +412,10 @@ def print_last(args, rec=None):
     stored = kept.filtered(common.allow_set(args))  # this run's --allow, as every other print path applies it
     if rec is not None:
         rec.problems = stored
-    if common.strict_hits(stored, args):
+    why = common.stop_reason(stored, args)
+    if why:
         if not args.json:
-            err("\n".join(common.render_problems(stored, f"{common.stopped() or 'stopped'} (--strict)")))
+            err("\n".join(common.render_problems(stored, f"{common.stopped() or 'stopped'} ({why})")))
         return STRICT  # identical bytes with the same warnings: --strict stops them as it did the first time
     left_out = [n for n in stored if n.code in common.LEFT_OUT_CODES]
     code = LEFT_OUT if left_out else OK  # identical bytes: still without the payment code the first print lacked

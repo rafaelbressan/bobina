@@ -381,6 +381,15 @@ writes them to stdout in the same shape, next to the paper figures:
 object on stdout, schemas in docs/schemas. `view`, `edit`, `send`, `mode` and `mcp` write no data: there `--json`
 does nothing and a note says so.
 
+**A policy for every run** (`[problems]` in config.toml): `bobina config set problems.allow L102,F301` silences
+codes everywhere, `problems.error M130` makes those codes stop the job (exit 3, as `--strict` for them only),
+`problems.strict on` makes every warning stop it (`--no-strict` for one run), `problems.format plain` picks the
+format. The command line wins (`--allow M130` beats `problems.error M130`; `--problems` beats `BOBINA_PROBLEMS`,
+which beats `problems.format`), and a document's `allow:` beats the config. Errors and security refusals are never
+silenced. The MCP server reads the
+same config (its JSON format stays). `bobina config unset problems` puts the whole group back, after asking
+(`--yes`), and prints the command that restores it.
+
 ## Two commands at the same time
 
 Two terminals, a script and the tower over ssh may run bobina at once. Its own files stay whole:

@@ -58,10 +58,66 @@ def refuse_json_on_stdout_output(args) -> None:
                    problem="E101")  # fmt: skip
 
 
-def strict_hits(job, args) -> bool:
-    """--strict and a warning or error left: the job must not go out. job: a result, or its visible problems."""
+def policy() -> dict:
+    """The problem policy of config.toml ([problems] allow, error, strict, format). A value bobina cannot read is
+    said once and its default is used; a config that does not load is the command's own error, not this one's."""
+    from .. import config_keys
+
+    try:
+        st = config.path().stat()
+        stamp = (str(config.path()), st.st_mtime_ns, st.st_size)
+    except OSError:
+        stamp = (str(config.path()), 0, 0)
+    if _POLICY[0] != stamp:  # read again only when config.toml changed (many calls per print)
+        try:
+            cfg = config.load()
+        except Exception:  # noqa: BLE001 - StateError and friends: the command reports the broken file itself
+            cfg = {}
+        _POLICY[:] = [stamp, {k: config_keys.read(cfg, f"problems.{k}") for k in ("allow", "error", "strict",
+                                                                                  "format")}]  # fmt: skip
+    return _POLICY[1]
+
+
+_POLICY: list = [None, {}]
+
+
+_LAST_STOP = [""]  # the reason of the last stop of this run (history and messages say it)
+
+
+def last_stop() -> str:
+    return _LAST_STOP[0] or "--strict"
+
+
+def stop_reason(job, args, pol: dict | None = None) -> str:
+    """Why the job must not go out, "" when it may: --strict (or problems.strict) and a warning or error left, or
+    a problem listed in problems.error. job: a result, or its visible problems (allowed ones are already gone, so
+    --allow X on the command line or allow: X in the document beats problems.error X)."""
     problems = job.visible_nudges() if hasattr(job, "visible_nudges") else job
-    return bool(args.strict) and any(n.severity in ("warning", "error") for n in problems)
+    pol = pol or policy()
+    strict = getattr(args, "strict", None)
+    if strict is None:
+        strict, why = pol["strict"], "problems.strict"
+    else:
+        why = "--strict"
+    errors = set(pol["error"])
+    hit = sorted({n.code for n in problems if n.code in errors})
+    if strict and any(n.severity in ("warning", "error") for n in problems):
+        _LAST_STOP[0] = why
+    elif hit:
+        _LAST_STOP[0] = why = f"problems.error: {', '.join(hit)}"
+    else:
+        return ""
+    return why
+
+
+def stops_on() -> set[str]:
+    """The codes that stop a job under -q too: problems.error (a note listed there must still be shown)."""
+    return set(policy()["error"])
+
+
+def strict_hits(job, args) -> bool:
+    """The job must not go out (see stop_reason)."""
+    return bool(stop_reason(job, args))
 
 
 def job_json(res) -> dict:
@@ -85,6 +141,7 @@ GLOBAL_FLAGS = {
     "--quiet",
     "-q",
     "--strict",
+    "--no-strict",
     "--json",
     "--dry-run",
     "-n",
@@ -129,13 +186,15 @@ _FMT = ["pretty"]
 
 
 def set_problem_format(argv: list[str]) -> None:
-    """--problems FORMAT (any command) or BOBINA_PROBLEMS; read from argv so parse errors follow it too."""
-    fmt = os.environ.get("BOBINA_PROBLEMS", "pretty")
+    """--problems FORMAT (any command), else BOBINA_PROBLEMS, else problems.format in config.toml; read from argv so
+    parse errors follow it too."""
+    fmt = None
     for k, tok in enumerate(argv):
         if tok == "--problems" and k + 1 < len(argv):
             fmt = argv[k + 1]
         elif tok.startswith("--problems="):
             fmt = tok.split("=", 1)[1]
+    fmt = fmt or os.environ.get("BOBINA_PROBLEMS") or policy()["format"]
     _FMT[0] = fmt if fmt in PROBLEM_FORMATS else "pretty"
 
 
@@ -455,9 +514,11 @@ def parse_sets(pairs) -> dict:
 
 
 def allow_set(args) -> set[str]:
-    """--allow and --allow-all of this run (--last and --again have no parts: both mean the whole job)."""
+    """--allow and --allow-all of this run (--last and --again have no parts: both mean the whole job), plus
+    problems.allow of config.toml."""
     given = list(getattr(args, "allow", None) or []) + list(getattr(args, "allow_all", None) or [])
-    return {c.strip() for a in given for c in a.split(",") if c.strip()}
+    pol = policy()  # a code both in problems.allow and problems.error stops: the config's own stop wins
+    return {c.strip() for a in given for c in a.split(",") if c.strip()} | (set(pol["allow"]) - set(pol["error"]))
 
 
 def read_data(args) -> tuple[list[dict] | None, list[int] | None, list[tuple[str, str, str]]]:
@@ -1016,16 +1077,18 @@ IMAGE_FORMATS = (".png", ".jpg", ".jpeg", ".pdf", ".webp", ".bmp", ".gif", ".tif
 
 def report_nudges(res, args) -> int:
     shown = res.visible_nudges()
-    strict = strict_hits(shown, args)  # one pass over a 1000-label batch, not two
+    reason = stop_reason(shown, args)  # one pass over a 1000-label batch, not two
+    strict = bool(reason)
     left_out = [n for n in shown if n.code in LEFT_OUT_CODES]
     if strict and args.quiet:  # -q hides nudges, but never the reason of a stop
-        shown = [n for n in shown if n.severity in ("warning", "error")]
+        stops = stops_on()
+        shown = [n for n in shown if n.severity in ("warning", "error") or n.code in stops]
     elif args.quiet:  # … nor the reason of exit 9
         shown = left_out
     if (not args.quiet or strict or left_out) and not args.json:
         cmd = getattr(args, "command", "print")
         if strict:
-            outcome = f"{stopped() or 'stopped'} (--strict)"
+            outcome = f"{stopped() or 'stopped'} ({reason})"
         elif cmd not in ("print", "edit", "chat"):
             outcome = ""  # check, view, preview: the warnings are the answer, nothing was meant to print
         elif getattr(args, "dry_run", False):
@@ -1179,8 +1242,9 @@ def confirm_loop(args, res, title, rebuild=None, source_path=None, draft=False, 
             opts = " [p] print   " + ("[e] edit again   " if rebuild else "") + "[s] save as…   [q] quit\n> "
             a = ask(tty, opts)
             if a in ("p", "print"):
-                if strict_hits(res, args):  # a job rebuilt after [e] can bring new warnings
-                    tty.write(" --strict: these warnings stop the print; [e] edit again or [q] quit\n")
+                why = stop_reason(res, args)  # a job rebuilt after [e] can bring new warnings
+                if why:
+                    tty.write(f" {why}: these problems stop the print; [e] edit again or [q] quit\n")
                     continue
                 return True, res
             if a == "":

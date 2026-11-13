@@ -39,7 +39,7 @@ from .common import (
     render_problems,
     report_nudges,
     stdin_has_data,
-    strict_hits,
+    stop_reason,
 )
 
 DEFAULT_STYLE = "labels-underline"  # D1: a short mark under each name (chosen 11/11)
@@ -577,10 +577,11 @@ class Session:
         """The job's nudges (fonts, glyphs, the roll), in the format of every command (render_problems); -q keeps
         only warnings. True when --strict stops this print."""
         shown = list(res.visible_nudges())
-        strict = strict_hits(shown, self.args)
+        why = stop_reason(shown, self.args)
+        strict = bool(why)
         if self.args.quiet and not strict:
             shown = [n for n in shown if n.severity in ("warning", "error")]
-        for line in render_problems(shown, "not printed (--strict)" if strict else outcome):
+        for line in render_problems(shown, f"not printed ({why})" if strict else outcome):
             self.ui.note(line)
         return strict
 

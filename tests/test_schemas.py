@@ -77,6 +77,11 @@ def test_print_and_preview_json_match_their_schemas(tmp_path, capsys):
 
 
 def test_config_json_matches_its_schema(capsys):
-    for argv in (["config", "get", "locale", "--json"], ["config", "set", "locale", "th-TH", "--json"]):
+    for argv in (
+        ["config", "get", "locale", "--json"],
+        ["config", "set", "locale", "th-TH", "--json"],
+        ["config", "set", "problems.allow", "L102", "--json"],
+        ["config", "unset", "problems", "--yes", "--json"],
+    ):
         assert cli.main(argv) == cli.OK
         _check(json.loads(capsys.readouterr().out), _schema("config"))

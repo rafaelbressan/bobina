@@ -57,6 +57,8 @@ class Key:
             return "one or more folders"
         if self.kind == "table":
             return "a table: bobina config edit"
+        if self.kind == "codes":
+            return "problem codes, comma-separated (L102,F301; none: an empty list)"
         return "text"
 
 
@@ -100,6 +102,12 @@ def _ais() -> tuple:
     from .ai import ORDER
 
     return ORDER
+
+
+def _formats() -> tuple:
+    from .cli.common import PROBLEM_FORMATS
+
+    return PROBLEM_FORMATS
 
 
 def _marks() -> tuple:
@@ -152,8 +160,67 @@ KEYS: dict[str, Key] = {
         Key("chat", "table", None, "[chat.screen_colors]: your own colours (you = \"#00afaf\")",
             default_text="none", advanced=True),
         Key("printers", "table", None, "the printers", default_text="none", owner="bobina printer add / set"),
+        # the problem policy ([problems] in config.toml): command line > environment > document > config > default
+        Key("problems.allow", "codes", [], "problems never shown (as --allow on every command); errors still stop",
+            example="L102,F301"),
+        Key("problems.error", "codes", [], "problems that stop the job (as --strict, for these codes only)",
+            example="M130,M131"),
+        Key("problems.strict", "bool", False, "every warning stops the job (as --strict; --no-strict for one run)",
+            example="on"),
+        Key("problems.format", "choice", "pretty", "how problems are written (as --problems; BOBINA_PROBLEMS wins)",
+            _formats, example="plain"),
     )
 }  # fmt: skip
+TABLES = {"problems"}  # tables whose keys are in KEYS as TABLE.key
+
+
+def lookup(cfg: dict, name: str) -> tuple[bool, object]:
+    """(is it set, its value) for a key, also a TABLE.key one ([problems] allow = … or problems.allow = …)."""
+    table, dot, leaf = name.partition(".")
+    if not dot:
+        return (name in cfg), cfg.get(name)
+    sub = cfg.get(table)
+    if isinstance(sub, dict) and leaf in sub:
+        return True, sub[leaf]
+    return False, None
+
+
+def group(name: str) -> list[Key]:
+    """The keys of a dotted group (problems -> problems.allow, problems.error …); [] when NAME is not one."""
+    return [k for k in KEYS.values() if k.name.startswith(name + ".")] if "." not in name else []
+
+
+def typed(key: Key, value) -> str:
+    """A value as it is typed after bobina config set (the restore command of unset GROUP)."""
+    if key.kind == "codes":
+        found = codes(value) if isinstance(value, (list, str)) else [str(value)]
+        return ",".join(found) if found else "none"
+    if key.kind == "folders" and isinstance(value, list):
+        return " ".join(value)
+    return shown(value)
+
+
+CODE = re.compile(r"[A-Z]\d{3}")
+
+
+def codes(v) -> list[str]:
+    """A list of problem codes from a list or a comma-separated text ("none" or "" is an empty list)."""
+    items = [part for x in (v if isinstance(v, list) else [v]) for part in re.split(r"[,\s]+", str(x))]
+    out = [x.strip().upper() for x in items if x.strip()]
+    return [] if out == ["NONE"] else out
+
+
+def unknown_codes(values: list[str]) -> list[str]:
+    """Codes bobina does not have, each with the closest one: notes, never a block (a later bobina may add it)."""
+    from .nudges import CATALOG
+
+    out = []
+    for c in values:
+        if c not in CATALOG:
+            near = difflib.get_close_matches(c, list(CATALOG), n=1, cutoff=0.5)
+            out.append(f"{c} is not a bobina problem code" + (f" (did you mean {near[0]}?)" if near else ""))
+    return out
+
 
 PRINTER_KEYS: dict[str, Key] = {
     k.name: k
@@ -200,6 +267,8 @@ def find(name: str, table: dict[str, Key] | None = None, what: str = "setting", 
 def parse(key: Key, raw: str | list[str]):
     """A value typed on the command line -> the value to store. Raises KeyError_ with what is accepted."""
     values = raw if isinstance(raw, list) else [raw]
+    if key.kind == "codes":  # L102,F301 or L102 F301
+        return check(key, codes(values))
     if key.kind == "folders":
         return check(key, [str(v) for v in values])
     if len(values) != 1:
@@ -214,6 +283,14 @@ def check(key: Key, v, typed: bool = False):
         if typed or not isinstance(v, dict):
             raise KeyError_(f"{key.name} is a table: change it with bobina config edit")
         return v
+    if key.kind == "codes":
+        if not isinstance(v, (list, str)):
+            raise KeyError_(f"{key.name} = {v!r}: {key.accepts()}")
+        found = codes(v)
+        bad = [c for c in found if not CODE.fullmatch(c)]
+        if bad:
+            raise KeyError_(f"{key.name}: '{bad[0]}' is not a problem code (a letter and three digits: L102)")
+        return found
     if key.kind == "bool":
         if isinstance(v, bool):
             return v
@@ -279,12 +356,13 @@ def read(cfg: dict, name: str, say=None):
     default is used, so a typo in config.toml never stops a print."""
     key = KEYS[name]
     fallback = key.default
-    if name not in cfg:
+    present, value = lookup(cfg, name)
+    if not present:
         return fallback
     try:
-        return check(key, cfg[name])
+        return check(key, value)
     except KeyError_ as e:
-        said = (name, repr(cfg[name]))
+        said = (name, repr(value))
         if said not in _SAID:
             _SAID.add(said)
             used = shown(fallback) if fallback is not None else key.default_shown()
@@ -303,7 +381,7 @@ def problems(cfg: dict) -> list[tuple[str, str]]:
     that do not check, top level and per printer (bobina config edit says them after the editor closes)."""
     out = []
     for name, v in cfg.items():
-        if name not in KEYS:
+        if name not in KEYS and name not in TABLES:
             near = difflib.get_close_matches(name, list(KEYS), n=1, cutoff=0.6)
             out.append((name, f"{name}: not a bobina setting" + (f" (did you mean {near[0]}?)" if near else "")))
             continue
@@ -326,6 +404,23 @@ def problems(cfg: dict) -> list[tuple[str, str]]:
                         check(PRINTER_KEYS[k], pv)
                     except KeyError_ as e:
                         out.append((where, f"[printers.{pname}] {e}"))
+            continue
+        if name in TABLES:
+            if not isinstance(v, dict):
+                out.append((name, f"{name}: a table, [{name}]"))
+                continue
+            for k, sv in v.items():
+                where = f"{name}.{k}"
+                if where not in KEYS:
+                    near = difflib.get_close_matches(where, [n for n in KEYS if n.startswith(name + ".")], n=1,
+                                                     cutoff=0.6)  # fmt: skip
+                    out.append((where, f"{where}: not a bobina setting" + (f" (did you mean {near[0]}?)" if near
+                                                                         else "")))  # fmt: skip
+                    continue
+                try:
+                    check(KEYS[where], sv)
+                except KeyError_ as e:
+                    out.append((where, str(e)))
             continue
         if name == "chat":
             extra = [k for k in (v if isinstance(v, dict) else {}) if k != "screen_colors"]
@@ -361,14 +456,17 @@ SCHEMA = "bobina.config/1"
 
 def entry(key: Key, table: dict) -> dict:
     """One setting as bobina config list/get and bobina printer show write it (--json rows, bobina.config/1)."""
-    set_ = key.name in table
-    value = table.get(key.name, key.default)
-    bad = ""
+    set_, value = lookup(table, key.name)
+    value = value if set_ else key.default
+    bad, notes = "", []
     if set_:
         try:
-            check(key, value)
+            checked = check(key, value)
         except KeyError_ as e:
             bad = str(e)
+        else:
+            if key.kind == "codes":
+                value, notes = checked, unknown_codes(checked)
     return {
         "key": key.name,
         "value": value,
@@ -382,4 +480,5 @@ def entry(key: Key, table: dict) -> dict:
         "advanced": key.advanced,
         "set_by": key.owner or "bobina config set",
         "problem": bad,
+        "notes": notes,  # what is set but may not do what is meant (an unknown problem code): never a block
     }

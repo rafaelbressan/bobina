@@ -183,70 +183,152 @@ def _places(lines: list[str], first_table: int) -> list[tuple[int, bool]]:
     return [*out, (i, bool(lines[i].strip())), (first_table, True)]
 
 
-def set_value(key: str, value) -> None:
-    """Sets one top-level KEY in config.toml and keeps the rest of the file as it is: comments, tables, the order
-    (save() rewrites the whole file). Under the file's lock; a file that would no longer read is never written."""
-    p = path()
-    with fileio.locked(p):
-        try:
-            text = p.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            text = ""
-        except OSError as e:
-            raise fileio.StateError(f"cannot read {p}: {e.strerror or e}") from e
-        lines = text.splitlines()
-        first_table = next((i for i, line in enumerate(lines) if TABLE.match(line)), len(lines))
-        line = f"{key} = {_toml_value(value)}"
-        same = re.compile(rf"^\s*{re.escape(key)}\s*=")
-        hit = next((i for i in range(first_table) if same.match(lines[i])), None)
-        if hit is not None:
-            candidates = [[*lines[:hit], line, *lines[hit + 1 :]]]
+def _get(cfg: dict, key: str):
+    """The value of KEY (TABLE.key too) in a read config, or a marker when it is not there."""
+    table, dot, leaf = key.partition(".")
+    if not dot:
+        return cfg.get(key, _MISSING)
+    sub = cfg.get(table)
+    return sub.get(leaf, _MISSING) if isinstance(sub, dict) else _MISSING
+
+
+_MISSING = object()
+
+
+def _header(lines: list[str], table: str) -> int | None:
+    pat = re.compile(rf"^\s*\[\s*{re.escape(table)}\s*\]\s*(#.*)?$")
+    return next((i for i, line in enumerate(lines) if pat.match(line)), None)
+
+
+def _section_end(lines: list[str], start: int) -> int:
+    return next((i for i in range(start + 1, len(lines)) if TABLE.match(lines[i])), len(lines))
+
+
+def _read_text(p) -> str:
+    try:
+        return p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ""
+    except OSError as e:
+        raise fileio.StateError(f"cannot read {p}: {e.strerror or e}") from e
+
+
+def _with(cfg: dict, key: str, value=_MISSING) -> dict:
+    """A copy of CFG with KEY (TABLE.key too) set to VALUE, or removed when VALUE is missing (an emptied table goes)."""
+    out = dict(cfg)
+    table, dot, leaf = key.partition(".")
+    if not dot:
+        if value is _MISSING:
+            out.pop(key, None)
         else:
-            gap = [""]
-            candidates = [[*lines[:i], line, *(gap if blank else []), *lines[i:]]
-                          for i, blank in _places(lines, first_table)]  # fmt: skip
-        for new_lines in candidates:
-            new = "\n".join(new_lines) + "\n"
-            try:
-                if tomllib.loads(new).get(key) == value:
-                    fileio.atomic_write(p, new)
-                    return
-            except tomllib.TOMLDecodeError:
-                continue
-        raise fileio.StateError(f"{p}: could not set {key} without changing the rest; set {line} by hand")
+            out[key] = value
+        return out
+    sub = dict(out.get(table) or {})
+    if value is _MISSING:
+        sub.pop(leaf, None)
+    else:
+        sub[leaf] = value
+    if sub:
+        out[table] = sub
+    else:
+        out.pop(table, None)
+    return out
 
 
-def unset_value(key: str) -> bool:
-    """Removes one top-level KEY from config.toml and keeps the rest as it is (its value may span lines). False
-    when the file does not set it. A file that would no longer read the same is never written."""
+def _try(p, candidates: list[list[str]], *wants: dict) -> bool:
+    """Writes the first candidate that reads back as one of WANTS; False when none does."""
+    for lines in candidates:
+        new = "\n".join(lines) + "\n"
+        try:
+            got = tomllib.loads(new)
+        except tomllib.TOMLDecodeError:
+            continue
+        if any(got == w for w in wants):
+            fileio.atomic_write(p, new)
+            return True
+    return False
+
+
+def _value_ends(lines: list[str], hit: int, hi: int) -> range:
+    """Where the value that starts on line HIT may end (it may continue on the next lines)."""
+    return range(hit + 1, hi + 1)
+
+
+def set_value(key: str, value) -> None:
+    """Sets one KEY in config.toml and keeps the rest of the file as it is: comments, tables, the order (save()
+    rewrites the whole file). TABLE.key goes in [TABLE] when the file has one, else as a dotted key at the top.
+    Under the file's lock; a file that would not read back as the old config plus this value is never written."""
     p = path()
     with fileio.locked(p):
-        try:
-            text = p.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return False
-        except OSError as e:
-            raise fileio.StateError(f"cannot read {p}: {e.strerror or e}") from e
+        text = _read_text(p)
         try:
             before = tomllib.loads(text)
         except tomllib.TOMLDecodeError as e:
             raise fileio.StateError(f"{p} is not valid TOML ({e})") from e
-        if key not in before:
-            return False
-        want = {k: v for k, v in before.items() if k != key}
+        want = _with(before, key, value)
         lines = text.splitlines()
         first_table = next((i for i, line in enumerate(lines) if TABLE.match(line)), len(lines))
-        same = re.compile(rf"^\s*{re.escape(key)}\s*=")
-        hit = next((i for i in range(first_table) if same.match(lines[i])), None)
+        table, dot, leaf = key.partition(".")
+        head = _header(lines, table) if dot else None
+        candidates = []
+        if head is not None:  # [problems] … allow = …
+            lo, hi, name = head + 1, _section_end(lines, head), leaf
+        else:
+            lo, hi, name = 0, first_table, key
+        line = f"{name} = {_toml_value(value)}"
+        same = re.compile(rf"^\s*{re.escape(name)}\s*=")
+        hit = next((i for i in range(lo, hi) if same.match(lines[i])), None)
         if hit is not None:
-            for end in range(hit + 1, first_table + 1):  # the value may continue on the next lines
-                new = "\n".join([*lines[:hit], *lines[end:]]) + "\n"
-                try:
-                    if tomllib.loads(new) == want:
-                        fileio.atomic_write(p, new)
-                        return True
-                except tomllib.TOMLDecodeError:
-                    continue
+            candidates += [[*lines[:hit], line, *lines[end:]] for end in _value_ends(lines, hit, hi)]
+        elif head is not None:  # after the last line that is not blank, else anywhere in the section
+            last = max([i for i in range(lo, hi) if lines[i].strip()], default=head)
+            spots = [last + 1, *range(hi, lo - 1, -1)]
+            candidates += [[*lines[:i], line, *lines[i:]] for i in dict.fromkeys(spots)]
+        else:
+            candidates += [[*lines[:i], line, *([""] if blank else []), *lines[i:]]
+                           for i, blank in _places(lines, first_table)]  # fmt: skip
+        if not _try(p, candidates, want):
+            raise fileio.StateError(f"{p}: could not set {key} without changing the rest; set {line} by hand")
+
+
+def unset_value(key: str) -> bool:
+    """Removes one KEY (TABLE.key too) from config.toml and keeps the rest as it is: its value may span lines; a
+    [TABLE] left with nothing in it (no keys, no comments) goes too. False when the file does not set it. A file
+    that would not read back as the old config without KEY is never written."""
+    p = path()
+    with fileio.locked(p):
+        text = _read_text(p)
+        if not text:
+            return False
+        try:
+            before = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            raise fileio.StateError(f"{p} is not valid TOML ({e})") from e
+        if _get(before, key) is _MISSING:
+            return False
+        want = _with(before, key)
+        table, dot, leaf = key.partition(".")
+        keep_table = {**want, table: {}} if dot and table not in want else want  # [TABLE] kept, now empty
+        lines = text.splitlines()
+        head = _header(lines, table) if dot else None
+        if head is not None:
+            lo, hi, name = head + 1, _section_end(lines, head), leaf
+        else:
+            lo, hi, name = 0, next((i for i, ln in enumerate(lines) if TABLE.match(ln)), len(lines)), key
+        same = re.compile(rf"^\s*{re.escape(name)}\s*=")
+        hit = next((i for i in range(lo, hi) if same.match(lines[i])), None)
+        if hit is not None:
+            candidates = []
+            for end in _value_ends(lines, hit, hi):
+                new_lines = [*lines[:hit], *lines[end:]]
+                if head is not None:
+                    left = _section_end(new_lines, head)
+                    if not any(ln.strip() for ln in new_lines[head + 1 : left]):  # only blank lines are left
+                        start = head - 1 if head and not new_lines[head - 1].strip() else head
+                        candidates.append([*new_lines[:start], *new_lines[left:]])
+                candidates.append(new_lines)
+            if _try(p, candidates, want, keep_table):
+                return True
         raise fileio.StateError(f"{p}: could not remove {key} without changing the rest; remove it by hand")
 
 
