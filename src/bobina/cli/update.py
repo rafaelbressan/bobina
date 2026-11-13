@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 from .. import __version__, update
-from .common import OK, UNREACHABLE, USAGE, Fail, ask, err, open_tty, print_json
+from .common import NEWER, OK, UNREACHABLE, USAGE, Fail, ask, err, open_tty, print_json
 
-NEWER = 10  # bobina update --check: a newer release exists (docs/CLI.md exit codes)
 SCHEMA = "bobina.update/1"
+
+
+def _person() -> bool:
+    """stdin and stdout are a terminal: `bobina update > log.txt` and harnesses with a tty never get the question."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
 
 
 def cmd_update(args):
@@ -38,8 +46,8 @@ def cmd_update(args):
         print(f"  {how.note}")
     if not how.command:  # sudo, a download or a source checkout: said, never run
         return OK
-    tty = open_tty()
-    if tty is None:  # a script or an agent: the command is shown, never run
+    tty = open_tty() if _person() else None
+    if tty is None:  # a script or an agent (also one with a controlling terminal): shown, never run
         return OK
     with tty:
         a = ask(tty, " run it? [y/n] ")

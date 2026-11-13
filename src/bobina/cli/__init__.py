@@ -6,6 +6,7 @@ from .common import (  # noqa: F401
     DOC,
     LEFT_OUT,
     MODE,
+    NEWER,
     OK,
     PRINTER_ERR,
     SECURITY,

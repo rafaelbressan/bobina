@@ -128,6 +128,7 @@ EXIT_CODES = {  # bobina help --json and the tools of bobina mcp say what each e
     common.CONFIRM: "confirmation needed or declined",
     common.SECURITY: "security",
     common.LEFT_OUT: "part of the job left out (a payment code, Q111)",
+    common.NEWER: "a newer release exists (bobina update --check)",
 }  # fmt: skip
 
 

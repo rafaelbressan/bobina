@@ -17,6 +17,7 @@ from ..nudges import Nudge, SecurityError, problems_header
 from ..templating import Tainted
 
 OK, USAGE, DOC, STRICT, UNREACHABLE, PRINTER_ERR, MODE, CONFIRM, SECURITY, LEFT_OUT = range(10)
+NEWER = 10  # bobina update --check: a newer release exists
 # LEFT_OUT: the job went out (printed, saved, shown) without a part it exists for. A warning, so the rest still
 # prints (nudges, not blocks), but a script or an agent with --yes must not read it as a clean print. --allow
 # CODE silences it and the exit is 0 again.

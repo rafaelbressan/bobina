@@ -12,6 +12,7 @@
     "kind",
     "installed_by",
     "command",
+    "steps",
     "runnable",
     "note"
   ],
@@ -38,7 +39,12 @@
       "type": "string"
     },
     "command": {
-      "type": "string"
+      "type": "string",
+      "description": "the upgrade command to run in a shell; empty when the way is not one command (see steps)"
+    },
+    "steps": {
+      "type": "string",
+      "description": "what to do, in words, when it is not one command (a .deb download, git pull)"
     },
     "runnable": {
       "type": "boolean"
