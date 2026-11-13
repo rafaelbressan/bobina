@@ -270,12 +270,15 @@ def test_mtp_ii_code39_preview_is_as_wide_as_the_paper():
     assert xs[-1] - xs[0] + 1 == 258
 
 
-def test_tracking_at_widths_nobody_measured_follows_the_spec():
-    """Only 2x was measured on the MTP-II; 3x keeps the spec (doubled gap), so lines wrap early, never overflow."""
+def test_tracking_follows_the_paper_where_measured_and_the_spec_elsewhere():
+    """The MTP-II never scales ESC SP with the width (paper: 2x on 09/11, 3x and 4x on 13/11). A printer nobody
+    measured keeps the spec (the gap scales), so lines wrap early, never overflow."""
     from bobina import profile
 
     p = profile.load("mtp-ii-58")
-    assert p.tracking_gap(4, 1) == 4 and p.tracking_gap(4, 2) == 4 and p.tracking_gap(4, 3) == 12
+    assert [p.tracking_gap(4, w) for w in (1, 2, 3, 4)] == [4, 4, 4, 4]
+    other = profile.load("epson-tm-t20ii")
+    assert other.tracking_gap(4, 3) == 12
 
 
 def test_vertical_code39_length_is_the_one_bobina_draws():

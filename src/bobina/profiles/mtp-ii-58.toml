@@ -23,7 +23,8 @@ feed_after_dots = 88      # tear bar 5 mm after the head + 6 mm to spare (08/11:
 [transport]
 chunk_bytes = 4096        # B1: 4 KB, no pause, no stripes
 pause_s = 0.0
-band_rows = 64            # GS v 0 band height
+band_rows = 16            # GS v 0 band height: 16 (paper 13/11: with 64 a light line appears where the Bluetooth
+                          # link starves the printer, at a different height on the same image; with 16 none)
 print_mm_per_s = 40       # conservative print speed: keep the link open this long (tail of long jobs was lost)
 idle_before_tail = true   # drops commands sent while it prints a big image: the end of a job that ends with one
                           # waits until GS r 1 is answered again (08/11, docs/printers/mtp-ii-58.md)
@@ -43,7 +44,7 @@ underline = true          # does not underline spaces (N2)
 invert = "words"          # GS B leaves spaces white; continuous bands go raster (N2)
 italic = false            # ESC 4 ignored (N2)
 strike = false
-tracking_unscaled_at = [2]  # ESC SP n stays n dots at 2x width (paper, 09/11); 3x, 4x not measured
+tracking_unscaled_at = [2, 3, 4]  # ESC SP n stays n dots at 2x (paper 09/11), 3x and 4x (paper 13/11)
 upside_down = true        # ESC {, line order not reversed (N2)
 absolute_position = true  # ESC $ works: native tables (N4)
 # Unicode ranges the internal font prints (N5). Anything else goes raster for that line.

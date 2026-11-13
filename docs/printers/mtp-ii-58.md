@@ -37,7 +37,7 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | Feature | Native | Notes | Decision |
 |---|---|---|---|
 | Line spacing `ESC 3 n` | ✅/⚠️ | 0 and ≥ 30 fine; **n below the font height gives a large gap** | set n = height + 6 |
-| Character spacing `ESC SP n` | ✅ | stays n dots at 2× width: not doubled as the spec says (paper, 09/11) | native; profile `native.tracking_unscaled_at = [2]` (3×, 4× not measured: spec assumed, lines wrap early) |
+| Character spacing `ESC SP n` | ✅ | stays n dots at 2×, 3× and 4× width: never scaled as the spec says (paper, 09/11 and 13/11) | native; profile `native.tracking_unscaled_at = [2, 3, 4]` |
 | Alignment `ESC a` | ✅ | | native |
 | Left margin `GS L` | ✅ | | native |
 | Print width `GS W` | ❌ | ignored | host computes |
@@ -82,6 +82,7 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | Minimum text | **12 px Terminus**, 14 px Atkinson Hyperlegible (8 px illegible, 10 px borderline) |
 | Inverted text (white on black) | bold ≥ 20 px with ≥ 4 dots of margin |
 | QR in raster | **module ≥ 4** (2 and 3 did not read); native reads at 3 |
+| Raster band height (`GS v 0`) | **16 rows** (13/11: with 64 rows a light line appears at a random height, a different one on the same image, where the Bluetooth link starves the printer; with 16 none) |
 | Rich typography, lists, drawn checkboxes, grids, bars, fills | ✅ |
 
 Recommended raster fonts: Atkinson Hyperlegible 16–20 (bold ok), Terminus / Spleen 12–16 for small

@@ -14,7 +14,7 @@ there with the evidence (printer, date, what was printed), and the mark and the 
 | Raster images, QR (native and raster), codes on the MTP-II | ✅ MTP-II | every profile |
 | Feeds after images as white raster rows (safe mode) | ✅ MTP-II, 08/11 | every profile not calibrated with `bobina calibrate feed` |
 | `--marks` cut and tear lines | ✅ MTP-II, 08/11 | any profile, when asked |
-| Label by label (`--step`): one send per label, the Bluetooth link closed while you tear | ⚠ not tested on paper | any print of several labels at a terminal |
+| Label by label (`--step`): one send per label, the Bluetooth link closed while you tear | ✅ MTP-II, 13/11 (3 labels, 20 s and 60 s idle between them: each whole, above the tear bar) | any print of several labels at a terminal |
 | native text through code pages (ESC t) | ⚠ not tested on paper | profiles with `encoding = "codepage"` (most imported profiles) |
 | automatic cutter (GS V) where a label ends (not between --compact labels: glued on purpose) | ⚠ not tested on paper | profiles with `cutter = "full"` or `"partial"` |
 | native barcodes (GS k) on an imported profile | ⚠ not tested on paper | imported profiles whose printer has barcode commands |
