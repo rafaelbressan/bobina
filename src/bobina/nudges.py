@@ -49,6 +49,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L103": ("warning", "preformatted line longer than the paper was wrapped", ""),
     "L104": ("warning", "rotated block wider than the paper was cropped", ""),
     "L105": ("warning", "nothing printable: every block was skipped", ""),
+    "L106": ("warning", "table turned vertical to fit the paper (header on the right)", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),

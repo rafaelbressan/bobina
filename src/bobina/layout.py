@@ -28,6 +28,7 @@ UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_PAD = "\ufdd0"  # a noncharacter: the second column of an icon in a table grid, never printed
+TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
@@ -1457,7 +1458,8 @@ class Layout:
         return default, None
 
     def table(self, t: Table, indent: int) -> list:
-        """Monospace grid: columns line up exactly in the native font."""
+        """Monospace grid: columns line up exactly in the native font. orientation=vertical (or auto, the default,
+        when the columns cannot keep TABLE_MIN characters each) turns it along the paper (table_turned)."""
 
         def txt(runs):  # a wide character (icon, CJK) takes two columns: a pad after it keeps the grid (not drawn)
             s = "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
@@ -1466,8 +1468,16 @@ class Layout:
         head = [txt(c) for c in t.header]
         body = [[txt(c) for c in r] for r in t.rows]
         ncol = len(head)
-        widths = [max([len(head[i])] + [len(r[i]) if i < len(r) else 0 for r in body]) for i in range(ncol)]
+        natural = [max([len(head[i])] + [len(r[i]) if i < len(r) else 0 for r in body]) for i in range(ncol)]
         cap = self.cols - indent - (ncol - 1)
+        orientation = t.attrs.kv.get("orientation", "auto")
+        if orientation not in ("auto", "horizontal", "vertical"):
+            self.n.add("M101", f"orientation={orientation}", t.line, "auto, horizontal or vertical")
+            orientation = "auto"
+        cramped = sum(min(w, TABLE_MIN) for w in natural) > cap
+        if orientation == "vertical" or (orientation == "auto" and cramped):
+            return self.table_turned(t, head, body, natural, auto=orientation == "auto")
+        widths = list(natural)
         while sum(widths) > cap and max(widths) > 2:  # 2: a wide character always fits its column
             i = widths.index(max(widths))
             widths[i] -= 1
@@ -1479,28 +1489,8 @@ class Layout:
         rows = []
 
         def emit(cells_text, bold):
-            wrapped = []
-            for i in range(ncol):
-                s = cells_text[i] if i < len(cells_text) else ""
-                wrapped.append(wrap_cell(s, widths[i]))
-            for k in range(max(len(p) for p in wrapped)):
-                line = ""
-                for i in range(ncol):
-                    s = wrapped[i][k] if k < len(wrapped[i]) else ""
-                    al = t.aligns[i] if i < len(t.aligns) else "left"
-                    s = (
-                        s.rjust(widths[i])
-                        if al == "right"
-                        else s.center(widths[i])
-                        if al == "center"
-                        else s.ljust(widths[i])
-                    )
-                    line += s + (" " if i < ncol - 1 else "")
-                cells = (
-                    self.lead(indent)
-                    + [Cell(" ")] * shift
-                    + [Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD]
-                )
+            for cells in self.table_lines(t, cells_text, widths, bold):
+                cells = self.lead(indent) + [Cell(" ")] * shift + cells
                 reason = self.native_ok(cells)
                 rows.append(TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason))
 
@@ -1509,6 +1499,68 @@ class Layout:
         for r in body:
             emit(r, False)
         return rows
+
+    def table_lines(self, t: Table, cells_text: list[str], widths: list[int], bold: bool) -> list[list[Cell]]:
+        """One table row as printed lines of cells: each cell wrapped to its width and aligned (:-- --: :-:)."""
+        ncol = len(widths)
+        wrapped = [wrap_cell(cells_text[i] if i < len(cells_text) else "", widths[i]) for i in range(ncol)]
+        out = []
+        for k in range(max(len(p) for p in wrapped)):
+            line = ""
+            for i in range(ncol):
+                s = wrapped[i][k] if k < len(wrapped[i]) else ""
+                al = t.aligns[i] if i < len(t.aligns) else "left"
+                fit = {"right": s.rjust, "center": s.center}.get(al, s.ljust)
+                s = fit(widths[i])
+                line += s + (" " if i < ncol - 1 else "")
+            out.append([Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD])
+        return out
+
+    def table_turned(self, t: Table, head: list[str], body: list[list[str]], natural: list[int], auto: bool) -> list:
+        """The table drawn as an image and turned 90° clockwise, like a book's spine: the header on the right, the
+        text read from top to bottom, the paper's length as the table's width. Cells never wrap (the length is
+        free); when the rows do not fit across the paper they go on in more turned blocks, the header repeated."""
+        avail = self.object_width(t.attrs.kv.get("width"), t.line) or self.W
+        avail = min(avail, self.W)
+        align = self.object_align(t.attrs)
+        widths = [max(1, w) for w in natural]
+        cols = sum(widths) + len(widths) - 1
+        width = cols * self.em.cw
+
+        def lines(cells_text, bold):
+            return [TextRow(c, (1, 1), "left", t.line) for c in self.table_lines(t, cells_text, widths, bold)]
+
+        head_rows = lines(head, True)
+        rule = imaging.divider(width, "solid", 2, pad=3)
+        row_h = self.em.row_height(head_rows[0]) if head_rows else self.em.ch
+        per_block = max(1, (avail - row_h * len(head_rows) - rule.height) // row_h)
+        chunks = [body[i : i + per_block] for i in range(0, len(body), per_block)] or [[]]
+        out = []
+        for n, chunk in enumerate(chunks):
+            parts = [self.em.render_row(r, width) for r in head_rows] + [rule]
+            parts += [self.em.render_row(r, width) for row in chunk for r in lines(row, False)]
+            im = Image.new("1", (width, sum(p.height for p in parts)), 1)
+            y = 0
+            for part in parts:
+                im.paste(part, (0, y))
+                y += part.height
+            turned = im.rotate(-90, expand=True)  # clockwise: the header (the top) goes to the right
+            if turned.width > avail:  # one row taller than the paper is wide: never past the paper's edge
+                turned = turned.crop((turned.width - avail, 0, turned.width, turned.height))
+            if n:
+                out.append(FeedRow(int(self.p.get("native.line_gap_dots", 6)) * 4))
+            out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table"))
+        if auto:
+            length = sum(r.image.height for r in out if isinstance(r, BitmapRow)) / (self.p.dpi / 25.4)
+            self.n.add(
+                "L106",
+                f"a table of {len(head)} columns does not fit across the paper: it prints VERTICALLY, "
+                f"about {length:.0f} mm along the paper" + (f", in {len(chunks)} blocks" if len(chunks) > 1 else ""),
+                t.line,
+                "read it with the header on the right; orientation=vertical silences this, orientation=horizontal "
+                "keeps it standing (narrow wrapped columns)",
+            )
+        return out
 
 
 def _justify(cells: list[Cell], cap: int) -> list[Cell]:

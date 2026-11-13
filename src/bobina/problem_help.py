@@ -54,6 +54,10 @@ FIX = {
     "L103": "Shorten the line or use a smaller size for the preformatted block.",
     "L104": "Use shorter lines or a smaller size in the rotated block.",
     "L105": "Every block was empty or skipped: see the other problems of this document.",
+    "L106": (
+        "Read it with the header on the right. orientation=vertical keeps it so without the note; "
+        "orientation=horizontal keeps it standing, with narrow wrapped columns."
+    ),
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",

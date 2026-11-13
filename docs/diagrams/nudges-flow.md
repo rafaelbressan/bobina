@@ -212,6 +212,7 @@ from this list.
 | `L103` | warning | preformatted line longer than the paper was wrapped |  |
 | `L104` | warning | rotated block wider than the paper was cropped |  |
 | `L105` | warning | nothing printable: every block was skipped |  |
+| `L106` | warning | table turned vertical to fit the paper (header on the right) |  |
 
 ### Codes (QR, barcodes, Pix)
 

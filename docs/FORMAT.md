@@ -58,7 +58,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles; italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | monospace grid, header bold with a rule under it, column alignment from `:--`/`--:`, **stretched to the paper width** (the first column absorbs the slack); `{.compact}` keeps it narrow (`.center`/`.right` place it) |
+| `\| a \| b \|` tables | monospace grid, header bold with a rule under it, column alignment from `:--`/`--:`, **stretched to the paper width** (the first column absorbs the slack); `{.compact}` keeps it narrow (`.center`/`.right` place it); `orientation=vertical`/`auto`: turned (`L106`) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -502,6 +502,7 @@ Nudges:
 | `L103` | warning | preformatted line longer than the paper was wrapped |
 | `L104` | warning | rotated block wider than the paper was cropped |
 | `L105` | warning | nothing printable: every block was skipped |
+| `L106` | warning | table turned vertical |
 | `I101` | warning | image not found, unreadable or in an unsupported format (the hint lists the formats) |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped: fetching shows the server when you print, and a shared document could reach your local network; add `--allow-net` if you trust it |
