@@ -47,10 +47,10 @@ INSTRUCTIONS = """\
 bobina prints Markdown (.bob.md: receipts, lists, labels, QR and payment codes) on thermal roll printers.
 Look before printing: check (paper length and problems) and preview (the exact image), with the printer the job
 will go to. print sends to the printer only with confirm: true, after the user agreed; without it, it is a dry
-run. Every result starts with the bobina command line it ran and its exit code: 0 ok, 9 printed without a
-payment code (Q111), others are errors. A print stopped before it finished may be partly on paper: never print
-again before checking. A problem code (E401, Q111…) is explained by help with that code. Document format: help
-topic format."""
+run. Every result starts with the bobina command line it ran and its exit code: 0 ok, 9 printed without
+a payment or contact code (Q111, Q112), others are errors. A print stopped before it finished may be partly on
+paper: never print again before checking. A problem code (E401, Q111…) is explained by help with that code.
+Document format: help topic format."""
 
 
 @dataclass
@@ -146,7 +146,8 @@ def _meaning(code: int) -> str:
 
 def result(r: Run, *extra):
     """The run as a tool result: the command line and exit code, stdout (the CLI's JSON), stderr (problems as
-    JSON, notes). An error unless the exit is 0 or 9 (the job went out without a payment code: docs/CLI.md)."""
+    JSON, notes). An error unless the exit is 0 or 9 (the job went out without a payment or contact code:
+    docs/CLI.md)."""
     from mcp.types import CallToolResult, TextContent
 
     if r.code is None:  # never read as a usage error: the agent must not simply call again
@@ -439,9 +440,9 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
         allow_net: NetArg = False, strict: StrictArg = False,
     ):  # fmt: skip
         """Print a document on the thermal printer (bobina print --json). Without confirm: true it is a dry run
-        (--dry-run): the same figures and problems, nothing sent. Exit 9: printed without a payment code (Q111).
-        A print stopped before it finished (no exit code) may be partly on paper: do not print it again before
-        the user checked the paper and bobina history."""
+        (--dry-run): the same figures and problems, nothing sent. Exit 9: printed without a payment or contact code
+        (Q111, Q112). A print stopped before it finished (no exit code) may be partly on paper: do not print it again
+        before the user checked the paper and bobina history."""
         return await s.print(text, path, confirm, copies, set_=set, data=data, printer=printer, profile=profile,
                              allow=allow, allow_net=allow_net, strict=strict)  # fmt: skip
 
@@ -459,10 +460,13 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
     async def help_(
         topic: Annotated[
             str | None,
-            Field(description="commands, format, data, pay, nudges, aliases, a command, or a problem code (Q111);"
+            Field(description="commands, format, data, pay, contact, nudges, aliases, a command, or a problem code"
+                              " (Q111);"
                               " none: the whole CLI for programs"),
         ] = None,
-        name: Annotated[str | None, Field(description="with topic pay: one scheme, e.g. pix")] = None,
+        name: Annotated[
+            str | None, Field(description="with topic pay or contact: one scheme or network, e.g. pix")
+        ] = None,
     ):  # fmt: skip
         """bobina help --json: the document format, a problem code and what to do, a payment scheme, a command."""
         return await s.help(topic, name)

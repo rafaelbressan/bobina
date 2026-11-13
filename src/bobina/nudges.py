@@ -38,6 +38,11 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "payment code not built: an attribute is missing or invalid (the code is left out, the rest prints, exit 9)",
         "",
     ),
+    "Q112": (
+        "warning",
+        "contact code not built: the network or its value is wrong (the code is left out, the rest prints, exit 9)",
+        "",
+    ),
     # L layout
     "L101": ("warning", "word longer than the line was split", ""),
     "L102": ("note", "long print", ""),
@@ -92,6 +97,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "P106": ("note", "--step: no terminal to wait on, so every label prints at once", ""),
     "P301": ("note", "this job uses a feature not tested on paper yet", ""),
     "P302": ("note", "a payment code nobody has scanned with its app yet", ""),
+    "P303": ("note", "a contact code nobody has scanned with its app yet", ""),
     "P201": ("warning", "raw bytes bypass every check and are not previewed", ""),
     "P401": ("note", "Bluetooth or USB printers cannot be looked for on this machine (the message says why)", ""),
     "P402": ("note", "the printer's name does not settle the profile (no match, or several widths): one was taken", ""),

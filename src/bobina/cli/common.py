@@ -20,7 +20,7 @@ OK, USAGE, DOC, STRICT, UNREACHABLE, PRINTER_ERR, MODE, CONFIRM, SECURITY, LEFT_
 # LEFT_OUT: the job went out (printed, saved, shown) without a part it exists for. A warning, so the rest still
 # prints (nudges, not blocks), but a script or an agent with --yes must not read it as a clean print. --allow
 # CODE silences it and the exit is 0 again.
-LEFT_OUT_CODES = {"Q111"}  # a payment code that was not built: a receipt without its QR
+LEFT_OUT_CODES = {"Q111", "Q112"}  # a payment or contact code that was not built: a print without its QR
 
 
 _JSON_WRITTEN = [False]  # did this run answer --json? (main says so when a command or subcommand did not)

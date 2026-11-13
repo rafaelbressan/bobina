@@ -8,4 +8,5 @@
 # The test kit (use these in tests, docs and examples; Pix keys of type EVP are random UUIDs and need no entry):
 value: 000.000.001-91  # fake CPF for tests and Pix examples (valid check digits, issued to nobody on purpose)
 value: +55 11 90000-0000  # fake mobile phone for tests and Pix examples
+value: +5511900000000  # the same fake mobile without spaces, as wa.me, tel: and signal.me links carry it
 path: tests/fixtures/fake/*  # folder of generated fake data (Pix payloads, receipts, contact lists)

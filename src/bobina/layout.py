@@ -803,6 +803,8 @@ class Layout:
             return self.barcode(f)
         if kind == "pay":
             return self.pay(f)
+        if kind == "contact":
+            return self.contact(f)
         if kind == "pix":  # Pix is a pay scheme now: say so loudly, a payment code is missing from the print
             self.n.add("Q111", "the pix block is gone: Pix is pay {scheme=pix}, nothing printed", f.line, PAY_HINT)
             return []
@@ -1121,6 +1123,59 @@ class Layout:
         elif caption.lower() in NO_CAPTION:
             caption = ""
         keep = {k: v for k, v in f.attrs.kv.items() if k in pay.QR_ATTRS - {"caption", "scheme"}}
+        rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
+                             resolved=True)  # fmt: skip
+        return rows + self.caption_rows(caption, f.line) if rows else rows
+
+    def contact(self, f: Fence) -> list:
+        """A contact or profile QR code (```contact NETWORK, the value in the body): the link from contact.py, a QR
+        and a caption line. A value that makes no link: Q112, and the code is left out (the rest prints)."""
+        from . import contact
+        from .model import Attrs
+
+        name = self.text(f.arg).strip().lower()
+        n = contact.find(name) if name else None
+        if n is None:
+            near = contact.closest(name) if name else ""
+            what = f"unknown network '{name}'" if name else "contact needs a network: ```contact whatsapp"
+            hint = (f"did you mean {near}? " if near else "") + "networks: " + ", ".join(contact.NETWORKS)
+            self.n.add("Q112", f"contact: {what}", f.line, hint)
+            return []
+        label = f"contact {n.name}"
+        kv = {k: self.text(v) for k, v in f.attrs.kv.items()}
+        for k in kv:
+            if k not in contact.QR_ATTRS and k not in (n.attrs or {}):
+                takes = ", ".join([*(n.attrs or {}), "caption", "size", "module", "ecc"])
+                self.n.add("M101", f"{label} does not use '{k}='", f.line, f"it takes {takes} (bobina help contact "
+                           f"{n.name})")  # fmt: skip
+        body = self.text(f.content).strip()
+        value = body if n.group == "card" else body.split("\n")[0].strip()
+        if n.group != "card" and "\n" in body:
+            self.n.add("M101", f"{label}: only the first line of the block is used", f.line,
+                       "one value per block: another network, another block")  # fmt: skip
+        try:
+            if not value:
+                raise contact.ContactError(f"{label} needs a value in the block body", f"for example: {n.example}")
+            payload, detail, *more = n.build(value, kv)
+            for msg, hint in more[0] if more else []:  # a card line it cannot use, text= on a group link
+                self.n.add("M101", msg, f.line, hint)
+        except contact.ContactError as e:
+            hint = e.hint or f"for example: {n.example}"
+            msg = str(e) if str(e).startswith("contact ") else f"contact {e}"  # "contact whatsapp: '11 …' has …"
+            self.n.add("Q112", msg, f.line, f"{hint} · bobina help contact {n.name}")
+            return []
+        if not n.tested:
+            why = f"nobody has scanned this code with {n.app or f'the {n.title} app'} yet"
+            if n.proprietary:
+                why += f"; {n.proprietary}"
+            self.n.add("P303", f"{label}: {why} ({contact.MARK})", f.line,
+                       "scan a printed code with the app before handing it out")  # fmt: skip
+        caption = str(kv.get("caption", "auto")).strip()
+        if caption.lower() == "auto":
+            caption = contact.caption(n, detail)
+        elif caption.lower() in NO_CAPTION:
+            caption = ""
+        keep = {k: v for k, v in f.attrs.kv.items() if k in contact.QR_ATTRS - {"caption"}}
         rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
                              resolved=True)  # fmt: skip
         return rows + self.caption_rows(caption, f.line) if rows else rows

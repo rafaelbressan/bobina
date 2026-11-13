@@ -41,3 +41,17 @@ real app. The others give the note `P302` and read **⚠ not tested in a payment
 
 Live somewhere these apps are used? Print `bobina help pay`'s example for your scheme, scan it with your app and
 say what it showed.
+
+## Contact codes
+
+A contact code is a plain QR of the network's public link (or a vCard / MeCard), so any phone camera reads it;
+what needs a test is the **app**: the link must open the right chat or profile. The links follow each network's
+published format (`source=` in `NETWORKS`, `src/bobina/contact.py`), but none was scanned with the real app yet:
+each gives the note `P303` and reads **⚠ not tested in the app** in `bobina help contact` and
+[contact.md](contact.md). When one is, set `tested=` there with the evidence.
+
+| Networks | Tested in the app |
+|---|---|
+| `whatsapp`, `telegram`, `signal`, `wechat`, `line`, `viber`, `kakao`, `kik`, `messenger`, `discord` | ⚠ not tested in the app |
+| `instagram`, `facebook`, `threads`, `tiktok`, `x`, `youtube`, `linkedin`, `vk`, `snapchat`, `pinterest`, `reddit`, `twitch`, `spotify`, `baidu` | ⚠ not tested in the app |
+| `phone`, `sms`, `email`, `vcard`, `mecard` | ⚠ not tested with a phone camera |
