@@ -34,8 +34,8 @@ Language: **English everywhere** (messages, help, docs, spec).
 | `fonts list \| test \| mark \| scripts \| get` | recommended fonts, the font test registry; fonts for other scripts (`get thai`, `get hi`, `get menu.bob.md`: download now, offline later) | — |
 | `seq list \| set \| reset` | persistent counters used by `{{ seq.NAME }}` | — |
 | `init` | first run: printer, profile, locale, roll, a test strip with the calibration ([below](#first-run-init)) | — |
-| `printer scan \| add \| list \| use` | find and store printers (address lives in config, never in code) | — |
-| `config locale [TAG]` | show or save the locale of documents without `locale:` ([FORMAT.md §7.1](FORMAT.md#71-dates-and-languages)) | — |
+| `printer scan \| add \| list \| use \| remove \| show \| set \| unset` | find and store printers; `set NAME KEY VALUE` | — |
+| `config list \| get \| set \| unset \| edit` | every setting and its value (`--all`: advanced too); `edit` checks the file; a bad value is a note, never a stop | — |
 | `profile list \| show \| use` | printer profiles | — |
 | `template list \| show \| new` | ready-made documents (receipt, label, todo, card, shop tags…) | — |
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
@@ -88,7 +88,7 @@ bobina edit list.bob.md            # existing file (or create it)
 
 - A draft is a full `.bob.md` (front matter, variables, counters, templates), stored in `~/.local/state/bobina/drafts/`; the last one is kept for `print --last`.
 - Drafts start with a column ruler as an HTML comment (exact for the native font only; the preview is the truth).
-- Editor resolution: `--editor CMD` > `editor` in `config.toml` > `$VISUAL` > `$EDITOR` > `nano` > `vi` (Notepad on Windows).
+- Editor: `--editor CMD` > config `editor` > `$VISUAL` > `$EDITOR` > `nano` > `vi` (Notepad on Windows).
 - GUI editors return immediately unless told to wait; bobina adds the flag for known ones (`code`/`cursor --wait`, `subl -w`).
 
 ## Inline text is an implicit document
@@ -147,7 +147,7 @@ A print of several labels stops after each one, so you can tear it off:
 `r` reprints the last (same number), `q` says how to print the rest (`--rows 4-10`); unprinted labels give
 their numbers back. Only at a terminal with a real printer: not with `-o`, a file printer, agents or `--yes`
 (unless `--step` is written). `--compact` prints at once (`P105`). `--no-step`: this print at once; `--step 3`:
-stop every 3; `bobina config step off`: always at once.
+stop every 3; `bobina config set step off`: always at once.
 
 ## One strip (`--compact`, `--then`, several files)
 
@@ -179,7 +179,7 @@ paper goes to the tear bar, `✂ ┄┄┄` at a cut.
 **On paper, no mark by default** (a cut is just space). To see on the strip where one order ends and the next
 begins, `--marks cut` prints a fine dashed line (1 dot, 4 on / 4 off) at every cut, `--marks tear` prints it so
 that the final feed leaves it on the tear bar (it uses the `tear_mm` measured by `bobina calibrate tear`; 5 mm
-without one), `--marks both` does both; `marks = "both"` in `config.toml` makes it the default. The marks change
+without one), `--marks both` does both; `bobina config set marks both` makes it the default. The marks change
 no length, and the confirmation screen says which ones go on paper.
 
 | Command | Strip (⟶ tear feed, ✂ cut line) |
@@ -356,7 +356,7 @@ bobina history --json · bobina history clear --yes
 Private by default: the text of labels is not kept; on the stored command line, inline text becomes `text`,
 `--set`/`--set-all`/`--where` keep only the key (`KEY=***`, they can be a Pix key or a phone number) and option
 values are kept only for file and number options. Problem messages are stored with every value given to the job,
-long digit runs and e-mails replaced by `***`. Abbreviated options are refused, so none slips past this. `history = false` in `config.toml` turns it off;
+long digit runs and e-mails replaced by `***`. Abbreviated options are refused, so none slips past this. `bobina config set history off` turns it off;
 `history_max` (default 5000) bounds it.
 
 ## Problems: one format, four renderings
@@ -444,7 +444,7 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 - Config: `~/.config/bobina/config.toml` (default profile, printers, editor, locale, preferences).
 - Profiles: built-in + `~/.config/bobina/profiles/*.toml` (width in dots, `dpi`, native fonts, capability matrix, top margin, `feed_after`, calibration curve).
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
-- Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `font_downloads = false` in config.toml (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
+- Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `bobina config set font_downloads off` (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 
 ## Decided
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import config, editor, preview, state, view
+from .. import config, config_keys, editor, preview, state, view
 from .. import profile as profiles
 from ..export import is_pattern as export_pattern
 from . import common, steps
@@ -277,7 +277,7 @@ def _keep_last(res, base: str, origin: str, st=None) -> None:
     way (steps) keeps only the labels that printed: --last must never print one whose number went back."""
     from .. import fileio
 
-    if not config.load().get("keep_last", True):
+    if not config_keys.read(config.load(), "keep_last", say=err):
         return
     try:
         emulator = res.first.emulator if hasattr(res, "first") else res.emulator

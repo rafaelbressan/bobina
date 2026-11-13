@@ -546,7 +546,7 @@ def _send(data: bytes, printer: dict, profile, log=print, precheck=None, length_
             raise SendFailed(
                 f"the command did not finish in {timeout:g} s" + (f": {said}" if said else ""),
                 len(data),
-                "for a long job, raise timeout = SECONDS for the printer in config.toml",
+                "for a long job: bobina printer set PRINTER timeout SECONDS",
             ) from None
         except OSError as e:
             raise PrinterUnreachable(f"cannot run {cmd[0]}: {e.strerror}") from e

@@ -591,10 +591,9 @@ MARKS = ("none", "cut", "tear", "both")
 
 def marks_setting(args, cfg: dict) -> str:
     """--marks, else marks in config.toml, else none (decided 08/11: no mark on paper unless asked)."""
-    value = getattr(args, "marks", None) or cfg.get("marks") or "none"
-    if value not in MARKS:
-        raise Fail(USAGE, f"marks = {value!r} in config.toml: use {', '.join(MARKS)}", problem="E101")
-    return value
+    from .. import config_keys
+
+    return getattr(args, "marks", None) or config_keys.read(cfg, "marks", say=err)  # a typo there: a note
 
 
 def build(args, source, base_dir, counters=None, machine=None):
@@ -1293,7 +1292,7 @@ def do_send(args, res_data: bytes, prof, check_status=True, length_mm: float = 0
             progress=progress,
         )  # fmt: skip
     except transport.PrinterBusy as e:
-        hint = "nothing was sent; to wait longer, add busy_timeout = SECONDS to the printer in config.toml"
+        hint = f"nothing was sent; to wait longer: bobina printer set {name} busy_timeout SECONDS"
         raise Fail.with_hint(UNREACHABLE, str(e), hint, "E405") from e
     except transport.PrinterUnreachable as e:  # the printer's name, what failed, then what to do
         raise Fail.with_hint(UNREACHABLE, f"printer '{name}': {e}", e.hint, "E402") from e
@@ -1301,7 +1300,7 @@ def do_send(args, res_data: bytes, prof, check_status=True, length_mm: float = 0
         if length_mm and e.sent and counts_paper(pr):
             _count_paper(name, length_mm * min(1.0, e.sent / max(1, len(res_data))))
         maybe = "part of the job may have printed: check the paper before printing again"
-        hint = "; ".join(h for h in (_why_it_stopped(pr, prof), maybe, e.hint) if h)
+        hint = "; ".join(h for h in (_why_it_stopped(pr, prof), maybe, (e.hint or "").replace("PRINTER", name)) if h)
         f = Fail.with_hint(UNREACHABLE, f"printer '{name}': {e}", hint, "E402")
         f.partial = e.sent > 0
         raise f from e

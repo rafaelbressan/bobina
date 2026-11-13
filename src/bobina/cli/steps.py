@@ -2,7 +2,7 @@
 
 On for a person at a terminal printing on a real printer; never without a terminal (agents, MCP, scripts, pipes,
 BOBINA_NONINTERACTIVE), with --yes (unless --step is written), -o, --dry-run or a file printer. --no-step prints
-one job at once, step = false in config.toml every job; --step N stops every N labels. --compact glues the labels
+one job at once, bobina config set step off every job; --step N stops every N labels. --compact glues the labels
 on purpose, so it prints at once (P105). Each stop is its own send: the Bluetooth link is closed while the
 person tears, and the next label connects again."""
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass, field
 
-from .. import config
+from .. import config, config_keys
 from ..nudges import CATALOG
 from ..problem_help import FIX
 from .common import Fail, ask, err, open_tty, paper_printer, plural
@@ -23,9 +23,6 @@ SKIP = ("s", "skip")
 STOP = ("q", "quit", "stop")
 
 
-ON, OFF = ("on", "true", "yes", "1"), ("off", "false", "no", "0")
-
-
 def setting(args) -> tuple[int, bool]:
     """(labels per stop, 0 = no stops; True when the command line chose it). The first part that says --step or
     --no-step decides (it is a job option); else step in config.toml (default on). A value bobina cannot read
@@ -34,16 +31,7 @@ def setting(args) -> tuple[int, bool]:
         v = getattr(a, "step", None)
         if v is not None:
             return int(v), True
-    value = config.load().get("step", True)
-    if isinstance(value, bool):
-        return (1 if value else 0), False
-    word = str(value).strip().lower()
-    if word in ON + OFF:
-        return (1 if word in ON else 0), False
-    if not getattr(args, "_step_said", False):
-        err(f"note: step = {value!r} in config.toml is not on or off: taken as on (bobina config step on|off)")
-        args._step_said = True
-    return 1, False
+    return (1 if config_keys.read(config.load(), "step", say=err) else 0), False
 
 
 def labels_of(res) -> list:

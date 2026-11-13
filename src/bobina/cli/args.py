@@ -393,6 +393,7 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
         "--screen-theme",
     ],
     "--name": ["--nome", "--my-name", "--username", "--usuario", "--user-name", "--apelido"],
+    "--all": ["--advanced", "--everything", "--full", "--show-all"],  # bobina config list
 }
 # Options reviewed for synonyms and left without them (their names are what people type, or too specific to
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
@@ -505,6 +506,12 @@ class Parser(argparse.ArgumentParser):
         unknown = [t for t in (m.group(1).split() if m else []) if t.startswith("-")]
         if unknown:
             hint = option_hint(unknown[0], cmd if cmd in COMMANDS else "") or hint
+        m = re.match(r"argument action: invalid choice: '([^']*)'", message)
+        if cmd == "config" and m:  # bobina config locale pt-BR: the verb is missing
+            from .. import config_keys
+
+            if m.group(1) in config_keys.KEYS:
+                hint = f"bobina config get {m.group(1)}, or bobina config set {m.group(1)} VALUE"
         if _FMT[0] == "pretty":
             target.print_usage(sys.stderr)
         message = message.replace("argument --step-every:", "argument --step:")  # --step N is parsed under it
@@ -708,18 +715,21 @@ def make_parser():
         sub,
         "printer",
         "find and store printers",
-        "printers live in ~/.config/bobina/config.toml",
+        "printers live in ~/.config/bobina/config.toml; show lists the settings of one, set and unset change one",
         [
             "bobina printer scan",
             "bobina printer add mtp AA:BB:CC:DD:EE:FF",
             "bobina printer add tower --command 'ssh tower bobina send --yes -'",
             "bobina printer list",
+            "bobina printer show mtp",
+            "bobina printer set mtp busy_timeout 600",
         ],
         cmd_printer,
     )
-    p.add_argument("action", choices=["list", "scan", "add", "use", "remove"])
+    p.add_argument("action", choices=["list", "scan", "add", "use", "remove", "show", "set", "unset"])
     p.add_argument("name", nargs="?")
-    p.add_argument("address", nargs="?", help="Bluetooth MAC")
+    p.add_argument("address", nargs="?", help="add: the Bluetooth MAC; set, unset: the KEY")
+    p.add_argument("value", nargs="?", help="set: the value")
     p.add_argument("--channel", type=int, default=1)
     p.add_argument("--command", dest="command", help="pipe bytes to this command (e.g. ssh to the printer host)")
     p.add_argument("--path", help="append bytes to this file/device")
@@ -754,26 +764,24 @@ def make_parser():
         sub,
         "config",
         "see and change settings",
-        "settings in ~/.config/bobina/config.toml. locale: the locale of documents without locale: (dates, numbers"
-        " and money); without one, the first print, check or preview infers it from the time zone and saves it."
-        " step: on (default), a print of several labels stops after each one so it can be torn off; off, they"
-        " print at once (--step and --no-step change one print)",
+        "every setting of ~/.config/bobina/config.toml: list shows them with their values (--all: the advanced ones"
+        " too), get one with what it accepts, set or unset (back to the default) one, or edit the file (checked"
+        " when the editor closes). Printers: bobina printer set/show",
         [
-            "bobina config locale",
-            "bobina config locale pt-BR",
-            "bobina config step",
-            "bobina config step off",
-            "bobina config locale --json",
+            "bobina config list",
+            "bobina config get locale",
+            "bobina config set locale pt-BR",
+            "bobina config set step off",
+            "bobina config unset marks",
+            "bobina config edit",
+            "bobina config list --json",
         ],
         cmd_config,
     )
-    p.add_argument("key", choices=["locale", "step"])
-    p.add_argument(
-        "value",
-        nargs="?",
-        metavar="VALUE",
-        help="locale: a BCP 47 tag (pt-BR, en-US, fr-CA); step: on or off; none: shown",
-    )
+    p.add_argument("action", nargs="?", choices=["list", "get", "set", "unset", "edit"], help="default: list")
+    p.add_argument("key", nargs="?", metavar="KEY", help="a setting (bobina config list --all names them)")
+    p.add_argument("value", nargs="*", metavar="VALUE", help="set: the value (image_dirs: one or more folders)")
+    p.add_argument("--all", action="store_true", help="list: the advanced settings too")
     p = _cmd(
         sub,
         "profile",
@@ -1056,6 +1064,9 @@ def main(argv=None) -> int:
 
     set_problem_format(argv)
     set_command(argv)
+    from .. import config_keys
+
+    config_keys._SAID.clear()  # a config value bobina cannot use is said once per run
     ap = make_parser()
     if not argv:
         ap.print_help()

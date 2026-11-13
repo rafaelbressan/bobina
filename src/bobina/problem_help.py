@@ -13,7 +13,7 @@ FIX = {
     "F303": "Use a size the printer has natively (small, normal, large, title, huge), or a font size in px (raster).",
     "F304": (
         "Nothing to fix: the font is kept and used offline from now on (bobina fonts scripts). To never download: "
-        "font_downloads = false in config.toml."
+        "bobina config set font_downloads off."
     ),
     "F305": (
         "Get the font once, with the network: bobina fonts get NAME (the message names it; a document works too: "
@@ -21,8 +21,8 @@ FIX = {
     ),
     "F306": (
         "The dates and numbers are readable, in English with the country's formats (th-TH prints as en-TH). For the "
-        "language itself: bobina fonts get LANG (or font_downloads = true in config.toml). Another locale: bobina "
-        "config locale TAG, or locale: in the document."
+        "language itself: bobina fonts get LANG (or bobina config set font_downloads on). Another locale: bobina "
+        "config set locale TAG, or locale: in the document."
     ),
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
@@ -86,9 +86,7 @@ FIX = {
     "E402": "Is the printer on and in range? Through a command (ssh): is that machine on? The message names the printer"
     " and what the command said. Look at the paper before printing again: part of the job may be there.",
     "E403": "Load paper or close the cover (bobina status); a printer without a cover sensor reports both as no paper.",
-    "E404": "Nothing to do: bobina no longer reports it. bobina status on a file or command printer says it has no"
-    " live status (exit 0), and printing works the same.",
-    "E405": "Wait for the other job, or raise busy_timeout for the printer in config.toml.",
+    "E405": "Wait for the other job, or wait longer: bobina printer set NAME busy_timeout SECONDS.",
     "E406": "Turn the printer on (Bluetooth: in range; USB: plugged in), or name it: bobina init --printer ADDRESS"
     " (or DEVICE), --command 'ssh HOST bobina send --yes -' for one on another machine.",
     "E501": "The message has the line and the template error; often a block not closed: {% if x %} needs {% endif %}.",
@@ -137,10 +135,10 @@ FIX = {
     "M202": "Write the number with digits (24.90, 24,90 or R$ 24,90), or a smaller amount for add().",
     "M203": (
         "Nothing to fix if it is right: documents without locale: use it from now on, even if the machine travels. "
-        "Another: bobina config locale TAG (bobina config locale shows it)."
+        "Another: bobina config set locale TAG (bobina config get locale shows it)."
     ),
     "M204": (
-        "Set this machine's locale: bobina config locale pt-BR (any BCP 47 tag), or write locale: in the document. "
+        "Set this machine's locale: bobina config set locale pt-BR (any BCP 47 tag), or write locale: in the document. "
         "Only a document's own locale: reads a typed 1.890 as a price; elsewhere it is printed as typed (M202)."
     ),
     "M205": "Write a BCP 47 tag (pt-BR, en-US, fr-CA); the message suggests the closest one bobina knows.",

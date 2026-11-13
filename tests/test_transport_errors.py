@@ -116,7 +116,7 @@ def test_command_timeout_shows_what_it_said(tmp_path, capsys):
     assert cli.main(["print", "x", "--yes", "--printer", "p"]) == cli.UNREACHABLE
     err = capsys.readouterr().err
     assert "printer 'p': the command did not finish in 0.5 s: still connecting" in err
-    assert "raise timeout = SECONDS" in err
+    assert "bobina printer set p timeout SECONDS" in err
 
 
 def test_a_bluetooth_printer_that_does_not_answer_says_so_with_its_name(monkeypatch, capsys):

@@ -15,7 +15,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import config, fileio, paths
+from . import config, config_keys, fileio, paths
 
 SCHEMA = "bobina.history/1"
 VALUE_FLAGS = ("--set", "--set-all")
@@ -26,7 +26,7 @@ def path() -> Path:
 
 
 def enabled() -> bool:
-    return config.load().get("history", True) is not False
+    return config_keys.read(config.load(), "history") is not False
 
 
 KEEP_VALUE = {  # options whose value is a file name, a number or a setting, never personal data

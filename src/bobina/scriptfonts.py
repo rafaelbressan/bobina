@@ -571,7 +571,7 @@ class Resolver:
                         f"{pack.family} downloaded for {script_name(script)} text ({human_size(pack.size)}, {LICENSE},"
                         f" from {source(pack)}): kept in {pack_dir(pack)}, used offline from now on",
                         line,
-                        "to never download fonts: font_downloads = false in config.toml",
+                        "to never download fonts: bobina config set font_downloads off",
                     )
                 return str(f)
         if here:  # another subset is here (Japanese for a Chinese letter): it draws what it has

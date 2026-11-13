@@ -125,9 +125,9 @@ def test_config_sets_the_default_and_rejects_unknown_values(tmp_path):
     path.write_text('marks = "cut"\n')
     lines = [b for b in _rasters(_job(tmp_path, "--compact")) if _is_fine_dash_line(b)]
     assert len(lines) == 1
-    path.write_text('marks = "always"\n')
-    doc = tmp_path / "e.bob.md"
-    assert run("check", str(doc)) == cli.USAGE
+    path.write_text('marks = "always"\n')  # a typo in config.toml never stops a print: a note, and none
+    lines = [b for b in _rasters(_job(tmp_path, "--compact")) if _is_fine_dash_line(b)]
+    assert lines == []
 
 
 def test_an_unknown_marks_value_is_a_usage_error(tmp_path):

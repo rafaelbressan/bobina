@@ -923,10 +923,10 @@ def test_layout_and_style_values(monkeypatch, capsys, argv, want):
     assert e.value.code == 1 and want in capsys.readouterr().err
 
 
-def test_a_bad_setting_in_config_lists_the_valid_ones(monkeypatch, capsys):
+def test_a_bad_setting_in_config_lists_the_valid_ones_and_never_stops_the_chat(monkeypatch, capsys):
     config.set_value("chat_layout", "roll")
     code, o = ask_once(monkeypatch, capsys, Fake(["x"]), "q?")
-    assert code == 1 and "chat_layout = 'roll' in config.toml: use strip, tickets" in o.err
+    assert code == 0 and "chat_layout = 'roll': use strip, tickets" in o.err and "strip is used" in o.err
 
 
 def test_config_defaults_apply_and_options_win(monkeypatch, capsys, printer):
@@ -1101,7 +1101,7 @@ def test_the_outlined_bubble_has_the_name_above_it():
 
 def test_style_switches_the_paper_style_inside_the_chat():
     """/paper-style lists the paper styles, what each looks like and the one in use; /paper-style NAME (or a synonym
-    like d4) changes the next answers; /style (the old name) still works, with a note."""
+    like d4) changes the next answers."""
     from bobina import chat
     from bobina.cli import chat as cli_chat
 
@@ -1126,6 +1126,7 @@ def test_style_switches_the_paper_style_inside_the_chat():
     assert ui.notes[-1] == "the next answers print with: your message in a framed bubble (labels-outline)"
     s.handle("/paper-style outlnie")
     assert t.style == "labels-outline" and "did you mean" in ui.notes[-1]
-    s.handle("/style labels-outline")
-    assert ui.notes[-2] == "/style is now called /paper-style"
+    s.handle("/paper-style labels-outline")
     assert ui.notes[-1] == "already printing with: your message in a framed bubble (labels-outline)"
+    s.handle("/style labels-outline")  # the old name is gone (nobody used it): an unknown command
+    assert ui.notes[-1].startswith("unknown command /style")

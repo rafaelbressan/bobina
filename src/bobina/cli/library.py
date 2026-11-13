@@ -274,9 +274,11 @@ def fonts_scripts(args):
     print(f"The others are downloaded the first time a document needs them ({sf.LICENSE}, github.com/notofonts),")
     print(f"kept in {sf.fonts_dir()} and used offline from then on.")
     if auto:
-        print("Get them now: bobina fonts get NAME (or a document); never download: font_downloads = false")
+        print(
+            "Get them now: bobina fonts get NAME (or a document); never download: bobina config set font_downloads off"
+        )
     else:
-        print("Automatic downloads are off (font_downloads = false); bobina fonts get NAME still downloads.")
+        print("Automatic downloads are off (bobina config get font_downloads); bobina fonts get NAME still downloads.")
     return OK
 
 

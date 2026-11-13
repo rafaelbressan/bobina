@@ -43,7 +43,6 @@ from .common import (
 )
 
 DEFAULT_STYLE = "labels-underline"  # D1: a short mark under each name (chosen 11/11)
-OLD_COMMANDS = {"/style": "/paper-style", "/theme": "/screen-colors"}  # the names before 11/11: work, with a note
 COMMANDS = {  # slash command -> what it does (completion and /help)
     "/print": "print the last answer, if it is not on paper yet (p for short)",
     "/again": "print another copy of the last answer",
@@ -313,11 +312,11 @@ def _limit(args, cfg, roll_left: float | None) -> float:
     return mm
 
 
-def _setting(args, cfg, key: str, option: str, choices: tuple, default: str) -> str:
-    value = getattr(args, option) or cfg.get(key) or default
-    if value not in choices:
-        raise Fail(USAGE, f"{key} = {value!r} in config.toml: use {', '.join(choices)}", problem="E304")
-    return value
+def _setting(args, cfg, key: str, option: str) -> str:
+    """--OPTION, else KEY in config.toml (a value bobina cannot use there: a note, and the default)."""
+    from .. import config_keys
+
+    return getattr(args, option) or config_keys.read(cfg, key, say=err)
 
 
 # -------------------------------------------------------------------------------------------------- the session
@@ -481,9 +480,6 @@ class Session:
             ui.note(f"your messages print too, at most {self.question_limit} characters" if self.questions
                     else "only the answers print")  # fmt: skip
             return True
-        if words[0] in OLD_COMMANDS:
-            ui.note(f"{words[0]} is now called {OLD_COMMANDS[words[0]]}")
-            words[0] = OLD_COMMANDS[words[0]]
         if words[0] == "/screen-colors":
             self.screen_colors(words[1] if len(words) > 1 else "")
             return True
@@ -776,19 +772,15 @@ def cmd_chat(args):
         raise Fail(USAGE, str(e).strip("'\""), problem="E207") from None
     # the printer's measured tear bar and the marks setting, as print uses them
     prof = engine.apply_overrides(prof, {**printer_overrides(pr), "marks": marks_setting(args, cfg)})
-    layout = _setting(args, cfg, "chat_layout", "layout", LAYOUTS, "strip")
-    if cfg.get("chat_paper_style") is None and cfg.get("chat_style") is not None:  # the name before 11/11
-        err("note: chat_style in config.toml is now called chat_paper_style (it was read; rename it)")
-        cfg = {**cfg, "chat_paper_style": cfg["chat_style"]}
-    style = _setting(args, cfg, "chat_paper_style", "paper_style", STYLES, DEFAULT_STYLE)
+    layout = _setting(args, cfg, "chat_layout", "layout")
+    style = _setting(args, cfg, "chat_paper_style", "paper_style")
     ticket = Ticket(prof, style=style, name=_name(args, cfg))
-    try:
-        qlimit = int(cfg.get("chat_question_limit") or ticket.question_chars())
-    except (TypeError, ValueError):
-        raise Fail(USAGE, "chat_question_limit in config.toml: a number of characters", problem="E304") from None
+    from .. import config_keys
+
+    qlimit = config_keys.read(cfg, "chat_question_limit", say=err) or ticket.question_chars()
     left = paper_left_of(printer, pr)
     conv = Conversation(backend, ticket, limit_mm=_limit(args, cfg, left()), paper_left=left, layout=layout)
-    questions = bool(args.questions or cfg.get("chat_questions") is True)
+    questions = bool(args.questions or config_keys.read(cfg, "chat_questions", say=err))
     if one:
         return one_question(args, conv, printer if pr else None, pr, question, qlimit, questions)
     return Session(args, conv, printer if pr else None, pr, ui, qlimit, questions).run()

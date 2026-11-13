@@ -165,7 +165,7 @@ def script_note(loc: Locale, shown: Locale, where: str) -> tuple[str, str, str]:
     formats = f"the formats of {country}" if country else "English formats"
     if script_support(loc) == "off":
         why = f"automatic font downloads are off, and the {lang} font is not here"
-        hint = f"get it once: bobina fonts get {loc.language} (or font_downloads = true in config.toml); or {CHANGE}"
+        hint = f"get it once: bobina fonts get {loc.language} (or bobina config set font_downloads on); or {CHANGE}"
     else:
         why = f"bobina has no font for {lang}"
         hint = f"choose another locale: {CHANGE}"
@@ -173,7 +173,7 @@ def script_note(loc: Locale, shown: Locale, where: str) -> tuple[str, str, str]:
             f"{formats}", hint)  # fmt: skip
 
 
-CHANGE = "bobina config locale TAG"
+CHANGE = "bobina config set locale TAG"
 
 
 # ---------------------------------------------------------------- the machine
@@ -340,7 +340,7 @@ class Machine:
         problem = _save(f.value)
         if problem:
             note = ("M203", f"locale {f.value} (from {f.detail}); not saved: {problem}",
-                    f"set it: bobina config locale {f.value}")  # fmt: skip
+                    f"set it: bobina config set locale {f.value}")  # fmt: skip
         else:
             note = ("M203", f"locale {f.value} (from {f.detail}), saved in config.toml",
                     f"change it: {_example(f.value)}")  # fmt: skip
@@ -351,10 +351,10 @@ class Machine:
 
 
 def _example(chosen: str | None = None, near: str = "") -> str:
-    """bobina config locale <a close tag, the system locale's when it differs, else an example>."""
+    """bobina config set locale <a close tag, the system locale's when it differs, else an example>."""
     _, system = system_language()
     other = near or (system if system and system != chosen and system.lower() != FALLBACK else "")
-    return f"bobina config locale {other or ('en-US' if chosen else 'pt-BR')}"
+    return f"bobina config set locale {other or ('en-US' if chosen else 'pt-BR')}"
 
 
 @lru_cache(maxsize=1)

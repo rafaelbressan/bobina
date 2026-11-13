@@ -123,7 +123,7 @@ Quality nudges, from the printed tests of the profile:
 **Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
 downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
 OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
-`font_downloads = false` in config.toml: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
+`bobina config set font_downloads off`: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
 follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
 Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
 
@@ -308,7 +308,7 @@ cannot become an image path (`M312`), and neither can a value joined into a path
 ### 7.1 Dates and languages
 
 One locale for dates, numbers and money (`US$ 24,90`, `09/11/2026` in `pt-BR`): the document's `locale:`, else
-`locale` in config.toml (`bobina config locale [TAG]`), saved on first use from the time zone (`America/Sao_Paulo`:
+`locale` in config.toml (`bobina config set locale TAG`), saved on first use from the time zone (`America/Sao_Paulo`:
 `pt-BR`; `LANG`'s language if official there) or else a non-English `LANG`, said once (`M203`); else English
 (`M204`). Only the document's `locale:` reads a typed `1.890` as a price (else `M202`); unknown: `M205`. No font
 for the script (downloads off): English words, its country's formats (`en-TH`, `F306`).
@@ -445,7 +445,6 @@ Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 | `E401` | error | no printer configured or unknown printer |
 | `E402` | error | printer unreachable |
 | `E403` | error | printer not ready (paper, cover, error) |
-| `E404` | error | retired: no longer reported |
 | `E405` | error | printer busy: another bobina job kept it too long |
 | `E406` | error | `bobina init` found no printer to set up |
 | `E501` | error | document error |

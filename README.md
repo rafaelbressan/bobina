@@ -56,7 +56,7 @@ checkout: [docs/INSTALL.md](docs/INSTALL.md).
 Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
 `bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
 Dates and money: the first `check`, `preview` or `print` takes the locale from the time zone and saves it
-(`M203`); `bobina config locale en-US` changes it.
+(`M203`); `bobina config set locale en-US` changes it.
 
 ## The format in one screen
 
@@ -125,8 +125,8 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 | `template list \| show \| new` | receipt, label, todo, card, note, and a shop gallery: [guides/templates.md](docs/guides/templates.md) |
 | `seq list \| set \| reset` | persistent counters (`{{ seq.NAME }}`); `seq set ticket 100`: the next print uses 100 |
 | `init` | first run; again to change one part |
-| `printer scan \| add \| list \| use \| remove` | printers live in `~/.config/bobina/config.toml` |
-| `config locale [TAG]` | the locale of documents without `locale:` |
+| `printer scan \| add \| list \| use \| remove \| show \| set` | printers live in `~/.config/bobina/config.toml` |
+| `config list \| get \| set \| unset \| edit` | the other settings (`config set step off`) |
 | `status`, `mode [esc\|tspl\|cpcl]` | printer state; command language |
 | `calibrate compare PHOTO FILE` | how close the preview is to the paper |
 | `calibrate tear` / `calibrate feed` | where the tear bar is; whether feeds after images need the safe mode |

@@ -156,7 +156,7 @@ def cmd_history(args):
         if total:
             print(f"no job matches (the history has {total})")
         else:
-            print("no jobs yet" + ("" if history.enabled() else " (history is off: history = false in config.toml)"))
+            print("no jobs yet" + ("" if history.enabled() else " (history is off: bobina config set history on)"))
         return OK
     for r in reversed(rows):
         print(_long(r) + "\n" if args.long else _line(r))

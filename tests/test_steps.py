@@ -226,8 +226,8 @@ def test_no_step_and_config_off_print_at_once(tmp_path, printer, tty, capsys):
     tty("p")
     assert run("print", doc, "--data", data, "--no-step") == cli.OK
     assert printer.sends() == 1
-    assert run("config", "step", "off") == cli.OK
-    assert "step off" in capsys.readouterr().out
+    assert run("config", "set", "step", "off") == cli.OK
+    assert "step = off saved" in capsys.readouterr().out
     tty("p")
     assert run("print", doc, "--data", data) == cli.OK
     assert printer.sends() == 2
@@ -318,10 +318,10 @@ def test_history_records_a_stopped_job(tmp_path, printer, tty):
 
 
 def test_config_step_shows_and_refuses_other_values(capsys):
-    assert run("config", "step") == cli.OK
-    assert "step on" in capsys.readouterr().out
-    assert run("config", "step", "maybe") == cli.USAGE
-    assert run("config", "step", "--json") == cli.OK
+    assert run("config", "get", "step") == cli.OK
+    assert "step = on (default)" in capsys.readouterr().out
+    assert run("config", "set", "step", "maybe") == cli.USAGE
+    assert run("config", "get", "step", "--json") == cli.OK
     assert json.loads(capsys.readouterr().out)["value"] is True
 
 
@@ -345,7 +345,7 @@ def test_step_in_config_as_a_word_or_a_typo_never_stops_a_print(tmp_path, printe
     cfg.write_text(cfg.read_text().replace('step = "off"', 'step = "maybe"'))
     tty("p", "", "")
     assert run("print", doc, "--data", data) == cli.OK  # taken as on, with a note
-    assert printer.sends() == 4 and "is not on or off" in capsys.readouterr().err
+    assert printer.sends() == 4 and "step = 'maybe': use on or off; on is used" in capsys.readouterr().err
 
 
 def test_history_keeps_the_step_number_but_never_typed_text():

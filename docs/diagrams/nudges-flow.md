@@ -123,7 +123,6 @@ from this list.
 | `E401` | error | no printer configured or unknown printer |  |
 | `E402` | error | printer unreachable |  |
 | `E403` | error | printer not ready (paper, cover, error) |  |
-| `E404` | error | retired: no longer reported |  |
 | `E405` | error | printer busy: another bobina job kept it too long |  |
 | `E406` | error | bobina init found no printer to set up |  |
 

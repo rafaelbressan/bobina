@@ -50,7 +50,7 @@ the printer's command language on models that support it (`bobina mode esc` rest
 ## Privacy
 
 - The last print (source, bytes, preview) is kept in `~/.local/state/bobina/last/` for `print --last`.
-  It can contain personal data (Pix keys, names). `keep_last = false` in `config.toml` disables it.
+  It can contain personal data (Pix keys, names). `bobina config set keep_last off` disables it.
 - Drafts live in `~/.local/state/bobina/drafts/`.
 
 ## Requirements before a print server or chat bot exists

@@ -1,8 +1,12 @@
-"""bobina config: see and change a setting of config.toml (locale, step)."""
+"""bobina config list | get KEY | set KEY VALUE | unset KEY | edit: every setting of config.toml from the command
+line (the table: bobina.config_keys). Printers have their own: bobina printer set/show."""
 
 from __future__ import annotations
 
-from .. import config, locales
+import tomllib
+
+from .. import config, config_keys, editor, fileio, locales
+from ..config_keys import KEYS, SCHEMA, KeyError_, entry, shown
 from .common import OK, USAGE, Fail, err, print_json, render_problems
 
 
@@ -22,83 +26,219 @@ def _examples(loc) -> dict:
     }
 
 
-ON, OFF = ("on", "true", "yes", "1"), ("off", "false", "no", "0")
+def _load() -> dict:
+    """config.load(); a file that does not read stops with where it breaks (bobina config edit fixes it)."""
+    try:
+        return config.load()
+    except fileio.StateError as e:
+        raise Fail(USAGE, f"{e}\n→ bobina config edit", problem="E209") from None
 
 
-def config_step(args):
-    """step: does a print of several labels stop after each one (on, the default) or print them at once (off)."""
-    if args.value is not None:
-        v = args.value.strip().lower()
-        if v not in ON + OFF:
-            raise Fail(USAGE, f"bobina config step {args.value}: use on or off", problem="E304")
-        try:
-            config.set_value("step", v in ON)
-        except OSError as e:
-            raise Fail(USAGE, f"cannot write {config.path()}: {e.strerror or e}", problem="E209") from None
-    raw = config.load().get("step")
-    source = "config" if raw is not None else "default"
-    if raw is not None and not isinstance(raw, bool):
-        raise Fail(USAGE, f"step = {raw!r} in config.toml: use bobina config step on|off", problem="E101")
-    on = raw is not False
-    st = {"schema": "bobina.config/1", "key": "step", "value": on, "source": source, "path": str(config.path())}
-    if args.json:
-        print_json({**st, "problems": []}, indent=2, ensure_ascii=False)
-        return OK
-    what = ("on: a print of several labels stops after each one so you can tear it off"
-            if on else "off: the labels of a print come out at once")  # fmt: skip
-    where = " (saved in config.toml)" if args.value is not None else " (config.toml)" if raw is not None else ""
-    print(f"step {what}{where}")
-    print("one print: --no-step (all at once) or --step N (stop every N) · always: bobina config step "
-          + ("off" if on else "on"))  # fmt: skip
-    return OK
+def _key(name: str | None) -> config_keys.Key:
+    if not name:
+        raise Fail(USAGE, "which setting? bobina config get KEY (all of them: bobina config list)", problem="E101")
+    try:
+        return config_keys.find(name)
+    except KeyError_ as e:
+        raise Fail(USAGE, str(e), problem=e.code) from None
+
+
+def _write(fn, *a) -> None:
+    try:
+        fn(*a)
+    except (OSError, fileio.StateError) as e:
+        raise Fail(
+            USAGE, f"cannot write {config.path()}: {getattr(e, 'strerror', None) or e}", problem="E209"
+        ) from None
 
 
 def cmd_config(args):
-    if args.key == "step":
-        return config_step(args)
-    if args.value is not None:
-        loc = locales.parse(args.value)
-        if loc is None:
-            near = locales.closest(args.value)
-            hint = (f"→ did you mean {near}? " if near else "→ ") + "a BCP 47 tag: pt-BR, en-US, fr-CA, en-IN"
-            raise Fail(USAGE, f"'{args.value}' is not a locale bobina knows\n{hint}", problem="E304")
+    action = args.action or "list"
+    if action != "list" and getattr(args, "all", False):
+        err(f"note: --all does nothing with bobina config {action}: it is for bobina config list")
+    if action == "list":
+        return config_list(args)
+    if action == "edit":
+        return config_edit(args)
+    key = _key(args.key)
+    if action == "get":
+        if args.value:
+            raise Fail(USAGE, f"bobina config get {key.name} takes no value; to change it: bobina config set "
+                       f"{key.name} {' '.join(args.value)}", problem="E101")  # fmt: skip
+        return _locale(args, saved=False) if key.name == "locale" else config_get(args, key)
+    if key.owner:
+        raise Fail(USAGE, f"{key.name} is set with: {key.owner}", problem="E101")
+    if action == "set":
+        if not args.value:
+            raise Fail(USAGE, f"bobina config set {key.name} VALUE: {key.accepts()}"
+                       + (f" (e.g. {key.example})" if key.example else ""), problem="E101")  # fmt: skip
         try:
-            config.set_value("locale", locales.tag(loc))
-        except OSError as e:
-            raise Fail(USAGE, f"cannot write {config.path()}: {e.strerror or e}", problem="E209") from None
+            value = config_keys.parse(key, args.value)
+        except KeyError_ as e:
+            raise Fail(USAGE, str(e), problem=e.code) from None
+        _write(config.set_value, key.name, value)
+        if key.name == "locale":
+            return _locale(args, saved=True)
+        return config_get(args, key, said=f"{key.name} = {shown(value)} saved in config.toml")
+    if action == "unset":
+        if args.value:
+            raise Fail(USAGE, f"bobina config unset {key.name} takes no value", problem="E101")
+        _load()  # a file that does not read: E209, never a traceback
+        try:
+            removed = config.unset_value(key.name)
+        except (OSError, fileio.StateError) as e:
+            raise Fail(USAGE, f"{getattr(e, 'strerror', None) or e}", problem="E209") from None
+        said = f"{key.name}: back to the default ({key.default_shown()})" if removed else (
+            f"{key.name} was not set: it is the default ({key.default_shown()})")  # fmt: skip
+        return config_get(args, key, said=said)
+    return USAGE
+
+
+def _problems(messages: list[str]) -> list[dict]:
+    from ..nudges import Nudge
+
+    return [Nudge("E304", m, None, "bobina config get KEY says what it accepts").as_dict() for m in messages]
+
+
+def config_get(args, key, said: str = "") -> int:
+    cfg = _load()
+    e = entry(key, cfg)
+    if args.json:
+        problems = _problems([e["problem"]] if e["problem"] else [])
+        print_json({"schema": SCHEMA, **e, "path": str(config.path()), "problems": problems}, indent=2,
+                   ensure_ascii=False, default=str)  # fmt: skip
+        return OK
+    if said:
+        print(said)
+    else:
+        where = "config.toml" if e["source"] == "config" else "default"
+        value = shown(e["value"]) if e["source"] == "config" else key.default_shown()
+        print(f"{key.name} = {value} ({where})")
+    print(f"  {key.about}")
+    print(
+        f"  accepts: {key.accepts()}" + (f" · e.g. bobina config set {key.name} {key.example}" if key.example else "")
+    )
+    if e["source"] == "config":
+        print(f"  default: {key.default_shown()} (bobina config unset {key.name})")
+    if e["problem"] and not args.quiet:
+        err(f"note: config.toml: {e['problem']}; the default is used")
+    return OK
+
+
+def config_list(args) -> int:
+    cfg = _load()
+    show_all = getattr(args, "all", False)
+    keys = [k for k in KEYS.values() if k.name != "printers" and (show_all or not k.advanced)]
+    rows = [entry(k, cfg) for k in keys]
+    printers = cfg.get("printers") if isinstance(cfg.get("printers"), dict) else {}
+    shown_keys = {r["key"] for r in rows}  # their problems are on their own line
+    others = [m for w, m in config_keys.problems(cfg) if w not in shown_keys]  # unknown keys, printers, [chat.*]
+    if args.json:
+        print_json({"schema": SCHEMA, "path": str(config.path()), "keys": rows, "printers": printers,
+                    "problems": _problems([r["problem"] for r in rows if r["problem"]] + others)},
+                   indent=2, ensure_ascii=False, default=str)  # fmt: skip
+        return OK
+    width = max(len(r["key"]) for r in rows)
+    print(f"{config.path()}" + ("" if config.path().exists() else " (not created yet: every value is the default)"))
+    for r in rows:
+        if r["source"] == "config":
+            value, where = shown(r["value"]), ""
+        else:
+            value, where = r["default_shown"], " (default)"
+        flag = "  ← " + r["problem"] if r["problem"] else ""
+        print(f"  {r['key']:<{width}}  {value}{where}{flag}")
+    for line in others:
+        print(f"  ! {line}")
+    if printers:
+        print("printers (change: bobina printer set NAME KEY VALUE · all of one: bobina printer show NAME):")
+        default = cfg.get("default_printer")
+        for name, pr in printers.items():
+            pr = pr if isinstance(pr, dict) else {}
+            where = pr.get("address") or pr.get("path") or pr.get("command") or ""
+            star = "*" if name == default else " "
+            print(f"  {star} {name}  {pr.get('transport', 'bluetooth')} {where}  [{pr.get('profile', 'mtp-ii-58')}]")
+    hidden = sum(1 for k in KEYS.values() if k.advanced and k.name != "printers")
+    print(
+        "change: bobina config set KEY VALUE · back to the default: bobina config unset KEY · about one: bobina "
+        "config get KEY" + ("" if show_all else f" · {hidden} more: --all") + " · the file: bobina config edit"
+    )
+    return OK
+
+
+def config_edit(args) -> int:
+    """Opens config.toml in the editor (as bobina edit chooses it), then says what it cannot use."""
+    p = config.path()
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fileio.atomic_write(p, config.EXAMPLE)
+    try:
+        cfg = config.load()
+    except fileio.StateError:  # the file is broken: that is why it is being edited
+        cfg = {}
+    try:  # config never prints, so it takes no --editor: config editor, $VISUAL, $EDITOR, nano
+        code = editor.open_file(p, None, cfg)
+    except OSError as e:  # the editor named by config, $VISUAL or $EDITOR is not installed
+        cmd = " ".join(editor.resolve(None, cfg))
+        raise Fail(USAGE, f"cannot open the editor '{cmd}': {e.strerror or e}\n→ bobina config set editor COMMAND "
+                   f"(or set $VISUAL / $EDITOR); the file: {p}", problem="E101") from None  # fmt: skip
+    if code:
+        err(f"note: the editor exited with {code}")
+    text = p.read_text(encoding="utf-8")
+    try:
+        cfg = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise Fail(USAGE, f"{p} is not valid TOML now ({e}): every command stops on it until it is fixed\n"
+                   "→ bobina config edit", problem="E209") from None  # fmt: skip
+    found = config_keys.problems(cfg)
+    if not found:
+        print(f"{p}: every setting is fine")
+        return OK
+    from ..nudges import Nudge
+
+    shown_ = []
+    for where, msg in found:
+        line = config_keys.line_of(text, where)
+        shown_.append(Nudge("E304", msg, line, "bobina config get KEY says what it accepts"))
+    for line in render_problems(shown_, f"{p}: bobina uses the default for these"):
+        err(line)
+    return OK
+
+
+def _locale(args, saved: bool) -> int:
+    """get/set locale: the locale a print would use, where it comes from, and how a date prints with it."""
     found = locales.Machine().peek()  # the same answer a print would act on; nothing written
     loc = locales.parse(found.value) or locales.parse(locales.FALLBACK)
-    shown = locales.printable(loc)
+    shown_ = locales.printable(loc)
     notes = []
-    if shown != loc:
+    if shown_ != loc:
         notes.append(
-            locales.script_note(loc, shown, found.detail if found.source == "config" else f"from {found.detail}")
+            locales.script_note(loc, shown_, found.detail if found.source == "config" else f"from {found.detail}")
         )
-        if args.value is not None:
+        if saved:
             locales.first_time(f"{locales.SCRIPT} {found.value}")  # said here: the next print does not repeat it
     from ..nudges import Nudge
 
     problems = [Nudge(c, m, None, h) for c, m, h in notes]
-    st = {"schema": "bobina.config/1", "key": "locale", "value": found.value, "source": found.source,
-          "prints_as": locales.tag(shown), "time_zone": found.zone, "path": str(config.path()),
-          "example": _examples(shown)}  # fmt: skip
+    st = {"schema": SCHEMA, "key": "locale", "value": found.value, "source": found.source,
+          "prints_as": locales.tag(shown_), "time_zone": found.zone, "path": str(config.path()),
+          "example": _examples(shown_)}  # fmt: skip
     if args.json:
         print_json({**st, "problems": [n.as_dict() for n in problems]}, indent=2, ensure_ascii=False)
         return OK
     ex = " · ".join(st["example"].values())
-    if args.value is not None:
+    if saved:
         print(f"locale {found.value} saved in {st['path']}: {ex}")
     elif found.source == "config":
         print(f"locale {found.value} (config.toml): {ex}")
-        print("documents with locale: keep theirs · change it: bobina config locale TAG")
+        print("documents with locale: keep theirs · change it: bobina config set locale TAG")
     elif found.source in ("time zone", "environment"):
         print(f"locale not set: the first print, check or preview saves {found.value} (from {found.detail}): {ex}")
-        print(f"set it now: bobina config locale {found.value}")
+        print(f"set it now: bobina config set locale {found.value}")
     else:
         zone = f"no country in the time zone {found.zone}" if found.zone else "no time zone"
         why = f"locale = {found.bad!r} in config.toml is not a locale bobina knows" if found.bad else zone
         print(f"{why}: documents without locale: print in English (en): {ex}")
-        print("set yours: bobina config locale TAG (pt-BR, en-GB, fr-CA …)")
+        print("set yours: bobina config set locale TAG (pt-BR, en-GB, fr-CA …)")
     if problems and not args.quiet:
         for line in render_problems(problems, ""):
             err(line)

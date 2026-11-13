@@ -211,6 +211,8 @@ def cmd_printer(args):
             for line in common.render_problems([Nudge(c, m, None, h) for c, m, h in notes], ""):
                 err(line)
         return OK
+    if args.action in ("show", "set", "unset"):
+        return _printer_setting(args, cfg)
     if args.action in ("use", "remove"):
 
         def change(cfg):
@@ -228,6 +230,67 @@ def cmd_printer(args):
         print(f"{args.action}: {args.name}")
         return OK
     return USAGE
+
+
+def _printer_setting(args, cfg) -> int:
+    """printer show NAME, printer set NAME KEY VALUE, printer unset NAME KEY (the keys: config_keys.PRINTER_KEYS)."""
+    from .. import config_keys
+    from ..config_keys import PRINTER_KEYS, KeyError_, shown
+
+    printers = cfg.get("printers") or {}
+    if not args.name:
+        raise Fail(USAGE, f"usage: bobina printer {args.action} NAME" + (" KEY VALUE" if args.action == "set" else
+                   " KEY" if args.action == "unset" else ""), problem="E101")  # fmt: skip
+    if args.name not in printers:
+        raise Fail(USAGE, f"unknown printer '{args.name}' (see: bobina printer list)", problem="E401")
+    if args.action == "show":
+        pr = printers[args.name]
+        keys = [k for k in PRINTER_KEYS.values() if k.name in pr or not k.advanced]
+        if args.json:
+            rows = [config_keys.entry(k, pr) for k in PRINTER_KEYS.values()]
+            print_json({"schema": config_keys.SCHEMA, "printer": args.name, "keys": rows,
+                        "path": str(config.path()), "problems": []}, indent=2, default=str)  # fmt: skip
+            return OK
+        width = max(len(k.name) for k in keys)
+        star = " (default printer)" if cfg.get("default_printer") == args.name else ""
+        print(f"{args.name}{star}")
+        for k in keys:
+            value = f"{shown(pr[k.name])}" if k.name in pr else f"{k.default_shown()} (default)"
+            print(f"  {k.name:<{width}}  {value}   {k.about}")
+        print(f"change: bobina printer set {args.name} KEY VALUE · back to the default: bobina printer unset "
+              f"{args.name} KEY")  # fmt: skip
+        return OK
+    try:
+        key = config_keys.find(args.address or "", PRINTER_KEYS, "printer setting", f"bobina printer show {args.name}")
+        if args.action == "set":
+            if args.value is None:
+                raise KeyError_(f"bobina printer set {args.name} {key.name} VALUE: {key.accepts()}", "E101")
+            value = config_keys.parse(key, args.value)
+    except KeyError_ as e:
+        raise Fail(USAGE, str(e), problem=e.code) from None
+
+    def change(cfg):
+        pr = (cfg.get("printers") or {}).get(args.name)
+        if pr is None:  # removed by another command meanwhile
+            raise Fail(USAGE, f"unknown printer '{args.name}' (see: bobina printer list)", problem="E401")
+        if args.action == "set":
+            pr[key.name] = value
+        else:
+            pr.pop(key.name, None)
+        needs = {"bluetooth": "address", "file": "path", "command": "command"}.get(pr.get("transport", "bluetooth"))
+        if needs and needs not in pr:
+            raise Fail(USAGE, f"{args.name}: a {pr.get('transport', 'bluetooth')} printer needs {needs}: bobina "
+                       f"printer set {args.name} {needs} VALUE first", problem="E304")  # fmt: skip
+
+    config.update(change)
+    if args.action == "set":
+        print(f"{args.name}: {key.name} = {shown(value)}")
+        if key.name == "tear_margin_mm" and "tear_mm" not in printers[args.name]:
+            err(f"note: tear_margin_mm counts from the tear bar bobina calibrate tear measures: until then "
+                f"{args.name} feeds the profile's distance")  # fmt: skip
+    else:
+        print(f"{args.name}: {key.name} back to the default ({key.default_shown()})")
+    return OK
 
 
 def cmd_paper(args):

@@ -60,7 +60,7 @@ def test_the_locale_a_time_zone_gives(zone, lang, want):
 def test_the_first_run_saves_the_zones_locale_and_says_so_once(fresh, capsys):
     notes = _check(capsys)
     assert notes == [("M203", "locale pt-BR (from the time zone America/Sao_Paulo), saved in config.toml",
-                      "change it: bobina config locale en-US")]  # fmt: skip
+                      "change it: bobina config set locale en-US")]  # fmt: skip
     assert config.load()["locale"] == "pt-BR"
     assert _check(capsys) == []  # said once
     assert cli.main(["view", LABEL, "--no-color"]) == cli.OK
@@ -102,7 +102,7 @@ def test_no_country_takes_the_system_locale_when_it_is_not_english(fresh, capsys
     monkeypatch.setenv("TZ", "Etc/UTC")
     monkeypatch.setenv("LANG", "pt_BR.UTF-8")  # a container with LANG set and no zone
     assert _check(capsys) == [("M203", "locale pt-BR (from LANG=pt_BR.UTF-8; no country in the time zone Etc/UTC), "
-                               "saved in config.toml", "change it: bobina config locale en-US")]  # fmt: skip
+                               "saved in config.toml", "change it: bobina config set locale en-US")]  # fmt: skip
     assert config.load()["locale"] == "pt-BR" and _check(capsys) == []
 
 
@@ -120,7 +120,7 @@ def test_no_country_is_english_said_once_and_not_saved(fresh, capsys, monkeypatc
     monkeypatch.setenv("LANG", "en_GB.UTF-8")  # English: nothing to take from it
     notes = _check(capsys, LABEL + '{{ "1.890" | currency }}\n')
     assert ("M204", "no country in the time zone Etc/UTC, and LC_ALL, LC_TIME, LANG name no other language: dates, "
-            "numbers and money in English (en)", "set yours: bobina config locale en-GB") in notes  # fmt: skip
+            "numbers and money in English (en)", "set yours: bobina config set locale en-GB") in notes  # fmt: skip
     assert "M202" in [c for c, *_ in notes]  # English is a fallback: 1.890 is not read as 1.89
     assert "locale" not in config.load()
     assert _check(capsys) == []
@@ -156,8 +156,8 @@ def test_a_script_bobina_cannot_draw_prints_english_words_with_the_countrys_form
         ("ready", True, "th-TH", None),  # a font here: the language itself
         ("ready", False, "th-TH", None),
         ("download", True, "th-TH", None),  # fetched on first use, with the fonts code's own notice (F304)
-        ("download", False, "en-TH", "bobina fonts get th (or font_downloads = true in config.toml)"),
-        ("none", True, "en-TH", "choose another locale: bobina config locale TAG"),
+        ("download", False, "en-TH", "bobina fonts get th (or bobina config set font_downloads on)"),
+        ("none", True, "en-TH", "choose another locale: bobina config set locale TAG"),
     ],
 )
 def test_the_printed_form_follows_the_fonts_bobina_has(monkeypatch, state, downloads, prints, hint):
@@ -188,7 +188,7 @@ def test_font_downloads_in_config_is_kept(isolated, capsys):
     p = isolated / "config" / "config.toml"
     p.write_text("font_downloads = false\n")
     assert cli.main(["printer", "add", "t", "--path", "o.bin"]) == cli.OK
-    assert cli.main(["config", "locale", "fr-CA"]) == cli.OK
+    assert cli.main(["config", "set", "locale", "fr-CA"]) == cli.OK
     cfg = config.load()
     assert cfg["font_downloads"] is False and cfg["locale"] == "fr-CA" and "t" in cfg["printers"]
 
@@ -204,14 +204,14 @@ def test_a_language_with_another_country():
 
 def test_config_locale_shows_saves_and_answers_json(fresh, capsys):
     (fresh / "config" / "config.toml").write_text('# mine\ndefault_printer = "x"\n\n[printers.x]\npath = "o.bin"\n')
-    assert cli.main(["config", "locale"]) == cli.OK
+    assert cli.main(["config", "get", "locale"]) == cli.OK
     assert "the first print, check or preview saves pt-BR" in capsys.readouterr().out
     assert "locale" not in config.load()  # showing writes nothing
-    assert cli.main(["config", "locale", "fr_ca"]) == cli.OK
+    assert cli.main(["config", "set", "locale", "fr_ca"]) == cli.OK
     assert "locale fr-CA saved" in capsys.readouterr().out
     text = (fresh / "config" / "config.toml").read_text()
     assert text.startswith('# mine\ndefault_printer = "x"\nlocale = "fr-CA"\n') and "[printers.x]" in text
-    assert cli.main(["config", "locale", "--json"]) == cli.OK
+    assert cli.main(["config", "get", "locale", "--json"]) == cli.OK
     doc = json.loads(capsys.readouterr().out)
     assert doc["schema"] == "bobina.config/1" and doc["value"] == "fr-CA" and doc["source"] == "config"
     assert {k: v.replace("\xa0", " ") for k, v in doc["example"].items()} == {
@@ -220,14 +220,14 @@ def test_config_locale_shows_saves_and_answers_json(fresh, capsys):
 
 
 def test_config_locale_refuses_an_unknown_tag(capsys):
-    assert cli.main(["config", "locale", "xx-YY-zz"]) == cli.USAGE
+    assert cli.main(["config", "set", "locale", "xx-YY-zz"]) == cli.USAGE
     assert "E304" in capsys.readouterr().err
     assert config.load()["locale"] == "en-US"
 
 
 def test_config_locale_of_a_script_not_drawable_says_what_prints(capsys, monkeypatch):
     no_font(monkeypatch, "none")
-    assert cli.main(["config", "locale", "ja-JP"]) == cli.OK
+    assert cli.main(["config", "set", "locale", "ja-JP"]) == cli.OK
     io = capsys.readouterr()
     assert "locale ja-JP saved" in io.out and "F306" in io.err and "en-JP" in io.err
 
@@ -252,7 +252,7 @@ def test_not_saved_still_prints_in_it_and_says_why(fresh, capsys, monkeypatch):
 
     monkeypatch.setattr(config, "set_value", fail)
     ((code, msg, hint),) = _check(capsys)
-    assert code == "M203" and "not saved: Permission denied" in msg and hint == "set it: bobina config locale pt-BR"
+    assert code == "M203" and "not saved: Permission denied" in msg and hint == "set it: bobina config set locale pt-BR"
 
 
 def test_plain_text_and_the_engine_alone_never_infer(fresh):
@@ -275,10 +275,10 @@ def test_lc_all_wins_over_lang(monkeypatch):
 def test_config_locale_names_where_an_undrawable_locale_comes_from(fresh, capsys, monkeypatch):
     no_font(monkeypatch, "none")
     monkeypatch.setenv("TZ", "Asia/Bangkok")
-    assert cli.main(["config", "locale"]) == cli.OK
+    assert cli.main(["config", "get", "locale"]) == cli.OK
     err = capsys.readouterr().err
     assert "F306" in err and "from the time zone Asia/Bangkok" in err and "config.toml" not in err
-    assert cli.main(["config", "locale", "th-TH"]) == cli.OK
+    assert cli.main(["config", "set", "locale", "th-TH"]) == cli.OK
     assert "(th-TH, config.toml)" in capsys.readouterr().err
 
 
@@ -360,7 +360,7 @@ def test_config_locale_shows_what_a_print_would_do(fresh, capsys, monkeypatch):
     monkeypatch.setenv("LANG", "es_MX.UTF-8")
     found = locales.Machine().peek()
     assert (found.value, found.source) == ("es-MX", "environment")
-    assert cli.main(["config", "locale", "--json"]) == cli.OK
+    assert cli.main(["config", "get", "locale", "--json"]) == cli.OK
     doc = json.loads(capsys.readouterr().out)
     assert (doc["value"], doc["source"]) == ("es-MX", "environment")
     assert not (fresh / "config" / "config.toml").exists()  # peek writes nothing

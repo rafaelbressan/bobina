@@ -26,8 +26,7 @@ def test_every_preset_styles_every_element():
         (None, {"chat_screen_colors": "contrast"}, LIGHT_TERM, "contrast"),  # config.toml over the terminal
         ("mono", {"chat_screen_colors": "contrast"}, LIGHT_TERM, "mono"),  # --screen-colors over config.toml
         (None, {"chat_screen_colors": "High-Contrast"}, {}, "contrast"),  # a synonym, any case
-        (None, {"chat_theme": "contrast"}, LIGHT_TERM, "contrast"),  # the old key is read too
-        (None, {"chat_theme": "contrast", "chat_screen_colors": "mono"}, {}, "mono"),  # the new one wins
+        (None, {"chat_theme": "contrast"}, LIGHT_TERM, "light"),  # an old name is not read (no legacy)
     ],
 )
 def test_which_theme(option, cfg, env, want):
@@ -39,13 +38,10 @@ def test_a_wrong_chat_screen_colors_is_a_note_and_falls_back():
     assert theme.name == "light" and "chat_screen_colors = 'neon'" in theme.notes[0] and "dark, light" in theme.notes[0]
 
 
-def test_the_old_names_in_config_are_read_with_a_note():
-    cfg = {"chat_theme": "light", "chat": {"colors": {"you": "#111111", "ai": "#222222"},
-                                           "screen_colors": {"you": "#333333"}}}  # fmt: skip
+def test_only_chat_screen_colors_is_read():
+    cfg = {"chat": {"colors": {"you": "#111111"}, "screen_colors": {"you": "#333333"}}}
     theme = T.pick(None, cfg, {})
-    assert theme.name == "light" and theme.colors["you"] == "#333333" and theme.colors["ai"] == "#222222"
-    assert "chat_theme in config.toml is now called chat_screen_colors" in theme.notes[0]
-    assert any("[chat.colors] in config.toml is now called [chat.screen_colors]" in n for n in theme.notes)
+    assert theme.colors["you"] == "#333333" and not theme.notes
 
 
 def test_own_colours_override_the_preset_and_wrong_ones_fall_back():
@@ -67,17 +63,13 @@ def test_no_color_wins():
 
 
 def test_the_colours_table_survives_a_rewrite_of_config():
-    """printer add rewrites config.toml: [chat.screen_colors] and the old [chat.colors] (any table) must stay."""
-    config.set_value("chat_theme", "light")
+    """printer add rewrites config.toml: [chat.screen_colors] (any table) must stay."""
+    config.set_value("chat_screen_colors", "light")
     path = config.path()
-    path.write_text(
-        path.read_text() + '\n[chat.colors]\nyou = "#ff8700"\nai = "bold ansired"\n'
-        '\n[chat.screen_colors]\nai = "#00ff00"\n'
-    )
+    path.write_text(path.read_text() + '\n[chat.screen_colors]\nai = "#00ff00"\n')
     assert main(["printer", "add", "test", "--path", "out.bin"]) == 0
     cfg = config.load()
-    assert cfg["chat"]["colors"] == {"you": "#ff8700", "ai": "bold ansired"} and cfg["chat_theme"] == "light"
-    assert cfg["chat"]["screen_colors"] == {"ai": "#00ff00"}
+    assert cfg["chat_screen_colors"] == "light" and cfg["chat"]["screen_colors"] == {"ai": "#00ff00"}
     assert "test" in cfg["printers"]
 
 
@@ -114,8 +106,8 @@ def test_theme_inside_the_chat(monkeypatch):
     assert "   light     dark text on a light terminal" in ui.notes[-1]
     s.handle("/screen-colors light")
     assert ui.theme.name == "light" and ui.notes[-1] == "screen colours: light (dark text on a light terminal)"
-    s.handle("/theme mono")  # the old name works, with a note
-    assert ui.theme.name == "mono" and "/theme is now called /screen-colors" in ui.notes
+    s.handle("/theme mono")  # not a command (the name before /screen-colors is gone)
+    assert ui.theme.name == "light" and ui.notes[-1].startswith("unknown command /theme")
     s.handle("/screen-colors light")
     s.handle("/screen-colors neon")
     assert "no screen colours 'neon'" in ui.notes[-1] and ui.theme.name == "light"

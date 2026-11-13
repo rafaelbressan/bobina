@@ -1,31 +1,41 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "bobina.config/1",
-  "title": "bobina config locale [TAG] --json",
+  "title": "bobina config list|get|set|unset --json, bobina printer show NAME --json",
+  "description": "One setting (get, set, unset: key, value, source; locale adds prints_as, time_zone, example), every setting (list: keys, printers) or one printer's (printer show: printer, keys).",
   "type": "object",
-  "required": [
-    "schema",
-    "key",
-    "value",
-    "source",
-    "prints_as",
-    "time_zone",
-    "path",
-    "example",
-    "problems"
-  ],
+  "required": ["schema", "path", "problems"],
   "properties": {
     "schema": {
       "const": "bobina.config/1"
     },
+    "path": {
+      "type": "string"
+    },
     "key": {
-      "const": "locale"
+      "type": "string"
     },
-    "value": {
-      "type": ["string", "null"]
-    },
+    "value": {},
     "source": {
-      "enum": ["config", "time zone", "environment", "default"]
+      "enum": ["config", "default", "time zone", "environment"]
+    },
+    "default_shown": {
+      "type": "string"
+    },
+    "accepts": {
+      "type": "string"
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "about": {
+      "type": "string"
+    },
+    "set_by": {
+      "type": "string"
     },
     "prints_as": {
       "type": "string"
@@ -33,12 +43,27 @@
     "time_zone": {
       "type": ["string", "null"]
     },
-    "path": {
+    "example": {},
+    "printer": {
       "type": "string"
     },
-    "example": {
-      "type": "object",
-      "required": ["date", "number", "money"]
+    "keys": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "value", "source"],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "source": {
+            "enum": ["config", "default"]
+          }
+        }
+      }
+    },
+    "printers": {
+      "type": "object"
     },
     "problems": {
       "type": "array",

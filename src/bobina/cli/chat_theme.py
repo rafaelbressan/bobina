@@ -130,22 +130,16 @@ def build(name: str, own: dict | None = None, off: str = "") -> Theme:
     return Theme(name, colors, off=off, notes=notes)
 
 
-OLD_KEY = "chat_theme"  # read too, with a note: the name before chat_screen_colors
-
-
 def pick(option: str | None, cfg: dict, env=None, off: str | None = None) -> Theme:
-    """--screen-colors (already a valid name), else chat_screen_colors (or the older chat_theme), else the
-    terminal's background, else dark; then [chat.screen_colors] (or the older [chat.colors]) over it. off: why
-    colours are off (default: view.colors_off of env)."""
+    """--screen-colors (already a valid name), else chat_screen_colors, else the terminal's background, else
+    dark; then [chat.screen_colors] over it. off: why colours are off (default: view.colors_off of env)."""
     from ..view import colors_off
 
     env = os.environ if env is None else env
     off = colors_off(env=env) if off is None else off
     notes = []
     name = option
-    key = "chat_screen_colors" if cfg.get("chat_screen_colors") is not None else OLD_KEY
-    if key == OLD_KEY and cfg.get(OLD_KEY) is not None:
-        notes.append(f"{OLD_KEY} in config.toml is now called chat_screen_colors (it was read; rename it)")
+    key = "chat_screen_colors"
     if not name and cfg.get(key) is not None:
         name = name_of(str(cfg[key]))
         if not name:
@@ -154,16 +148,11 @@ def pick(option: str | None, cfg: dict, env=None, off: str | None = None) -> The
     name = name or background(env) or "dark"
     chat = cfg.get("chat") if isinstance(cfg.get("chat"), dict) else {}
     own: dict = {}
-    for table in ("colors", "screen_colors"):  # the newer name wins where both say the same element
-        value = chat.get(table)
-        if value is None:
-            continue
-        if table == "colors":
-            notes.append("[chat.colors] in config.toml is now called [chat.screen_colors] (it was read; rename it)")
-        if isinstance(value, dict):
-            own.update(value)
-        else:
-            notes.append(f'[chat.{table}] in config.toml must be a table: you = "#00afaf"')
+    value = chat.get("screen_colors")
+    if isinstance(value, dict):
+        own.update(value)
+    elif value is not None:
+        notes.append('[chat.screen_colors] in config.toml must be a table: you = "#00afaf"')
     theme = build(name, own, off)
     theme.notes[:0] = notes
     return theme
