@@ -202,12 +202,19 @@ class Tok:
     brk: bool = False
     tracking: int = 0
     glue: bool = False  # part of the word before it (another script, another font): never a line break before it
+    icon: str = ""  # an icon (:fragile:) drawn as a square the height of the letters, not a glyph of the font
 
     @property
     def font(self):
         return load(self.path, self.px)
 
+    def icon_px(self) -> int:
+        asc, desc = self.font.getmetrics()
+        return max(8, round((asc + desc) * 0.9))
+
     def width(self) -> int:
+        if self.icon:
+            return self.icon_px() + self.tracking
         w = self.font.getlength(self.text) + self.tracking * len(self.text)
         return int(round(w + (self.px * 0.1 if self.italic and not self.space else 0)))
 
@@ -220,7 +227,15 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
         d.rectangle((0, 0, w - 1, line_h - 1), fill=0)
     fa, _ = t.font.getmetrics()
     ink = 255 if t.invert else 0
-    if not t.space:
+    if t.icon:
+        from . import icons
+
+        s = t.icon_px()
+        mark = icons.load(t.icon, s).convert("L")
+        if t.invert:
+            mark = mark.point(lambda v: 255 - v)
+        im.paste(mark, (0, max(0, (line_h - s) // 2)))
+    elif not t.space:
         pieces = [(0.0, t.text)]
         if t.tracking:  # letter spacing: glyph by glyph (kerning is dropped, as it would be anyway)
             pieces, x = [], 0.0
@@ -231,7 +246,7 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
             d.text((x, ascent - fa), txt, font=t.font, fill=ink)
             if t.bold and "bold" not in t.path.lower():  # synthetic bold for fonts without a bold file
                 d.text((x + 1, ascent - fa), txt, font=t.font, fill=ink)
-    if t.italic:
+    if t.italic and not t.icon:  # an icon is not slanted
         im = im.transform(
             im.size,
             Image.AFFINE,

@@ -118,6 +118,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "M158": ("note", "data columns renamed to names usable in {{ }} (Product Name → product_name)", ""),
     "M159": ("warning", "two data columns would get the same usable name; the first keeps it", ""),
     "M160": ("note", "Excel formula cells without a saved value print empty", ""),
+    "M161": ("warning", "no icon with that :name: (printed as written)", ""),
     "M201": ("warning", "date pattern looks like Moment.js", ""),
     "M202": ("warning", "a value is not a number, or a date moved out of the calendar (printed as it is)", ""),
     "M203": ("note", "this machine's locale, from its time zone, saved in config.toml (said once)", ""),

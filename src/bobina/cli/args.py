@@ -145,7 +145,7 @@ def _help_code(code: str, as_json: bool) -> int:
     return OK
 
 
-TOPICS = ("commands", "format", "data", "pay", "nudges", "problems", "aliases")
+TOPICS = ("commands", "format", "data", "pay", "icons", "nudges", "problems", "aliases")
 
 
 def _help_text(topic: str, name: str | None = None) -> str:
@@ -161,6 +161,10 @@ def _help_text(topic: str, name: str | None = None) -> str:
         from ..pay import help_text
 
         return help_text(name)
+    if topic == "icons":
+        from ..icons import help_text
+
+        return help_text()
     if topic in ("nudges", "problems"):  # problems: the name the docs use for the catalog
         return "\n".join(
             f"{code}  {sev:8s} {CATEGORY.get(code[0], ''):17s} {title}" + (f"  (evidence: {ev})" if ev else "")
@@ -219,7 +223,8 @@ def cmd_help(args):
         return OK
     raise Fail(
         USAGE,
-        f"unknown help topic '{topic}': commands, format, data, pay, nudges (or problems), aliases, a problem code"
+        f"unknown help topic '{topic}': commands, format, data, pay, icons, nudges (or problems), aliases, a problem"
+        " code"
         " (e.g. E302), or a command name",
         problem="E207",
     )

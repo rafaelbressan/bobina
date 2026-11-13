@@ -12,7 +12,7 @@ from functools import cache
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
-from . import paths
+from . import icons, paths
 from .rows import Cell, TextRow
 
 CHECKBOX = {"☐": None, "☑": "check", "☒": "cross"}
@@ -54,6 +54,9 @@ class Emulator:
         if ch in CHECKBOX:
             self._checkbox(d, w, CHECKBOX[ch])
             return im
+        name = icons.name_of(ch)
+        if name:
+            return _icon_cell(name, w, self.ch)
         if ch == " ":
             return im
         if ord(ch) in _cmap(self.font_name):
@@ -85,7 +88,7 @@ class Emulator:
         x = 0
         for c, w in zip(cells, widths, strict=True):
             g = self.glyph(c.ch, c.wide)
-            if c.bold and c.ch not in CHECKBOX:  # double strike: ink shifted by one dot
+            if c.bold and c.ch not in CHECKBOX and not icons.is_icon(c.ch):  # double strike: shifted by one dot
                 g2 = Image.new("L", g.size, 255)
                 g2.paste(g, (1, 0))
                 g = _darker(g, g2)
@@ -114,11 +117,20 @@ class Emulator:
         glyphs = glyphs.resize((glyphs.width * sw, glyphs.height * sh), Image.NEAREST)
         widths = [self.cw * (2 if c.wide else 1) * sw for c in cells]
         im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), glyphs.height), 255)
-        x = src = 0
-        for w in widths:
+        src = 0
+        for x, w in zip(self.lefts(cells, sw, tracking, True), widths, strict=True):
             im.paste(glyphs.crop((src, 0, src + w, glyphs.height)), (x, 0))
-            x, src = x + w + tracking, src + w
+            src += w
         return im
+
+    def lefts(self, cells: list[Cell], k: int, tracking: int, gapped: bool) -> list[int]:
+        """Where each cell starts in a row scaled k times: gapped, `tracking` dots after each scaled glyph
+        (_gapped); else the 1x row with its tracking, scaled as a whole (line_image, then GS !)."""
+        out, x = [], 0
+        for i, c in enumerate(cells):
+            out.append(x * k + tracking * i if gapped else (x + tracking * i) * k)
+            x += self.cw * (2 if c.wide else 1)
+        return out
 
     def row_height(self, row: TextRow) -> int:
         gap = row.gap if row.gap is not None else int(self.p.get("native.line_gap_dots", 6))
@@ -134,6 +146,8 @@ class Emulator:
             li = self.line_image(row.cells, row.tracking)
             if (sw, sh) != (1, 1):
                 li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
+        if sw == sh > 1:
+            li = self._sharp_icons(li, row, sw, gap)
         h = self.row_height(row)
         out = Image.new("L", (width, h), 255)
         lw = min(li.width, width)
@@ -142,6 +156,26 @@ class Emulator:
         if row.upside_down:
             out = out.rotate(180)
         return out.convert("1", dither=Image.NONE)
+
+    def _sharp_icons(self, li: Image.Image, row: TextRow, k: int, gap: int) -> Image.Image:
+        """At 2x-4x the printer scales letters dot by dot; an icon is drawn again from its own size, so its curves
+        stay smooth (same stroke width). Inverted, underlined, struck or slanted icons keep the scaled drawing."""
+        if not any(icons.is_icon(c.ch) for c in row.cells):
+            return li
+        gapped = gap != row.tracking * k
+        for left, c in zip(self.lefts(row.cells, k, gap if gapped else row.tracking, gapped), row.cells, strict=True):
+            name = icons.name_of(c.ch)
+            if name and not (c.invert or c.underline or c.strike or c.italic):
+                li.paste(_icon_cell(name, self.cw * (2 if c.wide else 1) * k, self.ch * k), (left, 0))
+        return li
+
+
+def _icon_cell(name: str, w: int, h: int) -> Image.Image:
+    """An icon as a square, centred in a cell w x h (mode L)."""
+    s = min(w, h)
+    cell = Image.new("L", (w, h), 255)
+    cell.paste(icons.load(name, s).convert("L"), ((w - s) // 2, (h - s) // 2))
+    return cell
 
 
 def _darker(a: Image.Image, b: Image.Image) -> Image.Image:

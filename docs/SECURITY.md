@@ -25,7 +25,7 @@ with vendor commands), paper and battery, counters, and the history of the last 
 
 | Threat | Defense | Test |
 |---|---|---|
-| Data changes structure (`# PROMO`, `{.invert}`, `**x**`) | every `{{ }}` is a placeholder, substituted as literal text after parsing | `test_templating.py` |
+| Data changes structure (`# PROMO`, `{.invert}`, `**x**`, `:fragile:`) | every `{{ }}` is a placeholder, substituted as literal text after parsing (icon characters in a value are dropped) | `test_templating.py`, `test_icons.py` |
 | Data evaluated as template (`{{ seq.x.take(500) }}`) | values are never re-evaluated | `test_data_is_never_evaluated_as_template` |
 | Data emits printer commands | no `raw` from data (`M314`, `RAW_FENCE` in `| markdown`); C0/C1 controls stripped from all text and barcode data | `test_no_path_lets_data_emit_raw_bytes`, `test_control_characters_never_reach_the_printer` |
 | Data chooses a file to print/preview | image paths with data are refused (`M312`); `| markdown` on data removes images and image fences (`M122`) | `test_data_cannot_*` |

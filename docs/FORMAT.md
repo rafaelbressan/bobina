@@ -62,6 +62,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
+| `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
 | `\*`, `\#` … | CommonMark escapes: the character is printed literally |
 
@@ -271,7 +272,7 @@ The escape hatch: no checks, no preview (`P201`). Never accepted from variables 
 ### 6.8 Planned objects ◇
 
 ` ```table {columns="auto,4ch,8ch" header=invert} ` (tables with explicit widths and styles), ` ```pay {scheme=…} `
-(UPI, SEPA/EPC, PromptPay, PayNow, profile links), shapes and icons.
+(UPI, SEPA/EPC, PromptPay, PayNow, profile links) and shapes.
 
 ## 7. Variables (Jinja) ✓
 
@@ -351,7 +352,8 @@ and `bobina seq set NAME N` starts one at N, even before its first print.
 ### 7.4 Data is literal
 
 **The author is trusted; data is not.** Values from `--data` (CSV), `--set` and any future server input:
-- are inserted as **literal text** after Markdown parsing: `# PROMO` prints a hash, `{.invert}` prints braces;
+- are inserted as **literal text** after Markdown parsing: `# PROMO` prints a hash, `{.invert}` prints braces,
+  `:fragile:` prints the word;
 - are never evaluated as templates;
 - can never produce a `raw` block (`M314` for variables inside `raw`), choose an image path (`M312`), or carry
   control characters (removed from all text and barcode data before encoding).
@@ -525,6 +527,7 @@ Nudges:
 | `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco`; `{{ row['Product Name'] }}` keeps the exact name |
 | `M159` | warning | two data columns would get the same usable name; the first keeps it |
 | `M160` | note | Excel formula cells without a saved value print empty |
+| `M161` | warning | no icon with that `:name:` (printed as written) |
 | `M201` | warning | date pattern looks like Moment.js |
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |
 | `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -21,10 +22,30 @@ SETS = {  # set -> (source URL pattern, version, license file, icon names)
         "https://cdn.jsdelivr.net/npm/lucide-static@{version}/{path}",
         "1.61.0",
         "LICENSE",
-        ["user-round", "sparkles", "bot", "message-circle"],
+        [
+            # the chat
+            "user-round", "sparkles", "bot", "message-circle",
+            # documents (:name: in any .bob.md): generic symbols, food, storage, shop
+            "check", "x", "heart", "star", "info", "triangle-alert", "ban", "bell", "bookmark", "tag", "gift",
+            "clock", "calendar", "phone", "mail", "map-pin", "house", "truck", "package", "shopping-cart",
+            "scissors", "key", "lock", "sun", "moon", "snowflake", "thermometer", "flame", "droplet", "umbrella",
+            "leaf", "recycle", "trash-2", "zap", "wifi", "music", "coffee", "utensils", "cake", "pizza", "wine",
+            "beer", "glass-water", "apple", "carrot", "fish", "egg", "milk", "wheat", "nut", "bean", "cookie",
+            "ice-cream-cone", "baby", "dog", "cat", "pill", "bike", "car", "plane", "hand", "hand-heart", "smile",
+            "thumbs-up",
+            # home goods: kitchen, food, bathroom, office
+            "cooking-pot", "soup", "salad", "sandwich", "croissant", "cherry", "grape", "banana", "citrus",
+            "drumstick", "beef", "ham", "popcorn", "candy", "lollipop", "cup-soda", "refrigerator", "microwave",
+            "washing-machine", "bath", "shower-head", "bed-double", "sofa", "lamp", "shirt", "spray-can",
+            "toilet", "pen", "pencil", "paperclip", "file-text", "folder", "printer", "book", "briefcase",
+            "calculator", "ruler", "highlighter",
+        ],
     ),
-}
-SIZES = (24,)  # one line of native text (12x24 cells); add sizes here and run again
+    # drawn for bobina (same license as bobina): packaging marks, in Lucide's style (24 grid, 2-unit strokes).
+    # Generic drawings of the meaning, never a copy of a standard's artwork.
+    "pictograms": (None, None, None, None),  # every SVG in icons/pictograms
+}  # fmt: skip
+SIZES = (24, 48, 72, 96)  # native text at 1x to 4x (12x24 cells, GS ! scaling); a raster font picks the nearest
 
 
 def fetch(name: str) -> None:
@@ -32,8 +53,11 @@ def fetch(name: str) -> None:
     folder = ICONS / name
     folder.mkdir(parents=True, exist_ok=True)
     for icon in names:
-        with urllib.request.urlopen(url.format(version=version, path=f"icons/{icon}.svg"), timeout=30) as r:
-            (folder / f"{icon}.svg").write_bytes(r.read())
+        try:
+            with urllib.request.urlopen(url.format(version=version, path=f"icons/{icon}.svg"), timeout=30) as r:
+                (folder / f"{icon}.svg").write_bytes(r.read())
+        except urllib.error.HTTPError as e:  # a name this version does not have: say it, keep going
+            print(f"skipped {icon}: {e.code}", file=sys.stderr)
     with urllib.request.urlopen(url.format(version=version, path=license_file), timeout=30) as r:
         (ICONS / "licenses" / f"{name.title()}-LICENSE.txt").write_bytes(r.read())
     print(f"fetched {len(names)} icons of {name} {version}")
@@ -55,10 +79,12 @@ def main() -> int:
     a = ap.parse_args()
     (ICONS / "licenses").mkdir(parents=True, exist_ok=True)
     n = 0
-    for name, (_, _, _, names) in SETS.items():
-        if a.fetch:
+    for name, (url, _, _, names) in SETS.items():
+        if a.fetch and url:
             fetch(name)
-        for icon in names:
+        for icon in names or sorted(p.stem for p in (ICONS / name).glob("*.svg")):
+            if not (ICONS / name / f"{icon}.svg").is_file():
+                continue  # skipped by --fetch
             svg = (ICONS / name / f"{icon}.svg").read_text(encoding="utf-8")
             for px in SIZES:
                 rasterize(svg, px).save(ICONS / name / f"{icon}-{px}.png", optimize=True)

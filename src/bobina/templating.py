@@ -153,10 +153,15 @@ class Rendered:
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
 
     def resolve(self, s: str) -> str:
+        from . import icons
+
+        def value(m):  # a value never brings an icon, even typed in (data joined with ~ is no longer tainted)
+            return icons.strip(self.values[int(m.group(1))].text)
+
         for _ in range(4):  # defaults may nest placeholders once
             if PH_OPEN not in s:
                 break
-            s = PH_RE.sub(lambda m: self.values[int(m.group(1))].text, s)
+            s = PH_RE.sub(value, s)
         return s
 
     def tainted_in(self, s: str) -> bool:

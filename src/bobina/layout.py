@@ -7,7 +7,7 @@ import unicodedata
 
 from PIL import Image, ImageDraw, ImageOps
 
-from . import imaging, rasterfont, scriptfonts, sources
+from . import icons, imaging, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
 from .model import Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
@@ -26,10 +26,12 @@ SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
+TABLE_PAD = "\ufdd0"  # a noncharacter: the second column of an icon in a table grid, never printed
+ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
 def is_wide(ch: str) -> bool:
-    return unicodedata.east_asian_width(ch) in ("W", "F")
+    return unicodedata.east_asian_width(ch) in ("W", "F") or icons.is_icon(ch)  # an icon is a square: 2 columns
 
 
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
@@ -219,7 +221,7 @@ class Layout:
                 while ww > avail:  # a word longer than a full line
                     self.n.add(
                         "L101",
-                        f"word '{''.join(c.ch for c in w)[:20]}…' split at {avail} columns",
+                        f"word '{''.join(icons.shown(c.ch) for c in w)[:20]}…' split at {avail} columns",
                         line,
                         "shorten it or use a smaller size",
                     )
@@ -249,6 +251,7 @@ class Layout:
 
     def native_ok(self, cells: list[Cell]) -> str:
         """'' if the line can be printed natively, else the reason."""
+        icon = False
         for c in cells:
             if c.italic:
                 return "italic"
@@ -256,9 +259,12 @@ class Layout:
                 return "strike"
             if c.ch in CHECKBOX:
                 return "checkbox"
+            if icons.is_icon(c.ch):
+                icon = True  # drawn; a glyph the printer lacks later in the line must still be said (F301)
+                continue
             if c.ch != " " and not self.p.native_glyph(c.ch):
                 return f"glyph {c.ch}"
-        return ""
+        return "icon" if icon else ""
 
     def drawn_whole(self, runs) -> str:
         """The first letter that makes a native block go raster as a whole ('' for none): one the printer lacks
@@ -267,7 +273,7 @@ class Layout:
         decided: dict[str, tuple[bool, bool]] = {}  # script -> (shapes, a script font draws it): once per script
         for r in runs:
             for ch in self.text(r.text):
-                if ch.isspace() or self.p.native_glyph(ch) or ch in CHECKBOX:
+                if ch.isspace() or self.p.native_glyph(ch) or ch in CHECKBOX or icons.is_icon(ch):
                     continue
                 s = scriptfonts.script_of(ch)
                 if s not in decided:
@@ -402,9 +408,16 @@ class Layout:
                     toks.append(rasterfont.Tok("", path, rpx, brk=True))
                     continue
                 cm = rasterfont.cmap(path)
-                parts = [(piece, path)]
-                if cm and any(ord(ch) not in cm for ch in piece if not ch.isspace()):
-                    parts = self.script_parts(piece, path, fallback, line, context)
+                parts = []
+                for seg in re.split(ICON_SPLIT, piece):  # icons: their own tokens, glued to the word around them
+                    if not seg:
+                        continue
+                    if icons.is_icon(seg):
+                        parts.append((seg, path))
+                    elif cm and any(ord(ch) not in cm for ch in seg if not ch.isspace()):
+                        parts += self.script_parts(seg, path, fallback, line, context)
+                    else:
+                        parts.append((seg, path))
                 for k, (txt, pth) in enumerate(parts):
                     toks.append(
                         rasterfont.Tok(
@@ -418,6 +431,7 @@ class Layout:
                             invert=r.invert,
                             space=txt.isspace(),
                             glue=k > 0,  # the parts of one word stay on one line
+                            icon=icons.name_of(txt) or "" if len(txt) == 1 else "",
                         )
                     )
         rtl = scriptfonts.base_rtl(self.text(context))
@@ -458,7 +472,7 @@ class Layout:
         )
         view_rows = [
             TextRow(
-                self.view_with_bars([Cell(ch) for ch in t[: self.cols]], indent, rtl),
+                self.view_with_bars([Cell(ch, wide=is_wide(ch)) for ch in t[: self.cols]], indent, rtl),
                 (1, 1),
                 "left" if align == "justify" else align,
                 line,
@@ -598,7 +612,7 @@ class Layout:
                     "keep it (fine) or use a character from the native set",
                 )
                 for c in cells_line:
-                    if c.ch != " " and c.ch not in CHECKBOX and not self.em.has_glyph(c.ch):
+                    if c.ch != " " and c.ch not in CHECKBOX and not icons.is_icon(c.ch) and not self.em.has_glyph(c.ch):
                         self.n.add("F302", f"glyph {c.ch} is missing in every font: printed as a box", line)
             rows.append(
                 TextRow(
@@ -1180,8 +1194,9 @@ class Layout:
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font."""
 
-        def txt(runs):
-            return "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
+        def txt(runs):  # an icon takes two columns: a pad after it keeps the grid (dropped when drawn)
+            s = "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
+            return "".join(ch + TABLE_PAD if icons.is_icon(ch) else ch for ch in s)
 
         head = [txt(c) for c in t.header]
         body = [[txt(c) for c in r] for r in t.rows]
@@ -1214,7 +1229,9 @@ class Layout:
                         else s.ljust(widths[i])
                     )
                     line += s + (" " if i < ncol - 1 else "")
-                cells = self.lead(indent) + [Cell(ch, bold=bold) for ch in line.rstrip()]
+                cells = self.lead(indent) + [
+                    Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD
+                ]
                 reason = self.native_ok(cells)
                 rows.append(TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason))
 

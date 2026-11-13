@@ -10,7 +10,7 @@ import unicodedata
 
 from PIL import Image
 
-from . import preview
+from . import icons, preview
 from .rows import BitmapRow, FeedRow, QRRow, RawRow, TextRow
 
 BRAILLE = [
@@ -92,7 +92,8 @@ def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
     align = {"left": "right", "right": "left"}.get(row.align, row.align) if row.upside_down else row.align
     for c in cells:
         on, off = _sgr(c, color)
-        glyph = c.ch + (" " if c.wide and unicodedata.east_asian_width(c.ch) not in ("W", "F") else "")
+        ch = icons.shown(c.ch)  # the terminal cannot draw an icon: a mark in its two columns
+        glyph = ch + (" " if c.wide and unicodedata.east_asian_width(ch) not in ("W", "F") else "")
         parts.append(on + glyph + off + " " * (sw - 1) * (2 if c.wide else 1))
         width += (2 if c.wide else 1) * sw
     pad = {"center": (cols - width) // 2, "right": cols - width}.get(align, 0)
