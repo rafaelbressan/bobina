@@ -63,6 +63,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "what an image looks like (drawing or photo) and how it was printed; the other look is one class away",
         "",
     ),
+    "I110": ("note", "a turned image prints smaller: its corners need room on the paper", ""),
     # E errors: the job stops, nothing prints (exit code in docs/CLI.md)
     "E101": ("error", "command line usage", ""),
     "E102": ("error", "this command takes one document", ""),

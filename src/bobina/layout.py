@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 
@@ -68,6 +69,15 @@ def wrap_cell(s: str, width: int) -> list[str]:
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
 _IMAGES_MAX = 64
 IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
+MIRRORS = {"x": (True, False), "y": (False, True), "xy": (True, True), "yx": (True, True)}
+
+
+def _turn(ang: float) -> tuple[float, float]:
+    """|cos| and |sin| of a clockwise turn in degrees, exact at right angles (the turned box: w·cos + h·sin)."""
+    if ang % 90 == 0:
+        return (0.0, 1.0) if ang % 180 else (1.0, 0.0)
+    rad = math.radians(ang)
+    return abs(math.cos(rad)), abs(math.sin(rad))
 
 
 def _image_key(src: str, base_dir: str, attrs, extra: tuple):
@@ -723,17 +733,20 @@ class Layout:
         ang = self.angle(a, b.line)
         return [self.rotate(rows, ang, a, b.line)] if ang % 360 else rows
 
-    def angle(self, attrs, line: int) -> float:
-        """rotate= (clockwise, like CSS; any angle, B102 when not a right angle) or .flip (180), in degrees."""
+    def angle(self, attrs, line: int, image: bool = False) -> float:
+        """rotate= (clockwise, like CSS; any angle, B102 when not a right angle) or .flip (180), in degrees. An
+        image turned by any angle is fitted to the paper whole (I110 says when its corners make it smaller)."""
         rot = attrs.kv.get("rotate")
         if not rot:
             return 180.0 if attrs.has("flip") else 0.0
         try:
             ang = float(rot)
+            if not math.isfinite(ang):  # nan, inf: no turn PIL can draw (it raised)
+                raise ValueError
         except ValueError:
             self.n.add("M101", f"rotate={rot}", line, "0, 90, 180, 270 or degrees")
             return 0.0
-        if ang % 90:
+        if ang % 90 and not image:
             self.n.add("B102", f"rotate={ang:g}: slanted strokes look jagged at {self.p.dpi} dpi", line,
                        "prefer 90/180/270")  # fmt: skip
         return ang
@@ -804,7 +817,7 @@ class Layout:
         if isinstance(b, Fence):
             return self.fence(b, indent)
         if isinstance(b, ImageBlock):
-            return self.image(b.src, b.attrs, b.line)
+            return self.image(b.src, b.attrs, b.line, b.alt)
         if isinstance(b, Table):
             return self.table(b, indent)
         return []
@@ -1232,20 +1245,52 @@ class Layout:
                              resolved=True)  # fmt: skip
         return rows + self.caption_rows(caption, f.line) if rows else rows
 
-    def image(self, src: str, attrs, line: int) -> list:
-        if self.r is not None and self.r.tainted_in(src):
-            raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
-        src = self.text(src)
-        width = attrs.kv.get("width")
-        if width and str(width).endswith("%"):
-            w = int(self.W * float(str(width)[:-1]) / 100)
-        elif width:
-            w = int(str(width).removesuffix("px"))
-        else:
-            w = self.W
+    def image_width(self, width, line: int) -> int:
+        """width= of an image: 50%, 30mm or 200 (dots, also 200px); the paper width when absent or unreadable."""
+        if not width:
+            return self.W
+        text = str(width).strip().lower().replace(",", ".")
+        try:
+            if text.endswith("%"):
+                w = int(self.W * float(text[:-1]) / 100)
+            elif text.endswith("mm"):
+                w = self.p.mm_to_dots(float(text[:-2]))
+            else:
+                w = int(float(text.removesuffix("px").removesuffix("dots")))
+            if w < 1:
+                raise ValueError
+        except ValueError:
+            self.n.add("M101", f"width={width}", line, "a percentage (50%), millimetres (30mm) or dots (200)")
+            return self.W
         if w > self.W:
             self.n.add("I102", f"image width {w} reduced to {self.W}", line)
             w = self.W
+        return w
+
+    def image(self, src: str, attrs, line: int, alt: str = "") -> list:
+        if self.r is not None and self.r.tainted_in(src):
+            raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
+        src = self.text(src)
+        return self._image(src, attrs, line) + self.image_caption(attrs, alt, line)
+
+    def image_caption(self, attrs, alt: str, line: int) -> list:
+        """caption="text" under an image, centred, as a QR's; caption=alt uses the alt text of ![alt](file). A value
+        from --data/--set prints literally (it is laid out as text, never read as Markdown)."""
+        cap = attrs.kv.get("caption")
+        if cap is None:
+            return []
+        text = self.text(str(cap)).strip()
+        if text.lower() == "alt":
+            text = self.text(alt or "").strip()
+            if not text:
+                self.n.add("M101", "caption=alt: this image has no alt text", line, "write it: ![Shop sign](logo.png)")
+                return []
+        if text.lower() in NO_CAPTION:
+            return []
+        return self.caption_rows(text, line)
+
+    def _image(self, src: str, attrs, line: int) -> list:
+        w = self.image_width(attrs.kv.get("width"), line)
         try:
             page = int(attrs.kv.get("page", 1))
         except ValueError:
@@ -1261,17 +1306,18 @@ class Layout:
                 self.n.add(code, msg, line, hint)
             return [BitmapRow(row_im, line, "image")]
         mark = len(self.n)  # the notes of this image, said again when its cached dots are reused
-        ang = self.angle(attrs, line) % 360
-        sideways = ang in (90, 270)
+        ang = self.angle(attrs, line, image=True) % 360
+        cos, sin = _turn(ang)
         try:
             im = imaging.open_image(
                 src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
             )
-            if sideways and im.info.get("bobina.kind") == "vector":  # drawn again so its height becomes w dots
-                tall = min(4096, max(8, round(w * im.width / max(1, im.height))))
-                im = imaging.open_image(
-                    src, self.doc.base_dir, width=tall, page=page, allow_net=self.net, confine=self.image_dirs
-                )
+            if ang and im.info.get("bobina.kind") == "vector":  # drawn again so the turned box is w dots wide: sharp
+                wide = min(4096, max(8, round(w / (cos + sin * im.height / max(1, im.width)))))
+                if wide != im.width:
+                    im = imaging.open_image(
+                        src, self.doc.base_dir, width=wide, page=page, allow_net=self.net, confine=self.image_dirs
+                    )
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []
@@ -1282,11 +1328,18 @@ class Layout:
             self.n.add("I104", f"fetched {im.info['bobina.host']}", line, "that server can see when you print")
         vector, host = im.info.get("bobina.kind") == "vector", im.info.get("bobina.host")
         im = imaging.flatten(im)
-        side = im.height if sideways else im.width  # the side that runs across the paper after the turn
-        if side > 2 * w and min(im.size) > 1:  # a 40 MP photo: turned and sampled small, never at full size
-            f = max(1, side // (2 * w))
+        across = im.width * cos + im.height * sin  # how wide the turned image is: what is fitted to the paper
+        if ang % 90:
+            right = im.width if cos >= sin else im.height  # the nearest right angle would fit this side
+            kept = right / max(1.0, across)
+            if kept < 0.9:
+                said = attrs.kv.get("rotate")
+                self.n.add("I110", f"rotate={said}: the image prints at {kept:.0%} of its size so its corners stay"
+                           " on the paper", line, "a right angle (90, 180, 270) keeps it bigger")  # fmt: skip
+        if across > 2 * w and min(im.size) > 1:  # a 40 MP photo: turned and sampled small, never at full size
+            f = max(1, int(across // (2 * w)))
             im = im.reduce(f) if f > 1 else im
-        im = self.turn(im, ang, attrs)
+        im = self.turn(im, ang, attrs, line)
         kind, level = self.treatment(im, attrs, vector, line, src)
         default_gamma = (
             self.p.get("image.gamma_atkinson", 1.5) if kind == "atkinson" else self.p.get("image.gamma", 1.8)
@@ -1300,14 +1353,29 @@ class Layout:
             _remember(key, (host, placed, notes))
         return [BitmapRow(placed, line, "image")]
 
-    def turn(self, im, ang: float, attrs) -> Image.Image:
-        """The source turned clockwise by `ang` (rotate=, .flip) and mirrored (.mirror) before it is fitted to the
-        paper, so a tall photo turned sideways still fills the width."""
+    def turn(self, im, ang: float, attrs, line: int = 0) -> Image.Image:
+        """The source turned clockwise by `ang` (rotate=, .flip), then mirrored (mirror=x|y|xy, .mirror = x), before
+        it is fitted to the paper: a tall photo turned sideways still fills the width, and a slanted one fits whole,
+        its corners white."""
         if ang:
             exact = ang % 90 == 0
             im = im.rotate(-ang, expand=True, fillcolor=(255, 255, 255),
                            resample=Image.NEAREST if exact else Image.BICUBIC)  # fmt: skip
-        return ImageOps.mirror(im) if attrs.has("mirror") else im
+        across, down = self.mirror_axes(attrs, line)
+        if across:
+            im = ImageOps.mirror(im)
+        return ImageOps.flip(im) if down else im
+
+    def mirror_axes(self, attrs, line: int) -> tuple[bool, bool]:
+        """(left-right, top-bottom) from mirror=x|y|xy, or .mirror (left-right)."""
+        value = attrs.kv.get("mirror")
+        if value is None:
+            return attrs.has("mirror"), False
+        axes = str(value).strip().lower()
+        if axes in MIRRORS:
+            return MIRRORS[axes]
+        self.n.add("M101", f"mirror={value}", line, "x (left-right), y (top-bottom) or xy (both)")
+        return False, False
 
     def treatment(self, im, attrs, vector: bool, line: int, src: str) -> tuple[str, int | None]:
         """(dither kind, threshold level; None: the level between ink and paper, from the image). Written wins:

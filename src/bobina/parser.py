@@ -32,11 +32,12 @@ KNOWN_CLASSES = {
     "double",
     "wavy",
     "cut",
-    "mirror",  # images: left-right
+    "mirror",  # images: left-right (the short form of mirror=x)
     "threshold",  # images: sharp black and white, the cut between ink and paper
     "dither",  # images: dithered like a photo, even if bobina sees a logo
 }
 KNOWN_KEYS = {
+    "mirror",  # images: x (left-right), y (top-bottom), xy (both)
     "size",
     "font",
     "align",
@@ -320,8 +321,9 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
                 img = kids[0]
                 ia = _span_attrs(img).merged(extra) if extra else _span_attrs(img)
                 check_attrs(
-                    Attrs(ia.classes, {k: v for k, v in ia.kv.items() if k not in ("src", "alt", "title")}), ln, nudges
-                )
+                    Attrs(ia.classes, {k: v for k, v in ia.kv.items() if k not in ("src", "alt", "title")}), ln, nudges,
+                    extra=frozenset({"caption"}),
+                )  # fmt: skip
                 for k in ("src", "alt", "title"):
                     ia.kv.pop(k, None)
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
@@ -363,7 +365,7 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
             check_attrs(
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
-                extra=frozenset({"caption"}) if k == "qr" else frozenset(),
+                extra=frozenset({"caption"}) if k in ("qr", "image") else frozenset(),
             )  # fmt: skip
             out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":
