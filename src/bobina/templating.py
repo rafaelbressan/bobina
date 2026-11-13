@@ -692,7 +692,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
             elif name == "format_map" and args and isinstance(args[0], dict):
                 check_format(owner, (), args[0])
             elif name == "join" and args:
-                args = (__self.materialized(args[0]), *args[1:])
+                args = (__self.materialized(args[0], owner), *args[1:])
                 check_estimate(join_size(owner, args[0]))
             elif name == "replace" and len(args) >= 2:
                 check_estimate(replace_size(owner, *args[:3]))
@@ -702,12 +702,22 @@ class Sandbox(ImmutableSandboxedEnvironment):
                 check_estimate(expandtabs_size(owner, (*args, *kwargs.values(), 8)[0]))
         return check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
 
-    def materialized(self, items):
+    def materialized(self, items, sep=None):
         """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
-        MAX_OUTPUT items, so its size can be estimated before anything is built from it."""
+        MAX_OUTPUT items, so its size can be estimated before anything is built from it. sep (a join): the joined
+        length is counted while drawing, so a join that would grow too long stops at once, not after drawing a
+        million items."""
         if isinstance(items, (str, list, tuple, dict, SafeRange)) or not hasattr(items, "__iter__"):
             return items
-        return list(self._bounded(iter(items)))
+        if sep is None:
+            return list(self._bounded(iter(items)))
+        gap = len(sep if isinstance(sep, str) else str(sep or ""))
+        out, total = [], 0
+        for x in self._bounded(iter(items)):
+            total += _textlen(x) + (gap if out else 0)
+            check_estimate(total)
+            out.append(x)
+        return out
 
     def wrap_str_format(self, value):
         """As Jinja's, with a formatter that checks each field's final spec (_BoundedFormatter)."""
@@ -769,7 +779,7 @@ def _size_guard(name: str, f, env: Sandbox):
             check_format(v, rest, k)
         elif name == "join":
             if v is not None and not isinstance(v, (str, list, tuple, dict, SafeRange)):
-                v = env.materialized(v)  # a generator (map, select …): drawn, bounded, then estimated
+                v = env.materialized(v, rest[0] if rest else k.get("d", ""))  # drawn while its size is counted
                 a = (*a[: len(a) - len(values)], v, *rest)
             check_estimate(join_size(rest[0] if rest else k.get("d", ""), v))
         elif name == "replace" and len(rest) >= 2:
