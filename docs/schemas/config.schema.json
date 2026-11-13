@@ -2,9 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "bobina.config/1",
   "title": "bobina config list|get|set|unset --json, bobina printer show NAME --json",
-  "description": "One setting (get, set, unset: key, value, source; locale adds prints_as, time_zone, example), every setting (list: keys, printers) or one printer's (printer show: printer, keys).",
+  "description": "One setting (get, set, unset: key, value, source; locale adds prints_as, time_zone, example), every setting (list: keys, printers) one printer's (printer show: printer, keys) or a group reset (unset GROUP: key, removed, restore).",
   "type": "object",
-  "required": ["schema", "path", "problems"],
+  "required": [
+    "schema",
+    "path",
+    "problems"
+  ],
   "properties": {
     "schema": {
       "const": "bobina.config/1"
@@ -17,7 +21,12 @@
     },
     "value": {},
     "source": {
-      "enum": ["config", "default", "time zone", "environment"]
+      "enum": [
+        "config",
+        "default",
+        "time zone",
+        "environment"
+      ]
     },
     "default_shown": {
       "type": "string"
@@ -41,7 +50,10 @@
       "type": "string"
     },
     "time_zone": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "example": {},
     "printer": {
@@ -51,13 +63,20 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["key", "value", "source"],
+        "required": [
+          "key",
+          "value",
+          "source"
+        ],
         "properties": {
           "key": {
             "type": "string"
           },
           "source": {
-            "enum": ["config", "default"]
+            "enum": [
+              "config",
+              "default"
+            ]
           }
         }
       }
@@ -69,6 +88,20 @@
       "type": "array",
       "items": {
         "$ref": "problem.schema.json"
+      }
+    },
+    "removed": {
+      "type": "object",
+      "description": "unset GROUP: each removed key with the value it had"
+    },
+    "restore": {
+      "type": "string",
+      "description": "unset GROUP: the command that sets the removed values back ('' when nothing was set)"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
       }
     }
   }

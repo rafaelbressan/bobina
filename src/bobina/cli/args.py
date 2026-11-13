@@ -286,7 +286,12 @@ def _common(printing: bool = True):
     g.add_argument("--profile", help="printer profile (default: from the printer or mtp-ii-58)")
     g.add_argument("--printer", help="printer name from config, or a Bluetooth address")
     g.add_argument("-q", "--quiet", action="store_true", help="no nudges")
-    g.add_argument("--strict", action="store_true", help="nudges become errors (exit 3)")
+    g.add_argument(
+        "--strict",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="nudges become errors (exit 3); --no-strict for one run when problems.strict is on",
+    )
     g.add_argument("--json", action="store_true", help="structured output")
     if printing:
         g.add_argument("-n", "--dry-run", action="store_true", help="never touch the printer")
@@ -326,7 +331,8 @@ COMMAND_KIND = {
     "history": "prints",  # history clear --yes
     "check": "reads", "preview": "reads", "view": "reads", "status": "reads", "printer": "reads",
     "profile": "reads", "template": "reads", "seq": "reads", "fonts": "reads", "library": "reads",
-    "paper": "reads", "help": "reads", "config": "reads",
+    "paper": "reads", "help": "reads",
+    "config": "prints",  # config unset GROUP --yes (it asks first, as history clear does)
     "mcp": "reads",  # the server: its print tool prints only with confirm: true in that call
     "init": "prints",  # the test strip; --yes asks nothing and prints nothing
     "chat": "prints", "ai": "reads",  # cli/chat.py
@@ -439,7 +445,8 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
 # guess). A new option goes in ALSO_KNOWN or here: tests/test_option_hints.py fails until it is in one of them.
 NO_SYNONYMS = {
     "--allow", "--allow-all", "--channel", "--compact-all", "--core", "--debug",
-    "--diameter", "--editor", "--list", "--long", "--no-color", "--no-compact", "--note", "--outcome", "--path",
+    "--diameter", "--editor", "--list", "--long", "--no-color", "--no-compact", "--no-strict", "--note", "--outcome",
+    "--path",
     "--problems", "--remember", "--seconds", "--template", "--thickness",
 }  # fmt: skip
 
@@ -1117,13 +1124,12 @@ def _font_notice(args) -> None:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    from .. import config_keys
     from .common import set_command, set_problem_format
 
-    set_problem_format(argv)
-    set_command(argv)
-    from .. import config_keys
-
     config_keys._SAID.clear()  # a config value bobina cannot use is said once per run
+    set_problem_format(argv)  # reads problems.format: after the clear, or its note would be said twice
+    set_command(argv)
     ap = make_parser()
     if not argv:
         ap.print_help()
