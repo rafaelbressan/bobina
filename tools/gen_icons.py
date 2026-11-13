@@ -15,6 +15,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from bobina.icons import SIZES  # 1x to 8x of a 24-dot cell; a raster font picks the nearest
+
 ROOT = Path(__file__).resolve().parents[1]
 ICONS = ROOT / "src" / "bobina" / "icons"
 SETS = {  # set -> (source URL pattern, version, license file, icon names)
@@ -45,7 +47,6 @@ SETS = {  # set -> (source URL pattern, version, license file, icon names)
     # Generic drawings of the meaning, never a copy of a standard's artwork.
     "pictograms": (None, None, None, None),  # every SVG in icons/pictograms
 }  # fmt: skip
-SIZES = (24, 48, 72, 96)  # native text at 1x to 4x (12x24 cells, GS ! scaling); a raster font picks the nearest
 
 
 def fetch(name: str) -> None:

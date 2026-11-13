@@ -9,6 +9,7 @@ In a document, `:fragile:` is an icon: the parser turns a known name into one ch
 from __future__ import annotations
 
 import difflib
+import re
 from functools import cache
 from pathlib import Path
 
@@ -17,8 +18,7 @@ from PIL import Image
 ROOT = Path(__file__).parent
 SET = "lucide"
 SETS = ("pictograms", "lucide")  # a name in both: the first wins
-SIZES = (24, 48, 72, 96)
-CHAT_ONLY = {"user-round", "sparkles", "bot", "message-circle"}  # still usable in documents, not listed as such
+SIZES = (24, 48, 72, 96, 120, 144, 168, 192)  # 1x to 8x of a 24-dot printer cell (tools/gen_icons.py draws them)
 
 # Names people write for an icon (English): -> the icon's own name
 ALIASES = {
@@ -37,6 +37,11 @@ ALIASES = {
     "non-chlorine-bleach": "bleach-non-chlorine", "do-not-iron": "no-iron", "do-not-dry-clean": "no-dry-clean",
     "line-dry": "dry-line", "flat-dry": "dry-flat", "drip-dry": "dry-drip", "fridge": "refrigerator",
 }  # fmt: skip
+
+# :fragile: -> an icon; :fragile::keep-dry: is two. A run of shortcodes is not next to a letter, digit, colon or slash
+# (10:30:00, a:b:c, https://x.com/:id: stay text). ONE is a single shortcode inside a run.
+RUN = re.compile(r"(?<![\w:/])((?::[A-Za-z][A-Za-z0-9_+-]*:)+)(?![\w:/])")
+ONE = re.compile(r":([A-Za-z][A-Za-z0-9_+-]*):")
 
 PUA = 0x10F000  # Supplementary Private Use Area-B: not used by symbol fonts (Nerd Fonts use area A)
 

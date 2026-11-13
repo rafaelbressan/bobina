@@ -102,34 +102,59 @@ def check_attrs(a: Attrs, line: int, nudges: Nudges, keys: bool = True, extra: f
         nudges.add("M101", f"unknown key '{k}='", line, "see: bobina help format")
 
 
-# :fragile: -> an icon. Not next to a letter, digit, colon or slash (10:30:00, a:b:c, https://x.com/:id:)
-ICON_RE = re.compile(r"(?<![\w:/]):([A-Za-z][A-Za-z0-9_+-]*):(?![\w:/])")
+def _neighbour(kids: list, i: int, side: int) -> str:
+    """The character a text token touches on one side (side -1: before, 1: after), across emphasis markers: in
+    "**Ana**:ok:" it is the "a" of Ana, in "**:heart: x**" the start of the line. A line break or nothing is a space;
+    code, images and placeholders count as a word ("`x`:ok:" stays text, like "Ana:ok:")."""
+    j = i + side
+    while 0 <= j < len(kids) and (
+        kids[j].type.endswith(("_open", "_close")) or (kids[j].type == "text" and not kids[j].content)
+    ):
+        j += side
+    if not 0 <= j < len(kids) or kids[j].type in ("softbreak", "hardbreak"):
+        return " "
+    tok = kids[j]
+    if tok.type == "text":
+        ch = tok.content[-1] if side < 0 else tok.content[0]
+        return "a" if ch == ":" else ch
+    return "a"
 
 
 def _icons_rule(state) -> None:
-    """Known :name: in plain text become icon characters (icons.char_for). Runs before text_join, so an escaped
-    colon (\\:fragile:) and code stay text; data is still a placeholder here, so a value is never an icon. Unknown
-    names stay as written and are listed in env["icons_unknown"] (line, name) for M161."""
+    """Known :name: in plain text become icon characters (icons.char_for); :a::b: is two. Runs before text_join, so
+    an escaped colon (\\:fragile:) and code stay text; data is still a placeholder here (a word to its neighbours),
+    so a value is never an icon. Unknown names stay as written and are listed in env["icons_unknown"] (line, name)
+    for M161."""
     from . import icons
+    from .templating import PH_CLOSE, PH_OPEN
 
     for tok in state.tokens:
         if tok.type != "inline" or not tok.children:
             continue
         line = tok.map[0] if tok.map else 0
-        for child in tok.children:
+        kids = tok.children
+        for i, child in enumerate(kids):
             if child.type in ("softbreak", "hardbreak"):
                 line += 1  # the next line of the paragraph
             if child.type != "text" or ":" not in child.content:
                 continue
 
-            def swap(m, line=line):
+            def one(m, line=line):
                 name = icons.canonical(m.group(1))
                 if name:
                     return icons.char_for(name)
                 state.env.setdefault("icons_unknown", []).append((line, m.group(1)))
                 return m.group(0)
 
-            child.content = ICON_RE.sub(swap, child.content)
+            def run(m):
+                return icons.ONE.sub(one, m.group(0))
+
+            before, after = _neighbour(kids, i, -1), _neighbour(kids, i, 1)
+            # a placeholder is a word to its neighbours: its outer edges become letters while the rule runs
+            text = child.content.replace(PH_OPEN, "a\x01").replace(PH_CLOSE, "\x02a")
+            out = icons.RUN.sub(run, before + text + after)[1:-1]
+            if out != text:
+                child.content = out.replace("a\x01", PH_OPEN).replace("\x02a", PH_CLOSE)
 
 
 def _md() -> MarkdownIt:

@@ -191,3 +191,95 @@ def test_the_icons_guide_and_its_pictures_are_current():
         got = Image.open(gen.PICTURES / f"use-{slug}.png").convert("L")
         want = gen.use_png(src).convert("1", dither=0).convert("L")
         assert got.size == want.size and ImageChops.difference(got, want).getbbox() is None, slug
+
+
+# ------------------------------------------------------------------ second review
+
+
+def _row_widths(res):
+    return [sum(2 if c.wide else 1 for c in r.cells) for r in res.rows if isinstance(r, TextRow)]
+
+
+@pytest.mark.parametrize("profile", ["mtp-ii-58", "epson-tm-t20ii"])
+def test_tables_with_icons_and_cjk_keep_the_grid(profile):
+    cols = build("x\n", profile_name=profile).profile.columns
+    long = "a" * (cols // 3)
+    for src in (
+        f"| {long} :fragile: {'b' * cols} | {'x' * cols} | yyyyyyy |\n|---|---|---|\n| a | b | c |\n",
+        "| a | b |\n|---|---|\n| 漢字漢字 | x |\n| ab | 漢 |\n",
+        "| :fragile: | :keep-dry: |\n|---|---|\n| 漢字 | ok |\n",
+    ):
+        res = build(src, profile_name=profile)
+        assert max(_row_widths(res)) <= cols, (profile, src)
+    res = build("| a | b |\n|---|---|\n| 漢字漢字 | x |\n", profile_name=profile)
+    assert set(_row_widths(res)) == {cols}  # stretched to the paper edge, every row the same width
+
+
+def test_markdown_filter_never_turns_data_into_icons():
+    raw = icon("heart")
+    for v in (":fragile: x", ":ce: and :ukca:", f"{raw} raw", ":fragile::keep-dry:"):
+        res = build("{{ v | markdown }}\n", fields=_tainted({"v": v}))
+        cells = "".join(c.ch for r in res.rows if isinstance(r, TextRow) for c in r.cells)
+        assert not any(icons.is_icon(c) for c in cells), v
+        assert ":" in cells or "raw" in cells
+    res = build('{{ ":fragile: x" | markdown }}\n')  # the author's own text: an explicit choice
+    assert any(icons.is_icon(c.ch) for r in res.rows if isinstance(r, TextRow) for c in r.cells)
+
+
+def test_adjacent_shortcodes_are_two_icons():
+    text, problems = runs_text(":fragile::keep-dry: x :wash-30::no-bleach::iron-low:\n")
+    want = f"{icon('fragile')}{icon('keep-dry')} x {icon('wash-30')}{icon('no-bleach')}{icon('iron-low')}"
+    assert text == want and not problems
+
+
+@pytest.mark.parametrize("src", ["**Ana**:ok: x", "*Ana*:ok: x", "`code`:ok: x", ":ok:**Ana**"])
+def test_a_shortcode_touching_markup_stays_text_like_a_word(src):
+    res = build(src + "\n")
+    cells = "".join(c.ch for r in res.rows if isinstance(r, TextRow) for c in r.cells)
+    assert ":ok:" in cells and not any(icons.is_icon(c) for c in cells)
+
+
+def test_a_shortcode_touching_a_value_stays_text():
+    res = build("{{ sku }}:x: y :fragile: {{ sku }}\n", fields=_tainted({"sku": "A1"}))
+    cells = "".join(c.ch for r in res.rows if isinstance(r, TextRow) for c in r.cells)
+    assert "A1:x: y" in cells and sum(icons.is_icon(c) for c in cells) == 1
+
+
+def test_raster_font_view_rows_never_pass_the_paper_width():
+    from bobina.rows import BitmapRow
+
+    res = build(":fragile:" * 30 + " {render=raster}\n\n" + "漢" * 30 + " {render=raster}\n")
+    views = [v for r in res.rows if isinstance(r, BitmapRow) for v in (r.text_rows or [])]
+    assert views and max(sum(2 if c.wide else 1 for c in v.cells) for v in views) <= res.profile.columns
+
+
+def test_every_size_up_to_8x_has_its_own_bitmap():
+    assert max(icons.SIZES) >= 8 * 24
+    for px in icons.SIZES:
+        assert (ROOT / "src/bobina/icons/pictograms" / f"fragile-{px}.png").is_file()
+    res = build(":fragile: {size=8x}\n")
+    row = next(r for r in res.rows if isinstance(r, TextRow))
+    im = res.emulator.render_row(row, res.profile.width_dots).convert("L")
+    mark = icons.load("fragile", 192).convert("L")
+    assert ImageChops.difference(im.crop((0, 0, 192, 192)), mark).getbbox() is None
+
+
+def test_draw_pictograms_removes_what_it_no_longer_draws(tmp_path):
+    import subprocess
+    import sys
+
+    (tmp_path / "old-mark.svg").write_text("<svg/>")
+    for px in icons.SIZES:
+        (tmp_path / f"old-mark-{px}.png").write_bytes(b"x")
+    (tmp_path / "old-mark-extra-24.png").write_bytes(b"x")  # another name that starts the same: kept
+    r = subprocess.run([sys.executable, str(ROOT / "tools/draw_pictograms.py"), str(tmp_path)], capture_output=True,
+                       text=True, check=True)  # fmt: skip
+    assert "old-mark" in r.stdout
+    assert not list(tmp_path.glob("old-mark.svg")) and not list(tmp_path.glob("old-mark-[0-9]*.png"))
+    assert (tmp_path / "old-mark-extra-24.png").exists() and (tmp_path / "fragile.svg").exists()
+
+
+@pytest.mark.parametrize("src", ["**:heart: obrigado**", "*:fragile:* frágil", "x **:ok:** y", "~~:x:~~ z"])
+def test_a_shortcode_inside_emphasis_is_still_an_icon(src):
+    res = build(src + "\n")
+    assert any(icons.is_icon(c.ch) for r in res.rows if isinstance(r, TextRow) for c in r.cells), src

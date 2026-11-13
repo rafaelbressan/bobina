@@ -7,6 +7,8 @@ Usage: python tools/draw_pictograms.py"""
 import sys
 from pathlib import Path
 
+from bobina.icons import SIZES
+
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "src/bobina/icons/pictograms"
 HEAD = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" '
@@ -126,4 +128,9 @@ ICONS = {
 old = set(p.stem for p in OUT.glob("*.svg"))
 for name, body in ICONS.items():
     (OUT / f"{name}.svg").write_text(HEAD + body + "</svg>\n", encoding="utf-8")
-print(len(ICONS), "pictograms; removed:", sorted(old - set(ICONS)))
+gone = sorted(old - set(ICONS))
+for name in gone:  # a pictogram no longer drawn: its SVG and every bitmap made from it go too
+    (OUT / f"{name}.svg").unlink()
+    for px in SIZES:
+        (OUT / f"{name}-{px}.png").unlink(missing_ok=True)
+print(len(ICONS), "pictograms; removed:", gone)

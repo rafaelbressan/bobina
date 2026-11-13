@@ -1105,6 +1105,10 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
                 nudges.add("M122", "an image inside a --data/--set value was removed (data cannot choose files)")
             cleaned = c2
         if isinstance(v, Tainted):
+            from . import icons
+
+            # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
+            cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
             nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
         return MdSafe(cleaned)
 

@@ -34,6 +34,37 @@ def is_wide(ch: str) -> bool:
     return unicodedata.east_asian_width(ch) in ("W", "F") or icons.is_icon(ch)  # an icon is a square: 2 columns
 
 
+def fit_columns(s: str, cols: int) -> str:
+    """The start of s that fits in cols columns (wide characters and icons take 2)."""
+    used = 0
+    for i, ch in enumerate(s):
+        used += 2 if is_wide(ch) else 1
+        if used > cols:
+            return s[:i]
+    return s
+
+
+def _units(s: str) -> list[str]:
+    """A table cell as drawing units: a wide character with its TABLE_PAD is one unit (never split)."""
+    out, i = [], 0
+    while i < len(s):
+        n = 2 if i + 1 < len(s) and s[i + 1] == TABLE_PAD else 1
+        out.append(s[i : i + n])
+        i += n
+    return out
+
+
+def wrap_cell(s: str, width: int) -> list[str]:
+    """A table cell cut into lines of at most width columns, never between a wide character and its pad."""
+    parts, cur = [], ""
+    for u in _units(s):
+        if cur and len(cur) + len(u) > width:
+            parts.append(cur)
+            cur = ""
+        cur += u
+    return [*parts, cur]
+
+
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
 _IMAGES_MAX = 64
 IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
@@ -473,7 +504,7 @@ class Layout:
         )
         view_rows = [
             TextRow(
-                self.view_with_bars([Cell(ch, wide=is_wide(ch)) for ch in t[: self.cols]], indent, rtl),
+                self.view_with_bars([Cell(ch, wide=is_wide(ch)) for ch in fit_columns(t, self.cols)], indent, rtl),
                 (1, 1),
                 "left" if align == "justify" else align,
                 line,
@@ -1322,16 +1353,16 @@ class Layout:
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font."""
 
-        def txt(runs):  # an icon takes two columns: a pad after it keeps the grid (dropped when drawn)
+        def txt(runs):  # a wide character (icon, CJK) takes two columns: a pad after it keeps the grid (not drawn)
             s = "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
-            return "".join(ch + TABLE_PAD if icons.is_icon(ch) else ch for ch in s)
+            return "".join(ch + TABLE_PAD if is_wide(ch) else ch for ch in s)
 
         head = [txt(c) for c in t.header]
         body = [[txt(c) for c in r] for r in t.rows]
         ncol = len(head)
         widths = [max([len(head[i])] + [len(r[i]) if i < len(r) else 0 for r in body]) for i in range(ncol)]
         cap = self.cols - indent - (ncol - 1)
-        while sum(widths) > cap:
+        while sum(widths) > cap and max(widths) > 2:  # 2: a wide character always fits its column
             i = widths.index(max(widths))
             widths[i] -= 1
         if not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
@@ -1342,8 +1373,7 @@ class Layout:
             wrapped = []
             for i in range(ncol):
                 s = cells_text[i] if i < len(cells_text) else ""
-                parts = [s[k : k + widths[i]] for k in range(0, max(1, len(s)), widths[i])] or [""]
-                wrapped.append(parts)
+                wrapped.append(wrap_cell(s, widths[i]))
             for k in range(max(len(p) for p in wrapped)):
                 line = ""
                 for i in range(ncol):
