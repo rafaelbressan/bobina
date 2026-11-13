@@ -185,4 +185,4 @@ def test_a_vector_turned_sideways_is_drawn_at_its_final_size(tmp_path):
     box = im.point(lambda v: 255 - v).getbbox()
     assert box[2] - box[0] <= im.width // 2 + 2  # the turned drawing fits the asked width …
     assert box[3] - box[1] > 1.6 * (box[2] - box[0])  # … and keeps its proportions (tall now)
-    assert set(im.getdata()) <= {0, 255}
+    assert set(im.tobytes()) <= {0, 255}
