@@ -94,13 +94,14 @@ def screen_line(n: int, every: int) -> str:
 
 def title(label) -> str:
     """The first line of text of a label, for the pause line ("4/10 · Honey jar")."""
+    from .. import icons
     from ..rows import TextRow
 
     if getattr(label, "title", None) is not None:  # a stored label of --last: its title was kept
         return label.title
     for row in getattr(label, "rows", None) or []:
         if isinstance(row, TextRow):
-            text = " ".join("".join(c.ch for c in row.cells).split())
+            text = " ".join("".join(icons.shown(c.ch) for c in row.cells).split())
             if text:
                 return text if len(text) <= 32 else text[:31] + "…"
     return ""

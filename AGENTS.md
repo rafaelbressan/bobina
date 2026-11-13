@@ -15,8 +15,9 @@ has the rules that tests enforce.
 - Docs have a token budget per page (tests/test_token_budget.py): over it, split or cut the page.
 - Docs that are generated, never edited by hand: `docs/diagrams/nudges-flow.md` and `docs/problems/`
   (`tools/gen_problem_docs.py`),
-  `docs/pay.md` (`tools/gen_pay_docs.py`), `docs/contact.md` (`tools/gen_contact_docs.py`), `llms-full.txt`
-  (`tools/gen_llms_full.py`), imported printer profiles (`tools/import_profiles.py`).
+  `docs/pay.md` (`tools/gen_pay_docs.py`), `docs/contact.md` (`tools/gen_contact_docs.py`), `docs/guides/icons.md`
+  and its pictures (`tools/gen_icon_docs.py`; icons: `tools/draw_pictograms.py`, `tools/gen_icons.py`),
+  `llms-full.txt` (`tools/gen_llms_full.py`), imported printer profiles (`tools/import_profiles.py`).
 - A new command or option: `COMMAND_KIND`, `ALSO_KNOWN`/`NO_SYNONYMS` in `src/bobina/cli/args.py` and a hint case
   in `tests/test_option_hints.py` (a test fails until done). A new problem code: `CATALOG` in `src/bobina/nudges.py`,
   what to do in `FIX` (`src/bobina/problem_help.py`), the table in `docs/FORMAT.md`, then `tools/gen_problem_docs.py`.

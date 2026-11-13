@@ -102,10 +102,41 @@ def check_attrs(a: Attrs, line: int, nudges: Nudges, keys: bool = True, extra: f
         nudges.add("M101", f"unknown key '{k}='", line, "see: bobina help format")
 
 
+# :fragile: -> an icon. Not next to a letter, digit, colon or slash (10:30:00, a:b:c, https://x.com/:id:)
+ICON_RE = re.compile(r"(?<![\w:/]):([A-Za-z][A-Za-z0-9_+-]*):(?![\w:/])")
+
+
+def _icons_rule(state) -> None:
+    """Known :name: in plain text become icon characters (icons.char_for). Runs before text_join, so an escaped
+    colon (\\:fragile:) and code stay text; data is still a placeholder here, so a value is never an icon. Unknown
+    names stay as written and are listed in env["icons_unknown"] (line, name) for M161."""
+    from . import icons
+
+    for tok in state.tokens:
+        if tok.type != "inline" or not tok.children:
+            continue
+        line = tok.map[0] if tok.map else 0
+        for child in tok.children:
+            if child.type in ("softbreak", "hardbreak"):
+                line += 1  # the next line of the paragraph
+            if child.type != "text" or ":" not in child.content:
+                continue
+
+            def swap(m, line=line):
+                name = icons.canonical(m.group(1))
+                if name:
+                    return icons.char_for(name)
+                state.env.setdefault("icons_unknown", []).append((line, m.group(1)))
+                return m.group(0)
+
+            child.content = ICON_RE.sub(swap, child.content)
+
+
 def _md() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"breaks": True, "html": False})
     md.enable(["table", "strikethrough"])
     md.use(attrs_plugin, spans=True)
+    md.core.ruler.before("text_join", "icons", _icons_rule)
     return md
 
 
@@ -198,10 +229,29 @@ BROKEN_IMAGE = re.compile(r"!\[([^\]]*)\]\(((?!<)[^)\n]*\s[^)\n]*)\)")
 
 
 def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", meta: dict | None = None) -> Document:
-    root = SyntaxTreeNode(_md().parse(text))
+    env: dict = {}
+    root = SyntaxTreeNode(_md().parse(text, env))
     doc = Document(meta=meta or {}, base_dir=base_dir)
     doc.blocks = _blocks(root.children, nudges, line_offset)
+    _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
     return doc
+
+
+def _unknown_icons(found: list[tuple[int, str]], nudges: Nudges, off: int) -> None:
+    from . import icons
+
+    seen = set()
+    for line, name in found:
+        if name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        near = icons.closest(name)
+        nudges.add(
+            "M161",
+            f"no icon called ':{name}:': printed as written",
+            line + 1 + off,
+            (f"did you mean {', '.join(f':{n}:' for n in near)}? " if near else "") + "the names: bobina help icons",
+        )
 
 
 def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:

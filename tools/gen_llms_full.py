@@ -20,11 +20,11 @@ PARTS = [
     "docs/SECURITY.md",
     "docs/INSTALL.md",
 ]
-# Sections an agent does not need to use bobina (how it was decided, how the help is laid out, the change log, plans
-# for a server that does not exist yet): they stay in the docs and on the site; llms-full.txt names where they are.
+# Sections an agent does not need to use bobina (how it was decided, how the help is laid out, plans for a
+# server that does not exist yet): they stay in the docs and on the site; llms-full.txt names where they are.
 SKIP = {
     "docs/CLI.md": ("## Decided", "## Help layout"),
-    "docs/FORMAT.md": ("## 10. Conformance", "## Appendix B — changes"),
+    "docs/FORMAT.md": ("## 10. Conformance",),
     "docs/SECURITY.md": ("## Requirements before a print server or chat bot exists", "## Open"),
 }
 LINK = re.compile(r"(\]\()([^)\s]+)(\))")

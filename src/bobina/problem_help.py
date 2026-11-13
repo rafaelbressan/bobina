@@ -140,6 +140,7 @@ FIX = {
     "M158": "Use the new names in {{ }} (the message maps them), or row['Exact Name'].",
     "M159": "Rename one of the two columns so both get a usable name.",
     "M160": "Open the file in Excel and save it, so formula values are stored.",
+    "M161": "Use a name from bobina help icons (the message suggests the closest), or write \\: to keep the colons.",
     "M202": "Write the number with digits (24.90, 24,90 or R$ 24,90), or a smaller amount for add().",
     "M203": (
         "Nothing to fix if it is right: documents without locale: use it from now on, even if the machine travels. "

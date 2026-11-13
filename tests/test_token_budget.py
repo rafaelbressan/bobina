@@ -17,6 +17,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/FORMAT.md": 8500,
     "docs/guides/batch-printing.md": 3500,
     "docs/guides/templates.md": 2500,
+    "docs/guides/icons.md": 3800,  # set on 13/11, with icons (generated: one row per icon, not in llms-full.txt)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,

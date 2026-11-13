@@ -708,8 +708,9 @@ def test_icons_are_bundled_as_one_bit_bitmaps():
     assert {"user-round", "sparkles", "bot"} <= set(icons.names())
     im = icons.load("sparkles", 24)
     assert im.mode == "1" and im.size == (24, 24) and 20 < im.convert("L").histogram()[0] < 400
+    assert icons.load("sparkles", 13).size == (13, 13)  # a size not made from the SVG: resized from the nearest
     with pytest.raises(KeyError):
-        icons.load("sparkles", 13)
+        icons.load("no-such-icon", 24)
     assert "ISC" in (Path(icons.__file__).parent / "licenses" / "Lucide-LICENSE.txt").read_text()
 
 
