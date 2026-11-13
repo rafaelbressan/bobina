@@ -2,7 +2,7 @@
 +55 11 90000-0000
 ```
 
-```contact instagram {size=half}
+```contact instagram {width=half}
 @ana.souza
 ```
 

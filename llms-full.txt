@@ -753,7 +753,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles; italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | monospace grid, header bold with a rule under it, column alignment from `:--`/`--:`, **stretched to the paper width** (the first column absorbs the slack); `{.compact}` keeps it narrow |
+| `\| a \| b \|` tables | monospace grid, header bold with a rule under it, column alignment from `:--`/`--:`, **stretched to the paper width** (the first column absorbs the slack); `{.compact}` keeps it narrow (`.center`/`.right` place it) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -850,8 +850,9 @@ printer multipliers `size=2x`, `size=1x2` (width × height; above 4× prints jag
 
 ## 6. Objects (fenced blocks)
 
-The info string carries the object type and its attributes: ` ```qr {size=full .right} `.
-Objects are centred unless aligned with `.left` / `.right`.
+The info string carries the object type and its attributes: ` ```qr {width=half .right} `. Every object (image,
+code, `pay`, `contact`) is centred unless `.left` / `.right`; `width=full|half|third|50%|30mm|200` sizes it
+(codes: the largest integer module); captions follow.
 
 ### 6.1 QR code ✓
 
@@ -862,8 +863,7 @@ https://example.com
 ````
 
 `module=` dots per module (profile default 4; minimum 3 native, 4 raster → `Q101`), `ecc=L|M|Q|H` (`L` → `Q102`),
-`size=full|half|third|30mm` — the largest **integer** module that fits (integer modules keep codes scannable;
-native QR stops at 16), `render=raster`, `caption="Menu"` a centred line under the code. Content that does not fit
+`width=` (native: module ≤ 16), `render=raster`, `caption="Menu"` a centred line under the code. Content that does not fit
 any QR → `Q109`, nothing printed.
 
 ### 6.2 Barcodes ✓
@@ -875,8 +875,7 @@ ABC-123
 ````
 
 `type=code128` (default) `ean13 ean8 upca code39 code93 codabar itf` — native on the printer, with an exact
-preview. `module=` (minimum 2), `height=` dots (default 80), `text=below|above|both|none`, `width=full`
-(or `.justify`) stretches with the largest integer module (≤ 6). `orientation=auto|horizontal|vertical`:
+preview. `module=` (minimum 2), `height=` dots (default 80), `text=below|above|both|none`, `width=` (module ≤ 6). `orientation=auto|horizontal|vertical`:
 `auto` turns a barcode wider than the paper into a **vertical** one along the paper, so it is never cut (`Q110`,
 a warning, since you may not want it); vertical barcodes are raster with module ≥ 4 along the paper and a
 10-module white margin (measured: 2 and 3 did not scan). CODE39 gets the firmware's mod-43 check character in the
@@ -893,7 +892,7 @@ bars (not in the text). 1–250 printable ASCII characters; types the profile do
 One block for every payment scheme, with the same attributes: `to=` who receives, `name=`, `amount=` (`24.90` or
 `24,90`, in the scheme's currency), `ref=` your reference, `note=` text for the payer; a few schemes take an extra
 (`city=` Pix, `bic=` SEPA, `currency=` PayPal, `label=` other). `caption=auto|none|"text"`: `auto` prints a line
-under the code with the scheme and the amount (`Pix · R$ 10,00`), or the name. The QR attributes (`size=`,
+under the code with the scheme and the amount (`Pix · R$ 10,00`), or the name. The QR attributes (`width=`,
 `module=`, `ecc=`) work too. Pix is one scheme like the others: `pay {scheme=pix to=… name=… city=…}` (the old
 ```` ```pix ```` block is gone: it prints as text with `M102` and the way to write it). Attributes take `{{ }}`, so
 a receipt per row carries its own amount. Without `amount=` (or with 0) the code is open: the payer types it.
@@ -923,7 +922,7 @@ The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is 
 ### 6.4 Data Matrix and PDF417 ✓
 
 ````markdown
-```datamatrix {size=third}
+```datamatrix {width=third}
 batch 42
 ```
 
@@ -945,7 +944,7 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
   line art unless `.dither` or `dither=`.
 - `https://` URLs only when the command line has `--allow-net` (`I103` otherwise); public hosts only,
   no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
-- `width=` dots, `mm` or `%` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
+- `width=` as on every object (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
   `gamma=` (defaults from front matter `image:`, then the profile — tuned on printed ramps).
 - A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
   `.dither`, `.threshold` or `threshold=60%` choose.

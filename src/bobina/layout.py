@@ -70,6 +70,8 @@ _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this proc
 _IMAGES_MAX = 64
 IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
 MIRRORS = {"x": (True, False), "y": (False, True), "xy": (True, True), "yx": (True, True)}
+OBJECTS = ("qr", "barcode", "pay", "contact", "datamatrix", "pdf417")  # and images: sized by width=, placed by .left…
+FRACTIONS = {"full": 1.0, "half": 1 / 2, "third": 1 / 3}  # width=full|half|third on every object
 
 
 def _turn(ang: float) -> tuple[float, float]:
@@ -862,6 +864,8 @@ class Layout:
 
     def fence(self, f: Fence, indent: int) -> list:
         kind = f.kind
+        if kind in OBJECTS:  # an image says it in image(), for both ![](…) and ```image
+            self.object_words(f.attrs, f.line)
         if kind == "qr":
             return self.qr(f)
         if kind == "barcode":
@@ -912,17 +916,46 @@ class Layout:
                 cells = rest
         return rows
 
-    def fit_module(self, size: str, units: int, default: int, hi: int, line: int) -> int:
-        """Integer module so that `units` modules fill a target width: size=full|half|third|NNmm.
-        Integer modules keep codes scannable (no uneven bars)."""
-        target = {"full": self.W, "half": self.W // 2, "third": self.W // 3}.get(str(size))
-        if target is None:
-            m = UNIT_RE.match(str(size))
-            if not m:
-                self.n.add("M101", f"code size '{size}'", line, "full, half, third or a width like 30mm")
-                return default
-            target = float(m.group(1)) if m.group(2) == "px" else self.p.mm_to_dots(float(m.group(1)))
-        return max(1, min(hi, int(min(target, self.W) // units)))
+    def fit_module(self, target: int, units: int, default: int, hi: int) -> int:
+        """Integer module so that `units` modules fill `target` dots (width=). Integer modules keep codes scannable
+        (no uneven bars)."""
+        return max(1, min(hi, int(min(target, self.W) // units))) if target else default
+
+    def object_width(self, value, line: int) -> int | None:
+        """width= on any object (image, QR, barcode, Data Matrix, PDF417, pay, contact): full, half, third, 50%,
+        30mm or dots (200, 200px). None when absent or unreadable (M101)."""
+        if value is None or str(value).strip() == "":
+            return None
+        text = str(value).strip().lower().replace(",", ".")
+        try:
+            if text in FRACTIONS:
+                w = int(self.W * FRACTIONS[text])
+            elif text.endswith("%"):
+                w = int(self.W * float(text[:-1]) / 100)
+            elif text.endswith("mm"):
+                w = self.p.mm_to_dots(float(text[:-2]))
+            else:
+                w = int(float(text.removesuffix("px").removesuffix("dots")))
+            if w < 1:
+                raise ValueError
+        except ValueError:
+            self.n.add("M101", f"width={value}", line, "full, half, third, 50%, 30mm or dots (200)")
+            return None
+        return w
+
+    def object_align(self, attrs) -> str:
+        """left, center (the default for objects) or right: the classes .left .center .right, or align=."""
+        given = next((a for a in ("left", "right", "center") if attrs.has(a)), attrs.kv.get("align"))
+        return given if given in ("left", "right", "center") else "center"
+
+    def object_words(self, attrs, line: int) -> None:
+        """One way to size and place an object: width= and .left/.center/.right. size= is a text size and .justify
+        spreads text: on an object they say what to write instead."""
+        if "size" in attrs.kv:
+            size = attrs.kv["size"]
+            self.n.add("M101", f"size={size} is a text size", line, f"for an object: width={size}")
+        if attrs.has("justify") or attrs.kv.get("align") == "justify":
+            self.n.add("M101", ".justify spreads text", line, "an object fills the paper with width=full")
 
     def qr(self, f: Fence, resolved: bool = False) -> list:
         """A QR code, and under it the caption= line if there is one (1 mm of air: glued, it reads as part of it)."""
@@ -931,20 +964,21 @@ class Layout:
         caption = self.text(str(f.attrs.kv.get("caption", ""))).strip()
         if caption.lower() in NO_CAPTION:  # auto: a plain QR has nothing to say on its own
             caption = ""
-        return rows + self.caption_rows(caption, f.line) if rows else rows
+        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
 
-    def caption_rows(self, text: str, line: int) -> list:
+    def caption_rows(self, text: str, line: int, align: str = "center") -> list:
+        """The line under a code or an image, aligned as its object (1 mm of air: glued, it reads as part of it)."""
         from .model import Attrs, Run
 
         if not text:
             return []
-        return [FeedRow(self.p.mm_to_dots(1)), *self.text_block([Run(text)], line=line, attrs=Attrs({"center"}))]
+        return [FeedRow(self.p.mm_to_dots(1)), *self.text_block([Run(text)], line=line, attrs=Attrs({align}))]
 
     def _qr_code(self, f: Fence, resolved: bool = False) -> list:
         data = f.content if resolved else self.text(f.content.strip("\n"))
         ecc = f.attrs.kv.get("ecc", self.p.get("qr.default_ecc", "M")).upper()
         mod = int(f.attrs.kv.get("module", self.p.get("qr.default_module", 4)))
-        align = next((a for a in ("left", "right", "center") if f.attrs.has(a)), f.attrs.kv.get("align", "center"))
+        align = self.object_align(f.attrs)
         render = f.attrs.kv.get("render", "native" if self.p.get("qr.native") else "raster")
         if ecc == "L":
             self.n.add("Q102", "QR with ECC L", f.line, "use ecc=M")
@@ -964,14 +998,15 @@ class Layout:
                 "less data or ecc=L",
             )
             return []
-        if "size" in f.attrs.kv:
-            mod = self.fit_module(f.attrs.kv["size"], n, mod, 16 if render == "native" else 64, f.line)
+        target = self.object_width(f.attrs.kv.get("width"), f.line)
+        if target:
+            mod = self.fit_module(target, n, mod, 16 if render == "native" else 64)
             if mod < lo:
                 self.n.add(
                     "Q101",
-                    f"size={f.attrs.kv['size']} gives module {mod} in {render} mode",
+                    f"width={f.attrs.kv['width']} gives module {mod} in {render} mode",
                     f.line,
-                    f"a larger size or less data (module ≥ {lo})",
+                    f"a larger width or less data (module ≥ {lo})",
                 )
         while n * mod > self.W and mod > 1:
             mod -= 1
@@ -1015,9 +1050,9 @@ class Layout:
             self.n.add("Q108", f"module {mod}", f.line, f"use module={self.p.get('barcode.min_module', 2)}")
         height = int(f.attrs.kv.get("height", self.p.get("barcode.default_height", 80)))
         text = f.attrs.kv.get("text", "below")
-        align = next((a for a in ("left", "right", "center") if f.attrs.has(a)), f.attrs.kv.get("align", "center"))
+        align = self.object_align(f.attrs)
         orientation = f.attrs.kv.get("orientation", "auto")
-        stretch = f.attrs.kv.get("width") == "full" or f.attrs.has("justify")
+        target = self.object_width(f.attrs.kv.get("width"), f.line)
         pattern = None
         try:
             pattern, _ = codes.bars(kind, data, self.p.code39_wide())  # the firmware's GS k width
@@ -1031,8 +1066,8 @@ class Layout:
             self.n.add("Q109", f"{kind} '{data}': {e}", f.line)
             return []
         units = len(pattern) if pattern else 0
-        if units and stretch and orientation != "vertical":
-            mod = max(mod, min(6, self.W // units))  # GS w accepts 1..6
+        if units and target and orientation != "vertical":
+            mod = self.fit_module(target, units, mod, 6)  # GS w accepts 1..6
         too_wide = bool(units) and units * mod > self.W
         if orientation == "vertical" or (orientation == "auto" and too_wide):
             if not pattern:
@@ -1051,7 +1086,7 @@ class Layout:
                     )
                 else:
                     mod = lo_feed  # feed direction blurs more than the head direction
-            bar_len = self.W - 8 if stretch else height
+            bar_len = min(self.W, target) - 8 if target else height
             # drawn by bobina, not by the firmware: the readable 3:1 Code39, whatever the printer's GS k does
             im = codes.image(kind, data, mod, bar_len, text, self.em, wide=3).rotate(-90, expand=True)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
@@ -1083,20 +1118,20 @@ class Layout:
         mod = int(f.attrs.kv.get("module", default))
         if kind == "datamatrix" and mod < int(self.p.get("qr.min_module_raster", 4)):
             self.n.add("Q101", f"datamatrix module {mod} in raster", f.line, "use module=4")
-        align = next((a for a in ("left", "right", "center") if f.attrs.has(a)), f.attrs.kv.get("align", "center"))
-        if kind == "datamatrix" and "size" in f.attrs.kv:
-            try:
-                from ppf.datamatrix import DataMatrix
+        align = self.object_align(f.attrs)
+        target = self.object_width(f.attrs.kv.get("width"), f.line)
 
-                units = len(DataMatrix(data).matrix[0]) + 4
-                mod = self.fit_module(f.attrs.kv["size"], units, mod, 64, f.line)
-            except Exception:  # noqa: BLE001 - reported below by the encoder
-                pass
-        try:
+        def draw(m):
             if kind == "datamatrix":
-                im = imaging.datamatrix_image(data, mod)
-            else:
-                im = imaging.pdf417_image(data, mod, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)))
+                return imaging.datamatrix_image(data, m)
+            return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)))
+
+        try:
+            im = draw(mod)
+            if target:  # the largest integer module whose code fits the asked width
+                fitted = self.fit_module(target, max(1, im.width // mod), mod, 64)
+                if fitted != mod:
+                    mod, im = fitted, draw(fitted)
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -1190,7 +1225,7 @@ class Layout:
         keep = {k: v for k, v in f.attrs.kv.items() if k in pay.QR_ATTRS - {"caption", "scheme"}}
         rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
                              resolved=True)  # fmt: skip
-        return rows + self.caption_rows(caption, f.line) if rows else rows
+        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
 
     def contact(self, f: Fence) -> list:
         """A contact or profile QR code (```contact NETWORK, the value in the body): the link from contact.py, a QR
@@ -1243,24 +1278,12 @@ class Layout:
         keep = {k: v for k, v in f.attrs.kv.items() if k in contact.QR_ATTRS - {"caption"}}
         rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
                              resolved=True)  # fmt: skip
-        return rows + self.caption_rows(caption, f.line) if rows else rows
+        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
 
     def image_width(self, width, line: int) -> int:
-        """width= of an image: 50%, 30mm or 200 (dots, also 200px); the paper width when absent or unreadable."""
-        if not width:
-            return self.W
-        text = str(width).strip().lower().replace(",", ".")
-        try:
-            if text.endswith("%"):
-                w = int(self.W * float(text[:-1]) / 100)
-            elif text.endswith("mm"):
-                w = self.p.mm_to_dots(float(text[:-2]))
-            else:
-                w = int(float(text.removesuffix("px").removesuffix("dots")))
-            if w < 1:
-                raise ValueError
-        except ValueError:
-            self.n.add("M101", f"width={width}", line, "a percentage (50%), millimetres (30mm) or dots (200)")
+        """width= of an image (object_width: full, half, third, 50%, 30mm, dots); the paper width when absent."""
+        w = self.object_width(width, line)
+        if w is None:
             return self.W
         if w > self.W:
             self.n.add("I102", f"image width {w} reduced to {self.W}", line)
@@ -1271,6 +1294,7 @@ class Layout:
         if self.r is not None and self.r.tainted_in(src):
             raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
         src = self.text(src)
+        self.object_words(attrs, line)
         return self._image(src, attrs, line) + self.image_caption(attrs, alt, line)
 
     def image_caption(self, attrs, alt: str, line: int) -> list:
@@ -1287,7 +1311,7 @@ class Layout:
                 return []
         if text.lower() in NO_CAPTION:
             return []
-        return self.caption_rows(text, line)
+        return self.caption_rows(text, line, self.object_align(attrs))
 
     def _image(self, src: str, attrs, line: int) -> list:
         w = self.image_width(attrs.kv.get("width"), line)
@@ -1345,7 +1369,7 @@ class Layout:
             self.p.get("image.gamma_atkinson", 1.5) if kind == "atkinson" else self.p.get("image.gamma", 1.8)
         )
         gamma = float(attrs.kv.get("gamma", self.img.get("gamma", default_gamma)))
-        align = next((a for a in ("left", "right", "center") if attrs.has(a)), attrs.kv.get("align", "center"))
+        align = self.object_align(attrs)
         bw = imaging.photo(im, max(8, w), gamma, kind, level=level, flat=True)
         placed = imaging.place(bw, self.W, align)
         notes = tuple((n.code, n.message, n.suggestion) for n in list(self.n)[mark:] if n.code != "I104")
@@ -1435,6 +1459,9 @@ class Layout:
             widths[i] -= 1
         if not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
             widths[0] += cap - sum(widths)
+        free = cap - sum(widths)  # a .compact table is narrower than the paper: .center and .right place it
+        place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))
+        shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") else 0
         rows = []
 
         def emit(cells_text, bold):
@@ -1455,9 +1482,11 @@ class Layout:
                         else s.ljust(widths[i])
                     )
                     line += s + (" " if i < ncol - 1 else "")
-                cells = self.lead(indent) + [
-                    Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD
-                ]
+                cells = (
+                    self.lead(indent)
+                    + [Cell(" ")] * shift
+                    + [Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD]
+                )
                 reason = self.native_ok(cells)
                 rows.append(TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason))
 

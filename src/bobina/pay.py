@@ -18,7 +18,7 @@ from urllib.parse import quote
 from . import codes
 
 OLD_NAMES = {"key": "to", "txid": "ref", "description": "note"}  # the removed pix block's names, for the hint
-QR_ATTRS = {"size", "module", "ecc", "align", "render", "caption", "scheme", "id"}
+QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "scheme", "id"}
 MARK = "⚠ not tested in a payment app"
 
 
@@ -534,7 +534,7 @@ def help_scheme(name: str) -> str:
     rows = [("FIELD", f"IN {(s.title or 'THIS SCHEME').upper()}", "OFFICIAL NAME", "LIMIT")]
     rows += [(f"{k}=" + (" *" if k in s.required else ""), f.means, f.official, f.limit) for k, f in s.fields.items()]
     out += _table(rows, (9, 29, 15, 19))
-    out += ["", ("  * required. " if s.required else "  ") + "caption=auto|none|text and the QR's size= module= ecc= "
+    out += ["", ("  * required. " if s.required else "  ") + "caption=auto|none|text and the QR's width= module= ecc= "
             "work on every scheme."]  # fmt: skip
     out += [f"  {n}" for n in s.notes]
     out += ["  Over a limit or a wrong value: Q111 says what to change, and nothing is printed (never cut)."]

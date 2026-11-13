@@ -14,7 +14,7 @@ No brand logos.
 | Attribute | Means |
 |---|---|
 | `caption=` | `auto` (default: "WhatsApp +55 11 90000-0000"), `none`, or your own text |
-| `size=` `module=` `ecc=` `align=` | as on a ```` ```qr ```` block |
+| `width=` `module=` `ecc=` `.left` `.right` | as on a ```` ```qr ```` block |
 
 ## Messengers and calls
 

@@ -78,7 +78,7 @@ def line_art(im: Image.Image) -> bool:
     paper, ink = colors[0] if colors else None, colors[1:]
     total_ink = sum(n for n, _ in ink)
     if paper is None or not total_ink:
-        return False  # one colour: nothing drawn on it
+        return True  # one flat colour (a black square, a blank card): a drawing, not shading
     if sum(n for n, _ in ink[:3]) / total_ink < LINE_ART_INK:
         return False
 
@@ -107,10 +107,10 @@ def otsu(hist: list[int]) -> int:
 
 def threshold_level(im: Image.Image) -> int:
     """The level for a threshold chosen from the image ('L'): black below it. One grey level only: nothing to
-    split, so it stays paper (a flat grey square must not print solid black)."""
+    split, so the middle decides (a flat black square prints black, a flat light one stays paper)."""
     hist = im.histogram()[:256]
     if sum(1 for c in hist if c) < 2:
-        return 0
+        return 128
     return otsu(hist) + 1
 
 

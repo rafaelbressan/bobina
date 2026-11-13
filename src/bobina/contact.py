@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 MARK = "⚠ not tested in the app"
-QR_ATTRS = {"size", "module", "ecc", "align", "render", "caption", "id"}
+QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "id"}
 
 
 class ContactError(ValueError):
@@ -606,7 +606,7 @@ def help_network(name: str) -> str:
         out.append(f"  {k}=  {v}")
     if n.proprietary:
         out.append(f"  {n.proprietary}.")
-    out += [f"  link format: {n.source}", "  caption=auto|none|text and the QR's size= module= ecc= work on every "
+    out += [f"  link format: {n.source}", "  caption=auto|none|text and the QR's width= module= ecc= work on every "
             "network. A value bobina cannot turn into a link: Q112, the code is left out."]  # fmt: skip
     return "\n".join(out)
 
@@ -617,7 +617,7 @@ def help_text(name: str | None = None) -> str:
     out = ["```contact — contact and profile QR codes: the network after contact, the value in the body",
            "(docs/contact.md)", "", "  ```contact whatsapp", "  +55 11 90000-0000", "  ```", "",
            "  caption=auto (\"WhatsApp +55 11 90000-0000\"), none or your text",
-           "  size= module= ecc= as on a QR"]  # fmt: skip
+           "  width= module= ecc= as on a QR"]  # fmt: skip
     for g, title in GROUPS.items():
         out += ["", title.upper()]
         for n in NETWORKS.values():
@@ -642,7 +642,7 @@ def docs_page() -> str:
            "No brand logos.", "",
            "| Attribute | Means |", "|---|---|",
            "| `caption=` | `auto` (default: \"WhatsApp +55 11 90000-0000\"), `none`, or your own text |",
-           "| `size=` `module=` `ecc=` `align=` | as on a ```` ```qr ```` block |"]  # fmt: skip
+           "| `width=` `module=` `ecc=` `.left` `.right` | as on a ```` ```qr ```` block |"]  # fmt: skip
     for g, title in GROUPS.items():
         out += ["", f"## {title}"]
         for n in NETWORKS.values():

@@ -159,8 +159,8 @@ def test_barcode_stretches_with_integer_module():
     assert r.module == 384 // len(codes.bars("code128", "BOB-128")[0]) and r.module > 2
 
 
-def test_qr_size_full_uses_largest_integer_module():
-    r = [r for r in build("```qr {size=full}\nhttps://example.com/full\n```").rows if isinstance(r, QRRow)][0]
+def test_qr_width_full_uses_largest_integer_module():
+    r = [r for r in build("```qr {width=full}\nhttps://example.com/full\n```").rows if isinstance(r, QRRow)][0]
     from bobina import imaging
 
     n = len(imaging.qr_matrix("https://example.com/full", "M"))

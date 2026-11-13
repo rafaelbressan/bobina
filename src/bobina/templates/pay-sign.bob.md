@@ -12,7 +12,7 @@ labels:
 ---
 ## {{ label.pay }} {{ scheme | payname }} {.center}
 
-```pay {scheme="{{ scheme }}" to="{{ to }}" name="{{ name }}" amount="{{ amount }}" city="{{ city }}" size=full caption=none}
+```pay {scheme="{{ scheme }}" to="{{ to }}" name="{{ name }}" amount="{{ amount }}" city="{{ city }}" width=full caption=none}
 ```
 
 **{{ name }}** {.center}

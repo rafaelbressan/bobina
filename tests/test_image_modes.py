@@ -41,12 +41,25 @@ def test_line_art_tells_a_logo_from_a_photo(tmp_path):
     assert not imaging.line_art(fog)  # flat but no ink against paper: a foggy photo, dithered
 
 
-def test_the_cut_falls_between_ink_and_paper_and_a_flat_image_stays_paper():
+def test_the_cut_falls_between_ink_and_paper_and_a_flat_colour_is_cut_in_the_middle():
     im = Image.new("L", (10, 10), 240)
     ImageDraw.Draw(im).rectangle((0, 0, 4, 9), fill=200)
     assert 200 < imaging.threshold_level(im) <= 240
-    flat = Image.new("L", (10, 10), 100)
-    assert imaging.photo(flat, 10, 1.0, "threshold").convert("L").getextrema() == (255, 255)  # not solid black
+    dark, light = Image.new("L", (10, 10), 100), Image.new("L", (10, 10), 200)
+    assert imaging.photo(dark, 10, 1.0, "threshold").convert("L").getextrema() == (0, 0)  # a dark flat colour: ink
+    assert imaging.photo(light, 10, 1.0, "threshold").convert("L").getextrema() == (255, 255)  # a light one: paper
+
+
+def test_a_solid_black_image_is_a_drawing_and_prints_black(tmp_path):
+    Image.new("RGB", (100, 60), (0, 0, 0)).save(tmp_path / "black.png")
+    assert imaging.line_art(Image.open(tmp_path / "black.png"))
+    res = build("![](black.png)\n", base_dir=str(tmp_path))
+    (note,) = [n for n in res.nudges if n.code == "I109"]
+    assert "drawing" in note.message
+    row = next(r for r in res.rows if getattr(r, "kind", "") == "image")
+    assert row.image.convert("L").getextrema()[0] == 0 and row.image.convert("L").crop(
+        row.image.convert("L").point(lambda v: 255 - v).getbbox()
+    ).getextrema() == (0, 0)  # solid black where the image is
 
 
 def shoe(path, size=(400, 300)):

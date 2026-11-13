@@ -43,7 +43,7 @@ TEXT
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
 
 OBJECTS (fenced blocks)
-  ```qr {module=4 ecc=M size=full|half|30mm caption="Menu"}
+  ```qr {module=4 ecc=M width=full|half|30mm caption="Menu" .left|.right}
   ```barcode {type=code128|ean13|… width=full orientation=auto|vertical}
   ```datamatrix {module=4}      ```pdf417 {module=2 columns=4}
   ```pay {scheme=pix|upi|epc|… to=… amount=10.00}  (bobina help pay)      ```text {rotate=90}

@@ -65,7 +65,7 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | CODABAR, CODE93, CODE128 | ✅ | module ≥ 2 | native |
 | ITF | ⚠️ | detected but not read | nudge |
 | Module 1 | ❌ | too thin | **minimum 2** |
-| QR (module 3–16, ECC M/H) | ✅ | read | default **module 4, ECC M**; `size=full` = largest integer module |
+| QR (module 3–16, ECC M/H) | ✅ | read | default **module 4, ECC M**; `width=full` = largest integer module |
 | QR ECC L | ⚠️ | read with difficulty | only on request |
 | PDF417 (`GS ( k` cn 48) | ❌ | prints the bytes as text | 🖼️ raster works |
 | Data Matrix | — | raster module 4+ read | 🖼️ |

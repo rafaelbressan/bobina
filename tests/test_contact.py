@@ -164,7 +164,7 @@ def test_an_unknown_attribute_names_the_ones_the_network_takes():
     res = build('```contact instagram {text="hi"}\nana\n```\n')
     m = [n for n in res.nudges if n.code == "M101"]
     assert m and "does not use 'text='" in m[0].message and "caption" in m[0].suggestion
-    assert qr("```contact instagram {size=half module=6}\nana\n```\n") == ["https://www.instagram.com/ana/"]
+    assert qr("```contact instagram {width=half module=6}\nana\n```\n") == ["https://www.instagram.com/ana/"]
 
 
 def test_only_the_first_line_is_a_value():
