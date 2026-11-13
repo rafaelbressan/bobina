@@ -144,8 +144,8 @@ A print of several labels stops after each one, so you can tear it off:
  [Enter] next (4/10 · Honey)   [a] all 7 left   [r] again   [s] skip   [q] stop
 ```
 
-`r` reprints the last (same number), `q` says how to print the rest (`--rows 4-10`); unprinted labels give
-their numbers back. Only at a terminal with a real printer: not with `-o`, a file printer, agents or `--yes`
+`r` reprints the last, `q` says how to print the rest (`--rows 4-10`); unprinted labels give their numbers
+back. Only at a terminal with a real printer: not with `-o`, a file printer, agents or `--yes`
 (unless `--step` is written). `--compact` prints at once (`P105`). `--no-step`: this print at once; `--step 3`:
 stop every 3; `bobina config set step off`: always at once.
 
