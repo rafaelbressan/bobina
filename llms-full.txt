@@ -554,7 +554,15 @@ bobina history --outcome failed --since 2026-11-01
 bobina history show last                    # or an id, or the start of one
 bobina history stats                        # jobs by outcome, labels, paper per week, frequent problems
 bobina history --json · bobina history clear --yes
+bobina history export --format csv --since 7d -o jobs.csv   # jsonl (default) or csv, all matching jobs
 ```
+
+**For log and audit systems.** `history export` writes the stored lines (JSONL) or CSV with fixed columns, oldest
+first: `id, time, command, outcome, exit, duration_s, printer, profile, labels, labels_printed, length_mm, cuts,
+tears, saved_to, files, problems, argv` (new columns only ever go at the end). `--log FILE` on any command (or
+`log_file` in config.toml) appends that run's problems as JSON lines (schema `bobina.log/1`: time, job id,
+command, exit, code, severity, message, line, source), also with `-q`; masked like the history, and a log that
+cannot be written is a note, never an error.
 
 Private by default: the text of labels is not kept; on the stored command line, inline text becomes `text`,
 `--set`/`--set-all`/`--where` keep only the key (`KEY=***`, they can be a Pix key or a phone number) and option

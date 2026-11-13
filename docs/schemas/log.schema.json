@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bobina.log/1",
+  "title": "One line of the problem log (--log FILE, or log_file in config.toml): one problem of one run",
+  "type": "object",
+  "required": [
+    "schema",
+    "time",
+    "job",
+    "command",
+    "exit",
+    "code",
+    "severity",
+    "message"
+  ],
+  "properties": {
+    "schema": {
+      "const": "bobina.log/1"
+    },
+    "time": {
+      "type": "string",
+      "description": "when the run started (ISO 8601, local time)"
+    },
+    "job": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "the id in bobina history, when the run recorded a job"
+    },
+    "command": {
+      "type": "string"
+    },
+    "exit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "the exit code of the run"
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Z][0-9]{3}$"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warning",
+        "note"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "masked like the history: values given to the job, long digit runs and e-mails become ***"
+    },
+    "line": {
+      "type": "integer"
+    },
+    "source": {
+      "type": "string"
+    },
+    "part": {
+      "type": "integer"
+    },
+    "file": {
+      "type": "string"
+    }
+  }
+}

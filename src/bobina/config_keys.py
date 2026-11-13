@@ -126,6 +126,8 @@ KEYS: dict[str, Key] = {
         Key("keep_last", "bool", True, "keep the last print for print --last and --again"),
         Key("history", "bool", True, "record each print in bobina history"),
         Key("history_max", "int", 5000, "jobs kept in the history", minimum=1, example="2000", advanced=True),
+        Key("log_file", "text", None, "append the problems of every run to this file as JSON lines (as --log FILE;"
+            " a relative path is beside config.toml)", default_text="none", example="~/bobina-problems.jsonl"),
         Key("font_downloads", "bool", True, "download the font of another script on first use", example="off"),
         Key("update_check", "bool", True, "once a day, say at the end of a command when a newer bobina exists",
             example="off"),
