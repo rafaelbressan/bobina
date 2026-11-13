@@ -518,21 +518,7 @@ Short flags are allowed only for the most common options (`-o` output, `-q`, `-n
 
 Configuration precedence: **flag > document front matter > `~/.config/bobina/config.toml` > profile > built-in default**.
 
-## Help layout
-
-`bobina COMMAND --help` has the same parts for every command: usage, positional arguments, the command's
-options, global options (`-n/--dry-run`, `-y/--yes`, `--editor` only on commands that print), EXAMPLES.
-
-A wrong option shows the usage of that command, not of bobina, and one hint:
-
-| Typed | Hint |
-|---|---|
-| `print --copies-form 2` | did you mean --copies-from? |
-| `print --planilha x.xlsx` (a synonym, also Portuguese) | did you mean --data? |
-| `check --output x` | --output belongs to bobina print or bobina preview, not bobina check |
-| `preview --yes` (also `-n`, `--editor`) | not an error: runs, with `note: --yes does nothing in bobina preview: it never prints` |
-
-A new command or option goes through the checklist in CONTRIBUTING.md; a test fails until it does.
+<!-- 'Help layout' left out here: see docs/CLI.md -->
 
 ## Lists
 
@@ -663,16 +649,7 @@ Agents and the files written for them: [agents.md](docs/agents.md); the MCP serv
 - State (counters, drafts, last print): `~/.local/state/bobina/`.
 - Downloaded fonts for other scripts: `~/.local/share/bobina/fonts/` (`BOBINA_DATA_DIR`); `bobina config set font_downloads off` (or `BOBINA_FONT_DOWNLOADS=0`) turns automatic downloads off.
 
-## Decided
-
-- English everywhere.
-- Inline text and stdin are implicit `.bob.md` documents; `--plain` opts out.
-- Full names are canonical; aliases are typing shortcuts only.
-- Confirmation before every print; `--yes` to skip; exit 7 without a terminal.
-- `edit` without a file = draft in the state folder; editor resolution as above.
-- `print --last` reopens the confirmation; `--copies` identical vs `--repeat` new values.
-- Printer address in config (`printer scan/add`), never in code.
-- Profile `feed_after` so the last line clears the tear bar.
+<!-- 'Decided' left out here: see docs/CLI.md -->
 
 ## Implementation notes
 
@@ -1105,12 +1082,7 @@ labels:
   or the printer's measured `tear_mm` + 6 mm; `tear_margin_mm` in the printer's config.toml changes the 6 mm).
 - Errors stop a print only for parsing (`DOC`) and security (`M31x`); everything else is a nudge.
 
-## 10. Conformance
-
-`spec/conformance/` holds tickets — the printed test series rewritten as `.bob.md` — with their expected bitmaps
-for profile `mtp-ii-58` (`BOBINA_NOW=2026-11-05T09:49:00`). An implementation conforms to `bob/1` when it renders
-every ticket to the same bitmap. Printing one and running `bobina calibrate compare PHOTO TICKET` measures how close
-a printer's paper is to the preview.
+<!-- '10. Conformance' left out here: see docs/FORMAT.md -->
 
 ## Appendix A — nudge codes
 
@@ -1239,14 +1211,7 @@ Nudges:
 | `M314` | error | variables cannot be used inside raw blocks |
 | `M315` | error | template path outside the allowed folders |
 
-## Appendix B — changes
-
-- **v0.4** (2026-11-06): consolidated; every feature marked implemented or planned; `render=` on text blocks;
-  `tracking=`, `indent=` and `leading=` in both the printer font and raster fonts; `M103` reserved for planned
-  attributes; code sizes, vertical barcodes, Data Matrix, PDF417, Pix details; nudge table.
-- **v0.3** (2026-11-05): implementation notes (line breaks, comments, attribute lines, tables, tasks, rotation).
-- **v0.2** (2026-11-05): fonts, sizes, Jinja + CLDR, counters, data-literal safety, templates.
-- **v0.1** (2026-11-04): first draft.
+<!-- 'Appendix B — changes' left out here: see docs/FORMAT.md -->
 
 
 <!-- file: docs/guides/batch-printing.md -->
@@ -1619,21 +1584,9 @@ the printer's command language on models that support it (`bobina mode esc` rest
   It can contain personal data (Pix keys, names). `bobina config set keep_last off` disables it.
 - Drafts live in `~/.local/state/bobina/drafts/`.
 
-## Requirements before a print server or chat bot exists
+<!-- 'Requirements before a print server or chat bot exists' left out here: see docs/SECURITY.md -->
 
-A server turns "document author" into "anyone who can reach it", and returns previews to them:
-
-1. Treat every submitted document as **data**, not author: no local paths at all (images only as
-   uploads or `data:` URIs), no `template:` paths, no `raw`, no `fonts:` outside the bundled set.
-2. Previews returned to a client must come only from submitted content (no file reads) —
-   otherwise the preview is an exfiltration channel.
-3. Authentication on the tailnet, per-client paper/rate limits, and an audit log.
-4. Keep `--yes` server-side only after an explicit human confirmation step (e.g. a chat button).
-
-## Open
-
-- Full multi-agent audit with the skill (`standard` profile): needs an OS-level sandbox; waits for a go.
-- Red team round 2 when the server exists (requirements above).
+<!-- 'Open' left out here: see docs/SECURITY.md -->
 
 
 <!-- file: docs/INSTALL.md -->
