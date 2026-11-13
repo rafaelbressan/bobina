@@ -282,30 +282,41 @@ def _choose(args, ui) -> tuple[str, str | None]:
 MAX_LIMIT_MM = 1000.0  # more paper than this for one answer is not a chat any more
 
 
+def _parse_limit(raw, where_: str) -> float:
+    from .. import paper
+
+    text = str(raw).strip()
+    if text.startswith("-") or re.fullmatch(r"[0.,\s]+", text):
+        raise Fail(USAGE, f"{where_}: a length is more than 0 (10cm)", problem="E304")
+    if re.fullmatch(r"[\d.,\s/-]+", text):  # nudges, not blocks: centimetres, said
+        err(f"note: {where_}: read as {text}cm; give a unit to be sure (10cm, 100mm, 4in)")
+        text += "cm"
+    try:
+        mm = paper.parse_length(text, None)
+    except ValueError as e:
+        raise Fail(USAGE, f"{where_}: {e}", problem="E304") from None
+    if mm < 15:
+        raise Fail(USAGE, f"{where_}: an answer needs at least 1.5cm of paper", problem="E304")
+    if mm > MAX_LIMIT_MM:
+        err(f"note: {where_} is more than 1 m of paper per answer: capped at 1m")
+        mm = MAX_LIMIT_MM
+    return mm
+
+
 def _limit(args, cfg, roll_left: float | None) -> float:
     """--limit (or chat_limit): a length with its unit, from 1.5 cm to 1 m. Too much is capped, with a note."""
-    from .. import paper
 
     raw = args.limit if args.limit is not None else cfg.get("chat_limit")
     if raw is None:
         mm = DEFAULT_LIMIT_MM
-    else:
-        where_ = f"--limit {raw}" if args.limit is not None else f"chat_limit = {raw!r} in config.toml"
-        text = str(raw).strip()
-        if text.startswith("-") or re.fullmatch(r"[0.,\s]+", text):
-            raise Fail(USAGE, f"{where_}: a length is more than 0 (10cm)", problem="E304")
-        if re.fullmatch(r"[\d.,\s/-]+", text):  # nudges, not blocks: centimetres, said
-            err(f"note: {where_}: read as {text}cm; give a unit to be sure (10cm, 100mm, 4in)")
-            text += "cm"
+    elif args.limit is None:  # a bad value in config.toml never stops the chat: said once, the default used
         try:
-            mm = paper.parse_length(text, None)
-        except ValueError as e:
-            raise Fail(USAGE, f"{where_}: {e}", problem="E304") from None
-        if mm < 15:
-            raise Fail(USAGE, f"{where_}: an answer needs at least 1.5cm of paper", problem="E304")
-        if mm > MAX_LIMIT_MM:
-            err(f"note: {where_} is more than 1 m of paper per answer: capped at 1m")
-            mm = MAX_LIMIT_MM
+            mm = _parse_limit(raw, f"chat_limit = {raw!r} in config.toml")
+        except Fail as e:
+            err(f"note: {e.args[0]}: {DEFAULT_LIMIT_MM / 10:g}cm used (bobina config set chat_limit 10cm)")
+            mm = DEFAULT_LIMIT_MM
+    else:
+        mm = _parse_limit(raw, f"--limit {raw}")
     if roll_left is not None and mm > roll_left:
         err(f"note: the roll has ~{roll_left / 10:.0f} cm left, less than one answer may take: answers print until"
             " it runs out (bobina paper new LENGTH after loading a new roll)")  # fmt: skip

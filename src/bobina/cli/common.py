@@ -1124,6 +1124,18 @@ def noninteractive() -> bool:
     return os.environ.get("BOBINA_NONINTERACTIVE", "").strip().lower() not in ("", "0", "false", "no")
 
 
+def open_editor(path, flag, cfg: dict) -> int:
+    """The editor on PATH (--editor, editor in config.toml, $VISUAL, $EDITOR, nano). One that is not installed is a
+    clear stop with what to do, never a crash."""
+
+    try:
+        return editor.open_file(path, flag, cfg)
+    except OSError as e:
+        cmd = " ".join(editor.resolve(flag, cfg))
+        raise Fail(USAGE, f"cannot open the editor '{cmd}': {e.strerror or e}\n→ --editor COMMAND, bobina config "
+                   f"set editor COMMAND, or $VISUAL / $EDITOR; the file: {path}", problem="E101") from None  # fmt: skip
+
+
 def open_tty():
     """The user's terminal, even when stdin/stdout are pipes. A tty is not seekable, so it cannot be opened
     with the buffered "r+" mode (that always failed on real terminals): raw read/write + a text wrapper."""

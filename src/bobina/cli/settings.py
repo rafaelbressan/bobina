@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import tomllib
 
-from .. import config, config_keys, editor, fileio, locales
+from .. import config, config_keys, fileio, locales
 from ..config_keys import KEYS, SCHEMA, KeyError_, entry, shown
-from .common import OK, USAGE, Fail, err, print_json, render_problems
+from .common import OK, USAGE, Fail, err, open_editor, print_json, render_problems
 
 
 def _examples(loc) -> dict:
@@ -175,12 +175,7 @@ def config_edit(args) -> int:
         cfg = config.load()
     except fileio.StateError:  # the file is broken: that is why it is being edited
         cfg = {}
-    try:  # config never prints, so it takes no --editor: config editor, $VISUAL, $EDITOR, nano
-        code = editor.open_file(p, None, cfg)
-    except OSError as e:  # the editor named by config, $VISUAL or $EDITOR is not installed
-        cmd = " ".join(editor.resolve(None, cfg))
-        raise Fail(USAGE, f"cannot open the editor '{cmd}': {e.strerror or e}\n→ bobina config set editor COMMAND "
-                   f"(or set $VISUAL / $EDITOR); the file: {p}", problem="E101") from None  # fmt: skip
+    code = open_editor(p, None, cfg)  # config never prints, so it takes no --editor
     if code:
         err(f"note: the editor exited with {code}")
     text = p.read_text(encoding="utf-8")

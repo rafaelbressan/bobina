@@ -1130,3 +1130,13 @@ def test_style_switches_the_paper_style_inside_the_chat():
     assert ui.notes[-1] == "already printing with: your message in a framed bubble (labels-outline)"
     s.handle("/style labels-outline")  # the old name is gone (nobody used it): an unknown command
     assert ui.notes[-1].startswith("unknown command /style")
+
+
+def test_a_bad_chat_limit_in_config_never_stops_the_chat(capsys):
+    from bobina.cli import chat as cli_chat
+
+    args = type("A", (), {"limit": None})()
+    assert cli_chat._limit(args, {"chat_limit": "-3"}, None) == cli_chat.DEFAULT_LIMIT_MM
+    assert "chat_limit = '-3' in config.toml" in capsys.readouterr().err
+    with pytest.raises(cli_chat.Fail):  # typed on the command line: an error, as before
+        cli_chat._limit(type("A", (), {"limit": "-3"})(), {}, None)

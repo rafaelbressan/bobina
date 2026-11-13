@@ -267,3 +267,11 @@ def test_printer_keys_point_at_printer_show_and_share_the_json_rows(capsys):
     assert {"problem", "default_shown", "choices", "accepts"} <= set(row)
     assert run("printer", "set", "loja", "tear_margin_mm", "3") == cli.OK
     assert "until then loja feeds the profile's distance" in capsys.readouterr().err
+
+
+def test_print_edit_names_a_missing_editor_instead_of_crashing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("VISUAL", "no-such-editor-xyz")
+    monkeypatch.delenv("EDITOR", raising=False)
+    (tmp_path / "d.bob.md").write_text("hi\n")
+    assert cli.main(["edit", str(tmp_path / "d.bob.md")]) == cli.USAGE
+    assert "cannot open the editor 'no-such-editor-xyz'" in capsys.readouterr().err

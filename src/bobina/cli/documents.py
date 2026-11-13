@@ -175,7 +175,7 @@ def _print_job(args, rec, res, base, origin):
 
         def rebuild():
             # the whole job again, the same way (load_job: --compact, joins, export names); --ask answers kept
-            editor.open_file(origin, args.editor, config.load())
+            common.open_editor(origin, args.editor, config.load())
             job, *_ = load_job(args)
             return job
 
@@ -614,7 +614,7 @@ def cmd_edit(args):
     else:
         path = state.new_draft((starter(args.template) if args.template else "") + editor.RULER + "\n")
     while True:
-        editor.open_file(path, args.editor, cfg)
+        common.open_editor(path, args.editor, cfg)
         src = path.read_text(encoding="utf-8")
         body = src.replace(editor.RULER, "").strip()
         if not body:
@@ -624,7 +624,7 @@ def cmd_edit(args):
         res = build(args, src, str(path.resolve().parent))
 
         def rebuild():
-            editor.open_file(path, args.editor, cfg)
+            common.open_editor(path, args.editor, cfg)
             return build(args, path.read_text(encoding="utf-8"), str(path.resolve().parent))
 
         # --strict stops before the screen, as print does; --yes has no screen to show the warnings on
