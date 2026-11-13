@@ -246,5 +246,7 @@ class Check:
         if self.thread.is_alive() or not newer(self.latest):
             return ""
         how = detect(self.latest)
+        if how.kind == "dev":  # an editable checkout: its developer pulls, a release notice would only be noise
+            return ""
         how_to = how.shown if how.command else "bobina update"  # a .deb or a source: bobina update says the steps
         return f"bobina {self.latest} is available (you have {__version__}): {how_to}"

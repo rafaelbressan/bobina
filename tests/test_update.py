@@ -195,3 +195,9 @@ def test_no_network_is_silent_and_waits_a_day(version, terminal, capsys):
     assert cli.main(["config", "get", "marks"]) == cli.OK
     assert "available" not in capsys.readouterr().err and "E701" not in capsys.readouterr().err
     assert json.loads(update._state().read_text())["latest"] is None
+
+
+def test_an_editable_checkout_gets_no_notice(pypi, version, terminal, monkeypatch, capsys):
+    monkeypatch.setattr(update, "detect", lambda latest=None: update.Install("dev", "an editable checkout"))
+    assert cli.main(["config", "get", "marks"]) == cli.OK
+    assert "is available" not in capsys.readouterr().err
