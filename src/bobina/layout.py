@@ -29,6 +29,7 @@ QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_PAD = "\ufdd0"  # a noncharacter: the second column of an icon in a table grid, never printed
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
+TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
@@ -692,12 +693,7 @@ class Layout:
         """Continuous inverted band (GS B leaves spaces white, so it goes raster)."""
         m = int(self.p.get("raster.invert_margin_dots", 4))
         imgs = [self.em.render_row(r, self.W).convert("L") for r in rows]
-        h = sum(i.height for i in imgs) + 2 * m
-        out = Image.new("L", (self.W, h), 255)
-        y = m
-        for i in imgs:
-            out.paste(i, (0, y))
-            y += i.height
+        out = imaging.vstack(imgs, self.W, "L", margin=m)
         return BitmapRow(ImageOps.invert(out).convert("1", dither=Image.NONE), line, "band", rows)
 
     # ------------------------------------------------------------ blocks
@@ -759,12 +755,7 @@ class Layout:
         from . import preview
 
         parts = [im.convert("L") for im in (preview.row_image(r, self.p, self.em) for r in rows) if im is not None]
-        out = Image.new("L", (self.W, max(1, sum(p.height for p in parts))), 255)
-        y = 0
-        for p in parts:
-            out.paste(p, (0, y))
-            y += p.height
-        return out
+        return imaging.vstack(parts, self.W, "L")
 
     def rotate(self, rows, ang: float, attrs, line: int) -> BitmapRow:
         im = self.compose(rows)
@@ -1458,8 +1449,9 @@ class Layout:
         return default, None
 
     def table(self, t: Table, indent: int) -> list:
-        """Monospace grid: columns line up exactly in the native font. orientation=vertical (or auto, the default,
-        when the columns cannot keep TABLE_MIN characters each) turns it along the paper (table_turned)."""
+        """Monospace grid: columns line up exactly in the native font. orientation=vertical turns it along the
+        paper (table_turned); auto (the default) does so only at the top level, when the columns cannot keep
+        TABLE_MIN characters each and the turned print is not much longer than the standing one."""
 
         def txt(runs):  # a wide character (icon, CJK) takes two columns: a pad after it keeps the grid (not drawn)
             s = "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
@@ -1474,9 +1466,40 @@ class Layout:
         if orientation not in ("auto", "horizontal", "vertical"):
             self.n.add("M101", f"orientation={orientation}", t.line, "auto, horizontal or vertical")
             orientation = "auto"
-        cramped = sum(min(w, TABLE_MIN) for w in natural) > cap
-        if orientation == "vertical" or (orientation == "auto" and cramped):
-            return self.table_turned(t, head, body, natural, auto=orientation == "auto")
+        if indent and orientation == "vertical":  # a quote's bar or a list's indent cannot follow a turned table
+            self.n.add("M101", "orientation=vertical: only a table outside quotes and lists turns", t.line,
+                       "move the table out of the quote or list")  # fmt: skip
+        if orientation == "vertical" and not indent:
+            return self.table_turned(t, head, body, natural)
+        standing = self.table_standing(t, head, body, natural, indent, cap)
+        if orientation == "auto" and not indent and sum(min(w, TABLE_MIN) for w in natural) > cap:
+            turned = self.table_turned(t, head, body, natural, quiet=True)
+            along = self.rows_height(turned)
+            # never metres of paper where a few wrapped lines do: up to twice the standing length, or TURN_FREE_MM;
+            # but columns of fewer than TABLE_MIN / 2 characters on average cannot be read standing: always turned
+            if cap < ncol * TABLE_MIN / 2 or along <= max(
+                2 * self.rows_height(standing), self.p.mm_to_dots(TURN_FREE_MM)
+            ):
+                self.n.add(
+                    "L106",
+                    f"a table of {ncol} columns does not fit across the paper: it prints VERTICALLY, about "
+                    f"{along / (self.p.dpi / 25.4):.0f} mm along the paper",
+                    t.line,
+                    "read it with the header on the right; orientation=vertical silences this, "
+                    "orientation=horizontal keeps it standing (narrow wrapped columns)",
+                )
+                return turned
+        if "width" in t.attrs.kv:
+            self.n.add("M101", f"width={t.attrs.kv['width']}: a standing table always fills its width", t.line,
+                       "width= places a turned table (orientation=vertical); .compact keeps one narrow")  # fmt: skip
+        return standing
+
+    def rows_height(self, rows: list) -> int:
+        from . import preview
+
+        return preview.heights(rows, self.p, self.em)
+
+    def table_standing(self, t, head, body, natural, indent: int, cap: int) -> list:
         widths = list(natural)
         while sum(widths) > cap and max(widths) > 2:  # 2: a wide character always fits its column
             i = widths.index(max(widths))
@@ -1511,55 +1534,46 @@ class Layout:
                 s = wrapped[i][k] if k < len(wrapped[i]) else ""
                 al = t.aligns[i] if i < len(t.aligns) else "left"
                 fit = {"right": s.rjust, "center": s.center}.get(al, s.ljust)
-                s = fit(widths[i])
-                line += s + (" " if i < ncol - 1 else "")
+                line += fit(widths[i]) + (" " if i < ncol - 1 else "")
             out.append([Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD])
         return out
 
-    def table_turned(self, t: Table, head: list[str], body: list[list[str]], natural: list[int], auto: bool) -> list:
-        """The table drawn as an image and turned 90° clockwise, like a book's spine: the header on the right, the
-        text read from top to bottom, the paper's length as the table's width. Cells never wrap (the length is
-        free); when the rows do not fit across the paper they go on in more turned blocks, the header repeated."""
-        avail = self.object_width(t.attrs.kv.get("width"), t.line) or self.W
-        avail = min(avail, self.W)
+    def table_turned(self, t: Table, head: list[str], body: list[list[str]], natural: list[int], quiet=False) -> list:
+        """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
+        right, the text read from top to bottom, the paper's length as the table's width. Cells never wrap (the
+        length is free); when the rows do not fit across the paper they go on in more turned blocks, the header
+        repeated. The rows are kept as text for the terminal views."""
         align = self.object_align(t.attrs)
         widths = [max(1, w) for w in natural]
-        cols = sum(widths) + len(widths) - 1
-        width = cols * self.em.cw
+        width = (sum(widths) + len(widths) - 1) * self.em.cw
 
         def lines(cells_text, bold):
             return [TextRow(c, (1, 1), "left", t.line) for c in self.table_lines(t, cells_text, widths, bold)]
 
         head_rows = lines(head, True)
-        rule = imaging.divider(width, "solid", 2, pad=3)
-        row_h = self.em.row_height(head_rows[0]) if head_rows else self.em.ch
-        per_block = max(1, (avail - row_h * len(head_rows) - rule.height) // row_h)
+        top = [self.em.render_row(r, width) for r in head_rows] + [imaging.divider(width, "solid", 2, pad=3)]
+        top_h = sum(p.height for p in top)
+        row_h = self.em.row_height(head_rows[0])
+        avail = min(self.object_width(t.attrs.kv.get("width"), t.line) or self.W, self.W)
+        if avail < top_h + row_h:  # not even the header and one row across: the paper's width instead
+            if not quiet:
+                self.n.add("M101", f"width={t.attrs.kv.get('width')}: too narrow for a turned table", t.line,
+                           "the paper's width is used")  # fmt: skip
+            avail = self.W
+        per_block = max(1, (avail - top_h) // row_h)
         chunks = [body[i : i + per_block] for i in range(0, len(body), per_block)] or [[]]
         out = []
         for n, chunk in enumerate(chunks):
-            parts = [self.em.render_row(r, width) for r in head_rows] + [rule]
-            parts += [self.em.render_row(r, width) for row in chunk for r in lines(row, False)]
-            im = Image.new("1", (width, sum(p.height for p in parts)), 1)
-            y = 0
-            for part in parts:
-                im.paste(part, (0, y))
-                y += part.height
+            rows = [r for row in chunk for r in lines(row, False)]
+            im = imaging.vstack(top + [self.em.render_row(r, width) for r in rows], width)
             turned = im.rotate(-90, expand=True)  # clockwise: the header (the top) goes to the right
-            if turned.width > avail:  # one row taller than the paper is wide: never past the paper's edge
-                turned = turned.crop((turned.width - avail, 0, turned.width, turned.height))
+            if turned.width > self.W:  # wider than the paper even so (a huge font): never past its edge
+                self.n.add("L104", f"turned table is {turned.width} dots across: cropped to {self.W}", t.line,
+                           "fewer rows per table, or orientation=horizontal")  # fmt: skip
+                turned = turned.crop((turned.width - self.W, 0, turned.width, turned.height))
             if n:
                 out.append(FeedRow(int(self.p.get("native.line_gap_dots", 6)) * 4))
-            out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table"))
-        if auto:
-            length = sum(r.image.height for r in out if isinstance(r, BitmapRow)) / (self.p.dpi / 25.4)
-            self.n.add(
-                "L106",
-                f"a table of {len(head)} columns does not fit across the paper: it prints VERTICALLY, "
-                f"about {length:.0f} mm along the paper" + (f", in {len(chunks)} blocks" if len(chunks) > 1 else ""),
-                t.line,
-                "read it with the header on the right; orientation=vertical silences this, orientation=horizontal "
-                "keeps it standing (narrow wrapped columns)",
-            )
+            out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table", head_rows + rows))
         return out
 
 

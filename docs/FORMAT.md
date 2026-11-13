@@ -502,7 +502,7 @@ Nudges:
 | `L103` | warning | preformatted line longer than the paper was wrapped |
 | `L104` | warning | rotated block wider than the paper was cropped |
 | `L105` | warning | nothing printable: every block was skipped |
-| `L106` | warning | table turned vertical |
+| `L106` | note | table turned vertical |
 | `I101` | warning | image not found, unreadable or in an unsupported format (the hint lists the formats) |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped: fetching shows the server when you print, and a shared document could reach your local network; add `--allow-net` if you trust it |

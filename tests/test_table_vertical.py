@@ -42,17 +42,66 @@ def test_a_narrow_table_stays_standing(profile):
     assert any(isinstance(r, TextRow) for r in res.rows)
 
 
-@pytest.mark.parametrize("profile", PROFILES)
-@pytest.mark.parametrize("ncol", [8, 12])
-def test_a_cramped_table_turns_by_itself_and_says_so(profile, ncol):
-    if profile == "epson-tm-t20iii" and ncol == 8:  # 48 columns: 8 columns of 4 characters still fit standing
-        res = build(table(ncol), profile_name=profile)
-        assert not turned(res)
-        return
+@pytest.mark.parametrize(
+    "profile,ncol,turns",
+    [
+        ("mtp-ii-58", 8, True),  # 32 columns: about 3 characters each
+        ("mtp-ii-58", 12, True),
+        ("epson-tm-t20iii", 8, False),  # 48 columns: 8 columns of 4 characters fit standing
+        ("epson-tm-t20iii", 12, False),  # about 3 characters each, and turned it is longer: stays (wrapped)
+        ("epson-tm-t20iii", 16, True),  # 2 characters each: unreadable standing
+    ],
+)
+def test_a_cramped_table_turns_by_itself_and_says_so(profile, ncol, turns):
     res = build(table(ncol), profile_name=profile)
-    assert turned(res) and "L106" in codes(res)
-    note = next(n for n in res.nudges if n.code == "L106")
-    assert f"{ncol} columns" in note.message and "VERTICALLY" in note.message
+    assert bool(turned(res)) is turns and ("L106" in codes(res)) is turns
+    if turns:
+        note = next(n for n in res.nudges if n.code == "L106")
+        assert f"{ncol} columns" in note.message and "VERTICALLY" in note.message
+        assert note.severity == "note"  # never stops a --strict job
+
+
+def test_auto_never_spends_metres_where_wrapped_lines_do():
+    """7 short columns and one very long cell in 60 rows: cramped, but turned every block would be as long as
+    that cell (6 blocks of ~30 cm) where standing only that one row wraps."""
+    long = "a long remark about this one item " * 6
+
+    def cell(r, c):
+        return long if (r, c) == (0, 6) else f"it{r:02}{c}"
+
+    res = build(table(7, nrow=60, cell=cell))
+    assert not turned(res) and "L106" not in codes(res)
+
+
+def test_tables_inside_quotes_and_lists_stay_standing():
+    quoted = build("> | " + " | ".join(f"Column{i}" for i in range(10)) + " |\n> |" + "---|" * 10 + "\n")
+    assert not turned(quoted) and "L106" not in codes(quoted)
+    asked = build("> | a | b |\n> |---|---|\n> | 1 | 2 |\n>\n> {orientation=vertical}\n")
+    assert not turned(asked)
+
+
+def test_width_on_a_standing_table_says_it_does_nothing():
+    res = build(table(3, attrs="width=half"))
+    assert "M101" in codes(res) and not turned(res)
+
+
+def test_a_width_too_narrow_for_one_row_uses_the_paper_and_says_so():
+    res = build("| Name | Qty |\n|---|--:|\n| Rice | 12 |\n| Beans | 8 |\n\n{orientation=vertical width=40px}\n")
+    blocks = turned(res)
+    assert blocks and "M101" in codes(res)
+    for b in blocks:  # the data is there, not cropped away
+        x = rule_x(b.image)
+        assert sum(ink_columns(b.image)[: x - 3]) > 0
+
+
+def test_the_terminal_shows_a_turned_table_as_text():
+    from bobina import profile as profiles
+    from bobina import view
+
+    res = build(table(8, attrs="orientation=vertical"))
+    text = "\n".join(view.lines(res.rows, profiles.load("mtp-ii-58")))
+    assert "table printed turned" in text and "Col0" in text and "v00" in text
+    assert "⣿" not in text
 
 
 @pytest.mark.parametrize("profile", PROFILES)

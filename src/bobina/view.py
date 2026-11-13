@@ -26,6 +26,7 @@ BRAILLE = [
 
 
 TEAR_MARK = " ⟶ "
+TURNED_TABLE = " ↻ table printed turned, header on the right "  # the terminal shows its text standing
 
 
 def colors_off(env=None, flag: bool = False) -> str:
@@ -117,6 +118,10 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1) -> list[s
             out.append(("✂ " + "┄" * cols)[:cols])  # (not --- rules or table rules: those are "divider")
         elif isinstance(r, TextRow):
             out += text_lines(r, cols, color)
+        elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
+            out.append(TURNED_TABLE.center(cols, "┄")[:cols])
+            for tr in r.text_rows:
+                out += [ln[:cols] for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
         elif isinstance(r, BitmapRow) and r.text_rows:
             for tr in r.text_rows:
                 inv = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)

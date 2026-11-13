@@ -38,7 +38,7 @@ TEXT
   {.center .right .justify .invert .bold .flip rotate=90 size=small|normal|large|title|huge|2x|1x2|20px|3mm}
   a line with only {.compact} applies to the block above (e.g. a table)
   - item · 1. item · - [ ] todo · - [x] done (struck; tasks: {done: check|plain})
-  | table |  (stretches to the paper; {.compact} keeps it narrow)    > quote
+  | table |  (stretches to the paper; {.compact} narrow; {orientation=vertical} turned)    > quote
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
 

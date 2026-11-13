@@ -186,6 +186,16 @@ def photo(
     return dither(im, kind, threshold_level(im) if level is None else level)
 
 
+def vstack(parts: list, width: int, mode: str = "1", margin: int = 0) -> Image.Image:
+    """Images one under the other on a white page `width` wide (and `margin` white dots above and below)."""
+    out = Image.new(mode, (width, max(1, sum(p.height for p in parts) + 2 * margin)), 1 if mode == "1" else 255)
+    y = margin
+    for p in parts:
+        out.paste(p.convert(mode) if p.mode != mode else p, (0, y))
+        y += p.height
+    return out
+
+
 def place(im: Image.Image, width: int, align: str = "center") -> Image.Image:
     """Pads a '1' image to the full paper width."""
     out = Image.new("1", (width, im.height), 1)
