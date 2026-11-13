@@ -135,6 +135,20 @@ Values from data are cleaned for file names (`../../x` cannot leave the folder; 
 Two labels that would get the same name are an error (add `{n}` or `{i}`); existing files are replaced only with
 `--force`; a missing `{column}` lists the available names. Folders in the name are created.
 
+## Label by label (`--step`)
+
+A print of several labels stops after each one, so you can tear it off:
+
+```
+ ✓ 3/10 printed: tear it off
+ [Enter] next (4/10 · Honey)   [a] all 7 left   [r] again   [s] skip   [q] stop
+```
+
+`r` reprints the last (same number), `q` says how to print the rest (`--rows 4-10`); unprinted labels give
+their numbers back. Only at a terminal with a real printer: not with `-o`, a file printer, agents or `--yes`
+(unless `--step` is written). `--compact` prints at once (`P105`). `--no-step`: this print at once; `--step 3`:
+stop every 3; `bobina config step off`: always at once.
+
 ## One strip (`--compact`, `--then`, several files)
 
 Every label normally ends with the feed to the tear bar, so you can tear each one off. To print several things as
@@ -156,10 +170,10 @@ bobina print jar.bob.md --data kitchen.csv --compact \
    is an error.
 3. **Joins**: inside a compact part, labels are glued at a ✂ cut. Between two parts there is a ✂ cut only if
    **both** are compact; otherwise the paper feeds to the tear bar. The end of the job always feeds.
-4. Job options (`--compact-all`, `--yes`, `--dry-run`, `--printer`, `--profile`, `--marks`, `-o`) may be written
-   in any part. Counters (`{{ seq.x }}`) continue across parts and files; copies of a row repeat its number.
+4. Job options (the table below) may be written in any part. Counters (`{{ seq.x }}`) continue across parts and
+   files; copies of a row repeat its number.
 
-The terminal preview always draws where one label ends (decided 08/11: symbols, no words): `┄┄ ⟶ ┄┄` where the
+The terminal preview always draws where one label ends: `┄┄ ⟶ ┄┄` where the
 paper goes to the tear bar, `✂ ┄┄┄` at a cut.
 
 **On paper, no mark by default** (a cut is just space). To see on the strip where one order ends and the next
@@ -180,9 +194,9 @@ no length, and the confirmation screen says which ones go on paper.
 | Kind | Options | Rule |
 |---|---|---|
 | Part | `--set`, `--data`, `--sheet`, `--rows`, `--where`, `--copies-from`, `--repeat`, `--copies`, `--ask`, `--page`, `--plain`, `--allow-net`, `--allow`, `--compact`/`--no-compact` | apply to the files of the part they are written in, never to the next part |
-| Job flag | `--compact-all`, `--sandbox`, `--yes`, `--dry-run`, `--strict`, `-q`, `--json`, `--no-color` | may be written in any part, apply to the whole job |
+| Job flag | `--compact-all`, `--sandbox`, `--yes`, `--dry-run`, `--strict`, `-q`, `--json`, `--no-color`, `--step`/`--no-step` | may be written in any part, apply to the whole job |
 | Job default | `--set-all KEY=VALUE`, `--allow-all CODES` | every part gets them; a part's own `--set`/`--allow` wins |
-| Job value | `--printer`, `--profile`, `-o`, `--editor` | one value per job; two different values are an error |
+| Job value | `--printer`, `--profile`, `-o`, `--editor`, `--marks` | one value per job; two different values are an error |
 | Not with documents | `--last`, `--again` | reprint the last job; an error with targets or `--then` |
 
 **Errors and warnings in a long job.** Every part is built and checked before the printer is touched, and every
@@ -286,24 +300,8 @@ Configuration precedence: **flag > document front matter > `~/.config/bobina/con
 
 ## Help layout
 
-`bobina COMMAND --help` (argparse) has the same parts for every command:
-
-```
-usage: bobina print [-h] [--profile PROFILE] … [target ...]
-
-bobina print — print a document, inline text or stdin
-
-positional arguments:
-  target        a .bob.md file, "TEXT" (\n = new line), or - for stdin; several = one strip
-
-options:        the options of this command (--data, --then, -o …)
-
-global options: --profile, --printer, -q, --strict, --json, --allow, --problems …
-                (-n/--dry-run, -y/--yes and --editor listed only on commands that print)
-
-EXAMPLES
-  bobina print "buy bread"
-```
+`bobina COMMAND --help` has the same parts for every command: usage, positional arguments, the command's
+options, global options (`-n/--dry-run`, `-y/--yes`, `--editor` only on commands that print), EXAMPLES.
 
 A wrong option shows the usage of that command, not of bobina, and one hint:
 
@@ -459,10 +457,8 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
 - Printer address in config (`printer scan/add`), never in code.
 - Profile `feed_after` so the last line clears the tear bar.
 
-## Implementation notes (v0.x, 2026-11-05)
+## Implementation notes
 
-- `print --data FILE`: one label per row (docs/guides/batch-printing.md); `--copies-from COL` 0 skips the row;
-  counters advance once per row; max 1000 labels per job. `-o FILE`: the bytes to a file, no confirmation.
 - Printers: `transport = bluetooth` (status checked before printing: exit 5 if cover open/paper out), `command`, `file`.
 - Confirmation is read from `/dev/tty`, so `cat x | bobina print` still asks.
 - The last print is kept in `~/.local/state/bobina/last/` (`--last`, `--again`).
@@ -481,4 +477,4 @@ Agents and the files written for them: [agents.md](agents.md); the MCP server `b
     **⚠ not tested on paper.** `bobina calibrate tear` then measures the distance to the blade.
   - Native barcodes on imported profiles (`barcode.native` from the printer database). **⚠ not tested on paper.**
 - `calibrate compare` finds the paper in the photo, scales it to the printable width and reports length error, row-profile correlation and a 0–100 score, plus a side-by-side PNG (exact | realistic | photo).
-- `bobina paper` (2026-11-05): a paper odometer per printer. `paper new 15m` (`1500cm`, `50ft`; or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded, `--width 57mm` to warn (`P103`, recorded anyway) when the roll is not the printer's width; a package code (`57x30`: 30 m or a 30 mm diameter?) is refused with that question; every confirmed print adds its exact length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.
+- `bobina paper`: a paper odometer per printer. `paper new 15m` (`1500cm`, `50ft`; or `--diameter 40mm --core 12mm --thickness 0.06`) when a roll is loaded, `--width 57mm` to warn (`P103`) when the roll is narrower; a package code (`57x30`) is refused with a question; every confirmed print adds its length; the confirmation shows the metres left, `P101` when the roll is almost over (< 1 m or 10%), `P102` when the print is longer than what is left. `paper used 3m` sets the total used, `paper used +30cm` adds to it (prints from other apps, raw `send` jobs and the self-test are not counted). On "paper out" the error suggests `paper new`.

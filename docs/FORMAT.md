@@ -343,7 +343,8 @@ Previews, `check` and `--dry-run` only show the next values; they take nothing. 
 it is built, so the confirmation screen shows the numbers that will be printed and two prints at the same time never
 get the same number. If the job is then not printed (you quit, the printer is unreachable, the build fails), the
 values go back, unless another print took numbers after them: then they stay skipped. A number is never printed
-twice; a cancelled job may leave a gap (a job that stopped halfway also keeps its numbers). The CLI adds
+twice; a cancelled job may leave a gap (a job that stopped halfway also keeps its numbers; one you stop between
+labels keeps those of the labels that printed). The CLI adds
 `--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them,
 and `bobina seq set NAME N` starts one at N, even before its first print.
 
@@ -496,6 +497,8 @@ Nudges:
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
 | `P104` | note | roll length not set: no paper estimate |
+| `P105` | note | `--compact`: labels print at once, without stops |
+| `P106` | note | `--step` without a terminal: labels print at once |
 | `P201` | warning | raw bytes bypass every check and are not previewed |
 | `P301` | note | this job uses a feature not tested on paper yet |
 | `P302` | note | a payment code nobody has scanned with its app yet |

@@ -430,6 +430,27 @@ class Batch:
         for r in {id(r): r for r in self.results}.values():
             r.release()
 
+    def keep(self, printed: set[int]):
+        """Only the labels at these indexes printed (bobina stopped between labels): their seq numbers are spent,
+        the numbers after the last printed one go back (a label skipped between two printed ones leaves a gap)."""
+        stores: dict[int, list] = {}
+        for r in self.results:
+            if r.rendered:
+                stores.setdefault(id(r.rendered.counters), [r.rendered.counters, {}])
+        for i in printed:
+            r = self.labels[i]
+            if r.rendered:
+                store, counts = stores[id(r.rendered.counters)]
+                mark = getattr(r, "seq_mark", None)
+                for name, n in (store.marks() if mark is None else mark).items():  # unknown: all of them are spent
+                    counts[name] = max(counts.get(name, 0), n)
+        self.kept_counters = {}  # the numbers this job spent, for the history
+        for store, counts in stores.values():
+            for name, n in counts.items():
+                if n:
+                    self.kept_counters[name] = [store.fmt(name, v) for v in store.used.get(name, [])[:n]]
+            store.keep(counts)
+
 
 def join(parts: list[tuple[Batch, int, bool]]) -> Batch:
     """Several documents/batches as one job (bobina print A B --then C): one preview, one confirmation,
@@ -475,9 +496,11 @@ def build_batch(
     kw.pop("counters", None)
     results = [first]
     store = first.rendered.counters if first.rendered else None
+    first.seq_mark = store.marks() if store else {}
     extra = [(i, dict(r)) for i, r in enumerate(rows[1:], 2)] if rows_data else [(None, {}) for _ in range(repeat - 1)]
     for i, r in extra:
         results.append(build(source, fields={**r, **base_fields}, counters=store, row=r.get(LINE, i), **kw))
+        results[-1].seq_mark = store.marks() if store else {}  # what this label and the ones before it took
     if row_copies:
         results = [r for r, n in zip(results, row_copies, strict=True) for _ in range(n)]
     return Batch(results, copies)

@@ -116,7 +116,7 @@ A `{{ name }}` that is not a column prints empty and is reported (`M130`, with t
 
 | Command | Does |
 |---|---|
-| `print [FILE \| "TEXT" \| -]` | render → confirm → print. `--data rows.csv` (above), `--set KEY=VALUE`, `--copies N` (identical), `--repeat N` (new counter values each), `-o job.bin` (save, do not print) |
+| `print [FILE \| "TEXT" \| -]` | render → confirm → print. `--data rows.csv` (above), `--set KEY=VALUE`, `--copies N` (identical), `--repeat N` (new counter values each), `-o job.bin` (save, do not print); stops after each label (`--no-step`) |
 | `print --last` / `--again` | reprint the last job: identical bytes / re-rendered (new `now` and counters); with `-o FILE` save instead |
 | `check FILE` | problems, paper length, native/raster rows, nothing printed (`--data`, `--json` → `{"stats", "problems"}`, `--strict`) |
 | `preview FILE \| "TEXT"` | exact PNG (`-o out.png`); `--data rows.csv -o 'dir/{column}.png'` one per label; `--realistic` simulates ink spread |

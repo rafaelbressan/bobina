@@ -16,7 +16,8 @@ def _line(r: dict) -> str:
     errs = sum(1 for p in probs if p.get("severity") == "error")
     warns = sum(1 for p in probs if p.get("severity") == "warning")
     mark = (f" ✗{errs}" if errs else "") + (f" !{warns}" if warns else "")
-    size = f"{r.get('labels', 0):>3} lbl {r.get('length_mm', 0) / 10:5.1f} cm" if "labels" in r else " " * 16
+    n = f"{r['labels_printed']}/{r.get('labels', 0)}" if "labels_printed" in r else f"{r.get('labels', 0)}"
+    size = f"{n:>3} lbl {r.get('length_mm', 0) / 10:5.1f} cm" if "labels" in r else " " * 16
     return f"{r['id']}  {r['time'][:16].replace('T', ' ')}  {r.get('outcome', '?')[:16]:16s} {size}  {_files(r)}{mark}"
 
 
@@ -32,7 +33,8 @@ def _long(r: dict) -> str:
         out.append(f"  saved to  {r['saved_to']}")
     if "labels" in r:
         joins = f"{r.get('cuts', 0)} ✂  {r.get('tears', 0)} tear feeds"
-        out.append(f"  labels    {r['labels']}  ·  {r['length_mm'] / 10:.1f} cm  ·  {joins}")
+        n = f"{r['labels_printed']} of {r['labels']} printed" if "labels_printed" in r else f"{r['labels']}"
+        out.append(f"  labels    {n}  ·  {r['length_mm'] / 10:.1f} cm  ·  {joins}")
     for p in r.get("parts", []):
         out.append(f"  part {p['part']}    {p['file']}")
     for name, vals in (r.get("counters") or {}).items():
@@ -46,7 +48,17 @@ def _long(r: dict) -> str:
     return "\n".join(out)
 
 
-OUTCOMES = ("printed", "reprinted", "cancelled", "failed", "saved", "dry run", "interrupted", "nothing printed")
+OUTCOMES = (
+    "printed",
+    "stopped",
+    "reprinted",
+    "cancelled",
+    "failed",
+    "saved",
+    "dry run",
+    "interrupted",
+    "nothing printed",
+)
 
 
 def _outcome(word: str | None) -> str | None:

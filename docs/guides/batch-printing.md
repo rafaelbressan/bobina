@@ -180,11 +180,10 @@ headers would get the same name, the first keeps it and a warning says so (`M159
   the whole batch. `--where`, `--rows`, `--copies-from` and `--sheet` need `--data`; two `--data` in one part is
   an error (use `--then` to print both lists, `--join` to combine them). Both are warnings
   on the confirmation screen; nothing is blocked.
-- **Counters** (`{{ seq.jar }}`) advance once per row; copies of a row repeat its number.
 - **Spreadsheets**: formulas are not recalculated; the value Excel saved is used. `.xls`/`.ods` must be saved as
   `.xlsx` or `.csv`. Dates come out as `YYYY-MM-DD` (format them in the design with `{{ packed | date }}`).
-- **Paper**: each label ends with the feed to the tear bar. Add `--compact` to print the batch as one strip with
-  ✂ lines between labels and one feed at the end; `--then other.bob.md` adds more to the same strip.
+- **Paper**: each label ends at the tear bar and bobina waits while you tear it off (`--no-step`: all at once).
+  `--compact` prints one strip with ✂ lines and one feed at the end; `--then other.bob.md` adds to it.
 - **Limits**: 1000 labels per job, copies included (`--copies`, `--copies-from`, `--repeat`, every `--then` part),
   and at most 100 copies of one label. Split bigger lists with `--rows`. `--copies` and `--copies-from` multiply.
 - **Saved designs**: `bobina library add jar jar-label.bob.md`, then `bobina print @jar --data pantry.csv`.

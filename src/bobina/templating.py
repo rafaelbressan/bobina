@@ -346,24 +346,53 @@ class CounterStore:
             fileio.locked_update(self.path, advance)
         self.done = True
 
-    def release(self):
-        """The job was not printed: give the numbers back if no other print took numbers after them."""
+    def marks(self) -> dict[str, int]:
+        """How many values of each counter this job has taken so far (a label's mark: what it and the labels
+        before it used)."""
+        return {k: len(vs) for k, vs in self.used.items()}
+
+    def keep(self, counts: dict[str, int]):
+        """Part of the job printed (bobina stopped between labels): the first counts[name] values of each counter
+        are spent, the others go back when no other print took numbers after them (as release does)."""
         from . import fileio
 
-        if self.done or not self.reserve or not self._wrote:
+        if self.done:
+            return
+        if not self.reserve:  # nothing was taken yet: move the counters on by what printed only
+
+            def advance(state):
+                for name, vs in self.used.items():
+                    n = min(len(vs), counts.get(name, 0))
+                    if n:
+                        start = int(self.cfg(name).get("start", 1))
+                        _, state[name] = self._series(name, state.get(name, start), n)
+
+            if any(counts.get(k, 0) for k in self.used):
+                fileio.locked_update(self.path, advance)
             self.done = True
+            return
+        back = {k: counts.get(k, 0) for k, vs in self.used.items() if vs and counts.get(k, 0) < len(vs)}
+        if not back:
+            self.commit()
             return
 
         def give_back(state):
-            for name, wrote in self._wrote.items():
-                if self._contiguous.get(name) and state.get(name) == wrote:
-                    if self._before[name] is None:
-                        state.pop(name, None)
-                    else:
-                        state[name] = self._before[name]
+            for name, n in back.items():
+                if not (self._contiguous.get(name) and state.get(name) == self._wrote.get(name)):
+                    continue  # another print took numbers after these: they stay skipped
+                if n:
+                    _, state[name] = self._series(name, self.used[name][n - 1], 1)
+                elif self._before.get(name) is None:
+                    state.pop(name, None)
+                else:
+                    state[name] = self._before[name]
 
         fileio.locked_update(self.path, give_back)
         self.done = True
+
+    def release(self):
+        """The job was not printed: give the numbers back if no other print took numbers after them."""
+        self.keep({})
 
 
 class Budget:

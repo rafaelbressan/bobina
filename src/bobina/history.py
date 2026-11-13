@@ -31,8 +31,9 @@ def enabled() -> bool:
 
 KEEP_VALUE = {  # options whose value is a file name, a number or a setting, never personal data
     "--data", "--join", "--on", "--sheet", "--rows", "--copies", "--repeat", "--copies-from", "--page", "--profile",
-    "--printer", "-o", "--output", "--problems", "--allow", "--allow-all", "--editor", "--limit",
+    "--printer", "-o", "--output", "--problems", "--allow", "--allow-all", "--editor", "--limit", "--step-every",
 }  # fmt: skip
+NUMBER_VALUE = {"--step", "--steps", "--pause", "--one-by-one"}  # --step 3; in `--step note.md` the file is a target
 MASK_VALUE = {"--set": "=", "--set-all": "=", "--where": "!=~"}  # keep the key/column, hide the value
 
 
@@ -60,14 +61,20 @@ def scan(argv: list[str]) -> tuple[list[str], set[str]]:
         if tok.startswith("-"):
             if eq and flag in TARGET_VALUE:  # --then=TEXT is a target: kept only when it names a file
                 out.append(f"{flag}={_target(inline)}")
-            elif eq and flag not in KEEP_VALUE:
+            elif eq and flag not in KEEP_VALUE and not (flag in NUMBER_VALUE and inline.isdigit()):
                 out.append(f"{flag}=***")  # a value of an option not known to be safe
             else:
                 out.append(tok)
-            if eq and inline and flag not in KEEP_VALUE and not (flag in TARGET_VALUE and _is_target_name(inline)):
+            if (
+                eq
+                and inline
+                and flag not in KEEP_VALUE | NUMBER_VALUE
+                and not (flag in TARGET_VALUE and _is_target_name(inline))
+            ):
                 secrets.add(inline)
-            if not eq and flag in KEEP_VALUE and k + 1 < len(argv):
-                out.append(argv[k + 1])
+            nxt = argv[k + 1] if not eq and k + 1 < len(argv) else None
+            if nxt is not None and (flag in KEEP_VALUE or (flag in NUMBER_VALUE and nxt.isdigit())):
+                out.append(nxt)
                 k += 1
             k += 1
             continue
@@ -137,6 +144,9 @@ class Recorder:
         self.counters: dict | None = None  # the seq values of the job
         self.summary: dict | None = None  # --last: what the stored job was (there is no render to read)
         self.problems: list = []  # --last: the problems stored with that job (Nudge), or a failure's
+        self.labels_printed: int | None = None  # a job that did not print every label (steps): how many did
+        self.printed_mm: float | None = None  # … the paper they took
+        self.printed_sha256 = ""  # … and their bytes
 
     def outcome_for(self, outcome: str) -> str:
         """The word recorded for a job: failures as they are, else what the job did (saved, dry run…)."""
@@ -185,6 +195,9 @@ class Recorder:
             problems = problems if problems is not None else res.visible_nudges()
         elif self.summary:
             rec |= self.summary
+        if self.labels_printed is not None:  # what went out, not the whole job
+            rec |= {"labels_printed": self.labels_printed, "length_mm": self.printed_mm,
+                    "bytes_sha256": self.printed_sha256}  # fmt: skip
         # messages can quote data (barcode contents, keys, --set values): stored with those values masked
         secrets = set(self.secrets)
         for r in getattr(res, "results", None) or ([res] if res is not None else []):
@@ -278,7 +291,7 @@ def stats(rows: list[dict]) -> dict:
     from collections import Counter
 
     by_outcome = Counter(r.get("outcome", "?") for r in rows)
-    printed = [r for r in rows if r.get("outcome") == "printed"]
+    printed = [r for r in rows if r.get("outcome") in ("printed", "stopped")]
     weeks = Counter()
     for r in printed:
         d = datetime.fromisoformat(r["time"])
@@ -288,7 +301,7 @@ def stats(rows: list[dict]) -> dict:
     return {
         "jobs": len(rows),
         "by_outcome": dict(by_outcome),
-        "printed_labels": sum(r.get("labels", 0) for r in printed),
+        "printed_labels": sum(r.get("labels_printed", r.get("labels", 0)) for r in printed),
         "paper_cm": round(sum(r.get("length_mm", 0) for r in printed) / 10, 1),
         "paper_cm_by_week": {k: round(v, 1) for k, v in sorted(weeks.items())},
         "top_problems": codes.most_common(10),

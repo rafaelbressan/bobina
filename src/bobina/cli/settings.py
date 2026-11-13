@@ -1,4 +1,4 @@
-"""bobina config: see and change a setting of config.toml (today: locale)."""
+"""bobina config: see and change a setting of config.toml (locale, step)."""
 
 from __future__ import annotations
 
@@ -22,7 +22,40 @@ def _examples(loc) -> dict:
     }
 
 
+ON, OFF = ("on", "true", "yes", "1"), ("off", "false", "no", "0")
+
+
+def config_step(args):
+    """step: does a print of several labels stop after each one (on, the default) or print them at once (off)."""
+    if args.value is not None:
+        v = args.value.strip().lower()
+        if v not in ON + OFF:
+            raise Fail(USAGE, f"bobina config step {args.value}: use on or off", problem="E304")
+        try:
+            config.set_value("step", v in ON)
+        except OSError as e:
+            raise Fail(USAGE, f"cannot write {config.path()}: {e.strerror or e}", problem="E209") from None
+    raw = config.load().get("step")
+    source = "config" if raw is not None else "default"
+    if raw is not None and not isinstance(raw, bool):
+        raise Fail(USAGE, f"step = {raw!r} in config.toml: use bobina config step on|off", problem="E101")
+    on = raw is not False
+    st = {"schema": "bobina.config/1", "key": "step", "value": on, "source": source, "path": str(config.path())}
+    if args.json:
+        print_json({**st, "problems": []}, indent=2, ensure_ascii=False)
+        return OK
+    what = ("on: a print of several labels stops after each one so you can tear it off"
+            if on else "off: the labels of a print come out at once")  # fmt: skip
+    where = " (saved in config.toml)" if args.value is not None else " (config.toml)" if raw is not None else ""
+    print(f"step {what}{where}")
+    print("one print: --no-step (all at once) or --step N (stop every N) · always: bobina config step "
+          + ("off" if on else "on"))  # fmt: skip
+    return OK
+
+
 def cmd_config(args):
+    if args.key == "step":
+        return config_step(args)
     if args.value is not None:
         loc = locales.parse(args.value)
         if loc is None:

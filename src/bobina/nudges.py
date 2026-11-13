@@ -89,6 +89,8 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "P102": ("warning", "the print is longer than the paper left on the roll (estimate)", ""),
     "P103": ("warning", "the roll is not as wide as this printer's paper (recorded anyway)", ""),
     "P104": ("note", "the roll length is not set: no estimate of the paper left", ""),
+    "P105": ("note", "--compact: the labels print at once, glued, without stopping between them", ""),
+    "P106": ("note", "--step: no terminal to wait on, so every label prints at once", ""),
     "P301": ("note", "this job uses a feature not tested on paper yet", ""),
     "P302": ("note", "a payment code nobody has scanned with its app yet", ""),
     "P201": ("warning", "raw bytes bypass every check and are not previewed", ""),

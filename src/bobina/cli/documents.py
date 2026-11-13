@@ -7,7 +7,7 @@ from pathlib import Path
 from .. import config, editor, preview, state, view
 from .. import profile as profiles
 from ..export import is_pattern as export_pattern
-from . import common
+from . import common, steps
 from .common import (
     CONFIRM,
     LEFT_OUT,
@@ -154,6 +154,7 @@ def _print_job(args, rec, res, base, origin):
         _save_bytes(args, res.data)
         rec.outcome, rec.saved_to = "saved", args.output
         return code
+    steps.plan_job(args, res)  # its notes (P105 glued labels, P106 no terminal) are shown with the others
     if args.yes:
         name = paper_printer(args)
         if name:
@@ -178,19 +179,74 @@ def _print_job(args, rec, res, base, origin):
             job, *_ = load_job(args)
             return job
 
-    go, res = confirm_loop(args, res, title, rebuild)
+    go, res = confirm_loop(args, res, title, rebuild, note=lambda r: _step_line(args, r))
     rec.res = res
     if not go:
         err("not printed")
         return CONFIRM
     rec.printer = printer_name(args) or ""
     rec.counters = res.stats().get("counters", {})
-    name = _send_and_commit(args, res)
+    name, st = _send_job(args, res, rec)
     rec.printer = name
-    _keep_last(res, base, origin)
+    _keep_last(res, base, origin, st)
     if not args.quiet:
-        err(f"printed on {common.where(name)}: ~{res.length_mm / 10:.1f} cm")
+        err(_printed_line(args, res, name, st))
     return job_code(res)
+
+
+def _step_line(args, res) -> str:
+    every = steps.plan_job(args, res)
+    return steps.screen_line(len(steps.labels_of(res)), every) if every else ""
+
+
+def _send_job(args, res, rec=None):
+    """Sends a confirmed job: all at once, or label by label (steps). -> (printer name, steps.Run or None)."""
+    every = steps.plan_job(args, res)
+    if not every:
+        return _send_and_commit(args, res), None
+    labels = steps.labels_of(res)
+    try:
+        names, st = steps.send_labels(args, labels, every, res.profile, do_send)
+    except BaseException as e:
+        st = e.step_run
+        _keep_printed(res, st, rec)
+        if isinstance(e, Fail):
+            steps.add_summary(e, st, getattr(args, "argv", None), res)
+        raise
+    _keep_printed(res, st, rec)
+    return (names[-1] if names else printer_name(args) or ""), st
+
+
+def _keep_printed(res, st, rec=None) -> None:
+    """The seq numbers of the labels that printed are spent; those after the last printed one go back. A job that
+    did not print every label is recorded with what it printed (and only those numbers)."""
+    try:
+        if hasattr(res, "keep"):
+            res.keep(st.printed)
+        elif st.printed:
+            res.commit()
+    except Exception as e:  # noqa: BLE001 - what printed must not turn into an error (it would be printed again)
+        err(f"note: the seq numbers of this job could not be updated ({e})")
+    if rec is not None and not st.complete:
+        if rec.outcome in ("", "printed"):
+            rec.outcome = "stopped"
+        _record_printed(rec, steps.labels_of(res), st)
+        rec.counters = getattr(res, "kept_counters", rec.counters)
+
+
+def _record_printed(rec, labels: list, st) -> None:
+    import hashlib
+
+    rec.labels_printed = len(st.printed)
+    rec.printed_mm = round(st.length_mm, 1)
+    rec.printed_sha256 = hashlib.sha256(b"".join(labels[i].data for i in sorted(st.printed))).hexdigest()
+
+
+def _printed_line(args, res, name: str, st) -> str:
+    where = common.where(name)
+    if st is None:
+        return f"printed on {where}: ~{res.length_mm / 10:.1f} cm"
+    return steps.summary(st, getattr(args, "argv", None), res, where)
 
 
 def _send_and_commit(args, res) -> str:
@@ -216,19 +272,35 @@ def _send_and_commit(args, res) -> str:
     return name
 
 
-def _keep_last(res, base: str, origin: str) -> None:
-    """After a print: saving it for --last must not turn the finished print into an error."""
+def _keep_last(res, base: str, origin: str, st=None) -> None:
+    """After a print: saving it for --last must not turn the finished print into an error. A job stopped part
+    way (steps) keeps only the labels that printed: --last must never print one whose number went back."""
     from .. import fileio
 
     if not config.load().get("keep_last", True):
         return
     try:
+        emulator = res.first.emulator if hasattr(res, "first") else res.emulator
+        labels = steps.labels_of(res)
+        kept = sorted(st.printed) if st is not None and not st.complete else list(range(len(labels)))
+        stats = res.stats()
+        if len(kept) == len(labels):
+            data, rows = res.data, res.rows
+        else:
+            data = b"".join(labels[i].data for i in kept)
+            rows = [row for i in kept[: res.SHOW] for row in labels[i].rows]
+            stats |= {"renders": len(kept), "copies": 1, "bytes": len(data),
+                      "length_mm": round(sum(labels[i].length_mm for i in kept), 1)}  # fmt: skip
+        if len(kept) > 1 and not getattr(res, "stripped", False):  # where each label ends: --last stops there too
+            stats["label_bytes"] = [len(labels[i].data) for i in kept]
+            stats["label_mm"] = [round(labels[i].length_mm, 2) for i in kept]
+            stats["label_titles"] = [steps.title(labels[i]) for i in kept]  # the pause of --last names them
         # the preview of what the terminal showed (up to SHOW labels), not the whole job: drawing a 1000-label
         # strip after every print doubled its time and memory
-        shown = preview.render(res.rows, res.profile, res.first.emulator if hasattr(res, "first") else res.emulator)
+        shown = preview.render(rows, res.profile, emulator)
         # what the document allowed stays allowed; a command line --allow belongs to its run (--last brings its own)
-        stats = {**res.stats(), "problems": [n.as_dict() for n in res.visible_nudges(doc_only=True)]}
-        state.save_last(res.source_text, base, origin, res.data, shown, stats)
+        stats["problems"] = [n.as_dict() for n in res.visible_nudges(doc_only=True)]
+        state.save_last(res.source_text, base, origin, data, shown, stats)
     except (OSError, fileio.StateError, fileio.LockTimeout) as e:
         err(f"note: this print was not kept for --last ({e})")
 
@@ -291,23 +363,24 @@ def print_last(args, rec=None):
             if not args.json:
                 print(screen(res, "again · re-rendered (new now/seq)", view.use_color() and not args.no_color, args))
             return job_code(res)
+        steps.plan_job(args, res)  # its notes (P105, P106) are shown with the others
         if args.yes:  # no confirmation screen to show the warnings on (and the reason of exit 9)
             report_nudges(res, args)
         try:
-            go, res = confirm_loop(args, res, "again · re-rendered (new now/seq)")
+            go, res = confirm_loop(args, res, "again · re-rendered (new now/seq)", note=lambda r: _step_line(args, r))
             if not go:
                 err("not printed")
                 return CONFIRM
             if rec is not None:
                 rec.res = res
-            name = _send_and_commit(args, res)
+            name, st = _send_job(args, res, rec)
             if rec is not None:
                 rec.printer = name
         finally:
             res.release()
-        _keep_last(res, last["base_dir"], last["origin"])
+        _keep_last(res, last["base_dir"], last["origin"], st)
         if not args.quiet:
-            err(f"printed on {common.where(name)}: ~{res.length_mm / 10:.1f} cm (re-rendered)")
+            err(_printed_line(args, res, name, st) + " (re-rendered)")
         return job_code(res)
     from PIL import Image
 
@@ -351,22 +424,64 @@ def print_last(args, rec=None):
         if not args.json:
             print(msg)
         return code
+    pieces = _last_labels(last["data"], st)
+
+    def note(code):
+        from ..nudges import Nudge
+
+        msg, hint = steps.message(code)
+        err("\n".join(common.render_problems([Nudge(code, msg, None, hint)], "")))
+
+    every = steps.plan(args, len(pieces), note=note)
     if not args.yes:
         tty = common.open_tty()
         if tty is None:
             err(msg)
             raise Fail(CONFIRM, "confirmation required: no terminal attached. Re-run with --yes.", problem="E107")
         with tty:
-            tty.write(msg + "\n\n")
+            tty.write(msg + "\n" + (steps.screen_line(len(pieces), every) + "\n" if every else "") + "\n")
             if ask(tty, " [p] print   [q] quit\n> ") not in ("p", "print"):
                 err("not printed")
                 return CONFIRM
+    if every:
+        try:
+            names, run = steps.send_labels(args, pieces, every, prof, do_send)
+        except BaseException as e:
+            if rec is not None and not e.step_run.complete:
+                _record_printed(rec, pieces, e.step_run)
+            if isinstance(e, Fail):
+                steps.add_summary(e, e.step_run)
+            raise
+        name = names[-1]
+        if rec is not None:
+            rec.printer = name
+            if not run.complete:  # still "reprinted": only how many labels went out is said
+                _record_printed(rec, pieces, run)
+        if not args.quiet:
+            err(steps.summary(run, where=common.where(name)) + " (identical bytes)")
+        return code
     name = do_send(args, last["data"], prof, length_mm=float(st.get("length_mm", 0)))
     if rec is not None:
         rec.printer = name
     if not args.quiet:
         err(f"reprinted on {common.where(name)}: ~{st.get('length_mm', 0) / 10:.1f} cm (identical bytes)")
     return code
+
+
+def _last_labels(data: bytes, st: dict) -> list:
+    """The labels of the stored job (where each one ends, kept by _keep_last); one piece when it does not say."""
+    from types import SimpleNamespace
+
+    sizes, mm = st.get("label_bytes"), st.get("label_mm")
+    if not (isinstance(sizes, list) and isinstance(mm, list) and len(sizes) == len(mm) and sum(sizes) == len(data)):
+        return [SimpleNamespace(data=data, length_mm=float(st.get("length_mm", 0)), rows=[])]
+    titles = st.get("label_titles")
+    titles = titles if isinstance(titles, list) and len(titles) == len(sizes) else [""] * len(sizes)
+    out, at = [], 0
+    for n, length, name in zip(sizes, mm, titles, strict=True):
+        out.append(SimpleNamespace(data=data[at : at + n], length_mm=float(length), rows=[], title=str(name)))
+        at += n
+    return out
 
 
 def _stored_nudge(p: dict):

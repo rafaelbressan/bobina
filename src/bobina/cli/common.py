@@ -104,6 +104,7 @@ class Fail(Exception):
         self.code = code
         self.problem = problem
         self.items = items or []
+        self.outcome = ""  # what happened, when not "nothing printed" (a job stopped after some labels printed)
 
     @classmethod
     def with_hint(cls, code: int, message: str, hint: str = "", problem: str = "") -> Fail:
@@ -119,7 +120,7 @@ class Fail(Exception):
         return [Nudge(self.problem or "E101", head, None, hint.strip().lstrip("→ ").strip(), severity="error")]
 
     def format(self) -> str:
-        return "\n".join(render_problems(self.problems(), stopped()))
+        return "\n".join(render_problems(self.problems(), self.outcome or stopped()))
 
 
 PROBLEM_FORMATS = ("pretty", "plain", "json", "jsonl")
@@ -1145,8 +1146,9 @@ def ask(tty, prompt: str) -> str:
     return line.strip().lower() if line else "q"
 
 
-def confirm_loop(args, res, title, rebuild=None, source_path=None, draft=False) -> tuple[bool, object]:
-    """Shows the confirmation screen. Returns (print?, result) — result may be rebuilt after edits."""
+def confirm_loop(args, res, title, rebuild=None, source_path=None, draft=False, note=None) -> tuple[bool, object]:
+    """Shows the confirmation screen. Returns (print?, result) — result may be rebuilt after edits.
+    note(result): a line shown above the choices (how the labels will print), or ""."""
     color = view.use_color(sys.stderr) and not args.no_color
     if args.yes:
         return True, res
@@ -1160,7 +1162,8 @@ def confirm_loop(args, res, title, rebuild=None, source_path=None, draft=False) 
         )
     with tty:
         while True:
-            tty.write(screen(res, title, color, args) + "\n\n")
+            line = note(res) if note else ""
+            tty.write(screen(res, title, color, args) + "\n" + (line + "\n" if line else "") + "\n")
             opts = " [p] print   " + ("[e] edit again   " if rebuild else "") + "[s] save as…   [q] quit\n> "
             a = ask(tty, opts)
             if a in ("p", "print"):

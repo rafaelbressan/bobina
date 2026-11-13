@@ -369,6 +369,8 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--json": ["--machine"],
     "--last": ["--ultimo", "--reprint", "--repeat-last"],
     "--again": ["--de-novo", "--novamente", "--rerender"],
+    "--step": ["--stop", "--wait", "--one-at-a-time", "--each", "--tear-each", "--stop-each"],
+    "--no-step": ["--nonstop", "--no-stop", "--no-wait", "--all-together", "--at-once", "--no-stops"],
     "--realistic": ["--realista", "--ink"],
     "--default": ["--padrao", "--main", "--principal"],
     "--command": ["--cmd", "--comando", "--exec"],
@@ -505,6 +507,7 @@ class Parser(argparse.ArgumentParser):
             hint = option_hint(unknown[0], cmd if cmd in COMMANDS else "") or hint
         if _FMT[0] == "pretty":
             target.print_usage(sys.stderr)
+        message = message.replace("argument --step-every:", "argument --step:")  # --step N is parsed under it
         lines = render_problems([Nudge("E101", message, None, hint)], stopped())
         self.exit(USAGE, "\n".join(lines) + "\n")
 
@@ -595,6 +598,7 @@ def make_parser():
             "bobina print list.bob.md --dry-run",
             'echo "hello" | bobina print --yes',
             "bobina print --last",
+            "bobina print jar.bob.md --data pantry.csv --step 3   # stop every 3 labels (default: after each)",
         ],
         cmd_print,
     )
@@ -612,6 +616,18 @@ def make_parser():
     p.add_argument(
         "--again", action="store_true", help="re-render and print the last document (new now/seq; -o FILE: save it)"
     )
+    p.add_argument(
+        "--step",
+        action="store_const",
+        const=1,
+        help="stop after each label so it can be torn off (the default at a terminal); --step N: every N labels",
+    )
+    p.add_argument("--no-step", dest="step", action="store_const", const=0, help="print every label at once")
+    for alias in ("--steps", "--pause", "--one-by-one"):  # accepted, not listed
+        p.add_argument(alias, dest="step", action="store_const", const=1, help=argparse.SUPPRESS)
+    for alias in ("--no-steps", "--no-pause", "--no-pauses", "--continuous", "--all-at-once"):
+        p.add_argument(alias, dest="step", action="store_const", const=0, help=argparse.SUPPRESS)
+    p.add_argument("--step-every", dest="step", type=_positive, metavar="N", help=argparse.SUPPRESS)  # --step N
 
     p = _cmd(
         sub,
@@ -739,12 +755,25 @@ def make_parser():
         "config",
         "see and change settings",
         "settings in ~/.config/bobina/config.toml. locale: the locale of documents without locale: (dates, numbers"
-        " and money); without one, the first print, check or preview infers it from the time zone and saves it",
-        ["bobina config locale", "bobina config locale pt-BR", "bobina config locale --json"],
+        " and money); without one, the first print, check or preview infers it from the time zone and saves it."
+        " step: on (default), a print of several labels stops after each one so it can be torn off; off, they"
+        " print at once (--step and --no-step change one print)",
+        [
+            "bobina config locale",
+            "bobina config locale pt-BR",
+            "bobina config step",
+            "bobina config step off",
+            "bobina config locale --json",
+        ],
         cmd_config,
     )
-    p.add_argument("key", choices=["locale"])
-    p.add_argument("value", nargs="?", metavar="TAG", help="a BCP 47 tag (pt-BR, en-US, fr-CA): saved; none: shown")
+    p.add_argument("key", choices=["locale", "step"])
+    p.add_argument(
+        "value",
+        nargs="?",
+        metavar="VALUE",
+        help="locale: a BCP 47 tag (pt-BR, en-US, fr-CA); step: on or off; none: shown",
+    )
     p = _cmd(
         sub,
         "profile",
@@ -937,8 +966,47 @@ def normalize(argv: list[str]) -> list[str]:
         i += 1
     if i < len(argv):
         cmd = ALIASES.get(argv[i], argv[i])
-        return [cmd] + pre + argv[i + 1 :]
+        rest = argv[i + 1 :]
+        return [cmd] + pre + (_step_values(rest) if cmd == "print" else rest)
     return argv
+
+
+STEP_NAMES = ("--step", "--steps", "--pause", "--one-by-one")
+
+
+STEP_VALUE = re.compile(r"[+-]?\d+(?:[.,]\d*)?|[A-Za-z]+")  # 3, -1, 1.5, abc: meant as N (wrong ones say why)
+
+
+def _step_values(argv: list[str]) -> list[str]:
+    """--step 3 and --step=3 -> --step-every 3. A number or a bare word after --step is its value (-1, 1.5 and
+    abc then get the --step N error); a file, @name, - or text with spaces stays the document."""
+    out, i = [], 0
+    while i < len(argv):
+        tok = argv[i]
+        name, eq, val = tok.partition("=")
+        if tok == "--":
+            return out + argv[i:]
+        if name in STEP_NAMES and eq:
+            out += ["--step-every", val]
+        elif tok in STEP_NAMES and i + 1 < len(argv) and _step_value(argv[i + 1]):
+            out += ["--step-every", argv[i + 1]]
+            i += 1
+        else:
+            out.append(tok)
+        i += 1
+    return out
+
+
+def _step_value(tok: str) -> bool:
+    from pathlib import Path
+
+    return bool(STEP_VALUE.fullmatch(tok)) and not Path(tok).exists()
+
+
+def _positive(v: str) -> int:
+    if not v.isdigit() or int(v) < 1:
+        raise argparse.ArgumentTypeError(f"--step N: N is how many labels between stops (1 or more), got '{v}'")
+    return int(v)
 
 
 def parse_args(ap, argv: list[str]):

@@ -105,6 +105,8 @@ FIX = {
     "P302": "Scan a printed code with the real app before customers use it, and tell us (docs/TESTED.md).",
     "P201": "Raw bytes are sent as they are: make sure they are meant for this printer.",
     "P104": "When you know the roll: bobina paper new 30m (its length) or bobina paper new --diameter 40mm.",
+    "P105": "Cut them apart after printing; to tear each one off, print without --compact.",
+    "P106": "Run it in a terminal to stop between labels, or leave --step out.",
     "P401": "Install or turn on what the message names, or set up another kind of printer: USB, a printer on"
     " another machine (ssh) or a file printer.",
     "P402": "Check the profile and its paper width: bobina profile list, then bobina init --profile ID (the"
