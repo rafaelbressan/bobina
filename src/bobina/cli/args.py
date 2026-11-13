@@ -7,6 +7,7 @@ import difflib
 import os
 import re
 import sys
+from pathlib import Path
 
 from .. import __version__
 from ..fileio import LockTimeout, StateError
@@ -306,6 +307,11 @@ def _common(printing: bool = True):
         help="how errors and warnings are written, always to stderr (stdout keeps the command's own output;"
         " 2> problems.json saves them); default pretty; also BOBINA_PROBLEMS",
     )
+    g.add_argument(
+        "--log",
+        metavar="FILE",
+        help="append this run's problems to FILE as JSON lines (masked like the history); also log_file in config.toml",
+    )
     return c
 
 
@@ -400,6 +406,8 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--json": ["--machine"],
     "--last": ["--ultimo", "--reprint", "--repeat-last"],
     "--again": ["--de-novo", "--novamente", "--rerender"],
+    "--log": ["--logfile", "--log-file", "--audit", "--audit-log", "--log-to"],
+    "--format": ["--fmt", "--as", "--type"],
     "--check": ["--check-only", "--outdated", "--available", "--is-latest"],  # bobina update
     "--step": ["--stop", "--wait", "--one-at-a-time", "--each", "--tear-each", "--stop-each"],
     "--no-step": ["--nonstop", "--no-stop", "--no-wait", "--all-together", "--at-once", "--no-stops"],
@@ -864,12 +872,17 @@ def make_parser():
             "bobina history show last",
             "bobina history stats",
             "bobina history --json",
+            "bobina history export --format csv --since 7d -o jobs.csv",
         ],
         cmd_history,
     )
-    p.add_argument("action", nargs="?", default="list", choices=["list", "show", "stats", "clear"])
-    p.add_argument("id", nargs="?", help="show: a job id (or its start), or last")
-    p.add_argument("--limit", type=int, default=20, metavar="N", help="list: the last N jobs (0 = all)")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "show", "stats", "export", "clear"])
+    p.add_argument("id", nargs="?", help="show: a job id (or its start), or last; export: the file to write (as -o)")
+    p.add_argument(
+        "--limit", type=int, default=None, metavar="N", help="list: the last N jobs (default 20, 0 = all); export: all"
+    )
+    p.add_argument("--format", metavar="FORMAT", help="export: jsonl (default, the stored lines) or csv")
+    p.add_argument("-o", "--output", metavar="FILE", help="export: write to FILE instead of stdout")
     p.add_argument("--long", action="store_true", help="list: every detail of each job")
     p.add_argument("--since", metavar="DATE", help="only jobs from this date/time on (2026-11-01, 2026-11-07T18:00)")
     p.add_argument("--outcome", metavar="WORD", help="only jobs with this outcome: printed, cancelled, failed, saved …")
@@ -1140,15 +1153,42 @@ def main(argv=None) -> int:
 
         limit_memory()  # untrusted input: a hard ceiling under bobina's own size checks
     check = _update_check(args, cmd)
+    from .. import history, problem_log
+
+    problem_log.start(argv, cmd, _log_target(args))
+    history.LAST_ID = None
     code = None
     try:
         code = _run(args, cmd)
         return code
     finally:
+        problem_log.write(code, history.LAST_ID)  # what no recorded job wrote yet
         if check is not None and code is not None and code != 130:
             line = check.finish()
             if line:
                 err(line)
+
+
+def _log_target(args) -> str | None:
+    """--log FILE (any part: it is a job option, like -o), else log_file in config.toml (a relative path is taken
+    from the folder of config.toml, so every run logs to the same file); None: no log."""
+    for a in (args, *(getattr(args, "chain", None) or [])):
+        if getattr(a, "log", None):
+            return a.log
+    from .. import config, config_keys
+    from ..fileio import StateError
+
+    try:
+        target = config_keys.read(config.load(), "log_file")
+    except (OSError, StateError):  # a broken config.toml is said by the command itself
+        return None
+    if not target:
+        return None
+    try:
+        p = Path(str(target)).expanduser()
+    except RuntimeError:  # ~user that names no user: the write says so
+        return str(target)
+    return str(p if p.is_absolute() else config.path().parent / p)
 
 
 def _run(args, cmd: str) -> int:

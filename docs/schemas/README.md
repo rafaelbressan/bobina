@@ -4,7 +4,8 @@
 |---|---|
 | [problem.schema.json](problem.schema.json) (`bobina.problem/1`) | each problem: `check --json` → `problems[]`, `--problems json|jsonl` |
 | [check.schema.json](check.schema.json) | `bobina check FILE --json` |
-| [history.schema.json](history.schema.json) (`bobina.history/1`) | one line of `history.jsonl`, `bobina history --json` |
+| [history.schema.json](history.schema.json) (`bobina.history/1`) | one line of `history.jsonl`, `bobina history --json`, `bobina history export` |
+| [log.schema.json](log.schema.json) (`bobina.log/1`) | one line of the `--log FILE` (or `log_file`) problem log |
 | [print.schema.json](print.schema.json) (`bobina.print/1`) | `bobina print … --json`: outcome, exit, printer, saved_to, stats, problems |
 | [preview.schema.json](preview.schema.json) (`bobina.preview/1`) | `bobina preview … --json`: exit, files, stats, problems |
 | [config.schema.json](config.schema.json) (`bobina.config/1`) | `bobina config list\|get\|set\|unset --json` and `bobina printer show NAME --json`: one setting (value, source, accepts; locale adds prints_as, example) or all of them (`keys`, `printers`) |

@@ -12,7 +12,7 @@ import difflib
 import re
 import sys
 
-from .. import ai, config, engine
+from .. import ai, config, engine, problem_log
 from .. import profile as profiles
 from ..chat import BOLD, DEFAULT_LIMIT_MM, LAYOUTS, LOOKS, STYLES, Conversation, Ticket
 from ..fileio import StateError
@@ -577,6 +577,7 @@ class Session:
         """The job's nudges (fonts, glyphs, the roll), in the format of every command (render_problems); -q keeps
         only warnings. True when --strict stops this print."""
         shown = list(res.visible_nudges())
+        problem_log.add(shown, res)  # --log keeps the notes -q hides, with the answer's data masked
         strict = strict_hits(shown, self.args)
         if self.args.quiet and not strict:
             shown = [n for n in shown if n.severity in ("warning", "error")]

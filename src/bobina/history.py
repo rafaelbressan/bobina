@@ -32,6 +32,7 @@ def enabled() -> bool:
 KEEP_VALUE = {  # options whose value is a file name, a number or a setting, never personal data
     "--data", "--join", "--on", "--sheet", "--rows", "--copies", "--repeat", "--copies-from", "--page", "--profile",
     "--printer", "-o", "--output", "--problems", "--allow", "--allow-all", "--editor", "--limit", "--step-every",
+    "--log",
 }  # fmt: skip
 NUMBER_VALUE = {"--step", "--steps", "--pause", "--one-by-one"}  # --step 3; in `--step note.md` the file is a target
 MASK_VALUE = {"--set": "=", "--set-all": "=", "--where": "!=~"}  # keep the key/column, hide the value
@@ -199,9 +200,7 @@ class Recorder:
             rec |= {"labels_printed": self.labels_printed, "length_mm": self.printed_mm,
                     "bytes_sha256": self.printed_sha256}  # fmt: skip
         # messages can quote data (barcode contents, keys, --set values): stored with those values masked
-        secrets = set(self.secrets)
-        for r in getattr(res, "results", None) or ([res] if res is not None else []):
-            secrets.update(getattr(getattr(r, "rendered", None), "data", None) or [])
+        secrets = set(self.secrets) | data_secrets(res)
         rec["problems"] = [_problem(p, secrets) for p in (problems or [])]
         try:
             keep = int(config.load().get("history_max", 5000))
@@ -213,7 +212,20 @@ class Recorder:
             with p.open("ab") as f:
                 f.write(line)
             _trim(p, keep)
+        global LAST_ID
+        LAST_ID = rec["id"]  # the job id of this run (--log FILE names it)
+        from . import problem_log
+
+        problem_log.job_done(rec["id"], exit_code)  # --log: this job's problems, written now with its id
         return rec
+
+
+def data_secrets(res) -> set[str]:
+    """The data values printed in a job (fields of every label): masked in stored and logged messages."""
+    out: set[str] = set()
+    for r in getattr(res, "results", None) or ([res] if res is not None else []):
+        out.update(str(v) for v in (getattr(getattr(r, "rendered", None), "data", None) or []))
+    return out
 
 
 def _problem(p, secrets: set[str]) -> dict:
@@ -275,6 +287,23 @@ def load() -> list[dict]:
 
 
 skipped = 0
+LAST_ID: str | None = None  # the id of the job this run recorded, if any
+
+# bobina history export --format csv: the columns, always in this order (new ones only ever go at the end)
+CSV_COLUMNS = (
+    "id", "time", "command", "outcome", "exit", "duration_s", "printer", "profile", "labels", "labels_printed",
+    "length_mm", "cuts", "tears", "saved_to", "files", "problems", "argv",
+)  # fmt: skip
+
+
+def csv_row(r: dict) -> list[str]:
+    """One job as CSV fields: lists become space-separated (files of its parts, problem codes, the command)."""
+    cell = {
+        "files": " ".join(p.get("file", "") for p in r.get("parts") or []),
+        "problems": " ".join(p.get("code", "") for p in r.get("problems") or []),
+        "argv": " ".join(r.get("argv") or []),
+    }
+    return [cell[c] if c in cell else ("" if r.get(c) is None else str(r.get(c))) for c in CSV_COLUMNS]
 
 
 def select(rows: list[dict], *, since: str | None = None, outcome: str | None = None, printer: str | None = None):

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
+
 from .. import history
-from .common import OK, USAGE, Fail, ask, open_tty, plural, print_json
+from .common import OK, USAGE, Fail, ask, err, json_written, open_tty, plural, print_json
 
 
 def _files(r: dict) -> str:
@@ -121,6 +123,10 @@ def cmd_history(args):
         return OK
     total = len(rows)
     rows = history.select(rows, since=_since(args.since), outcome=_outcome(args.outcome), printer=args.printer)
+    if args.action == "export":
+        return _export(args, rows[-args.limit :] if args.limit else rows)
+    if args.output or args.format:
+        raise Fail(USAGE, "-o and --format are for bobina history export", problem="E101")
     if args.action == "show":
         if not args.id:
             raise Fail(USAGE, "usage: bobina history show ID (see: bobina history)", problem="E101")
@@ -148,7 +154,8 @@ def cmd_history(args):
         if st["top_problems"]:
             print("most frequent problems: " + ", ".join(f"{c} ×{n}" for c, n in st["top_problems"]))
         return OK
-    rows = rows[-args.limit :] if args.limit else rows
+    limit = 20 if args.limit is None else args.limit
+    rows = rows[-limit:] if limit else rows
     if args.json:
         print_json(rows, indent=2, ensure_ascii=False)
         return OK
@@ -162,4 +169,46 @@ def cmd_history(args):
         print(_long(r) + "\n" if args.long else _line(r))
     if history.skipped:
         print(f"note: {history.skipped} damaged line(s) in {history.path()} were skipped")
+    return OK
+
+
+def _export(args, rows: list[dict]) -> int:
+    """bobina history export: every job that matches (all of them unless --limit), oldest first, as JSONL (the stored
+    lines, schema bobina.history/1) or CSV (history.CSV_COLUMNS, always in that order). Stdout, or -o FILE."""
+    import csv
+    import io
+    import json
+
+    if args.id:  # bobina history export jobs.csv: the file, as with -o
+        if args.output:
+            raise Fail(USAGE, f"export takes one file: '{args.id}' or -o {args.output}", problem="E101")
+        args.output = args.id
+    guess = "csv" if (args.output or "").lower().endswith(".csv") else "jsonl"
+    fmt = (args.format or guess).lower()
+    if fmt not in ("jsonl", "csv"):
+        raise Fail(USAGE, f"--format {args.format}: use jsonl or csv", problem="E101")
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(history.CSV_COLUMNS)
+        w.writerows(history.csv_row(r) for r in rows)
+        text = buf.getvalue()
+    else:
+        text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    if history.skipped:  # an audit must know the export is not the whole file
+        err(f"note: {history.skipped} damaged line(s) in {history.path()} are not in the export")
+    if not args.output:
+        sys.stdout.write(text)
+        if fmt == "jsonl":
+            json_written(mark=True)  # --json asked for JSON: it was written
+        return OK
+    from pathlib import Path
+
+    from .. import fileio
+
+    try:
+        fileio.write_output(Path(args.output).expanduser(), text.encode("utf-8"))
+    except OSError as e:
+        raise Fail(USAGE, f"{args.output}: {e.strerror or e} (nothing written)", problem="E208") from None
+    err(f"wrote {plural(len(rows), 'job')} to {args.output} ({fmt})")
     return OK

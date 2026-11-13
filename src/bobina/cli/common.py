@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import config, datasource, editor, engine, state, transport, view  # noqa: F401
+from .. import config, datasource, editor, engine, problem_log, state, transport, view  # noqa: F401
 from ..nudges import Nudge, SecurityError, problems_header
 from ..templating import Tainted
 
@@ -35,10 +35,12 @@ def print_json(obj, **kw) -> None:
     print(_json.dumps(obj, **kw))
 
 
-def json_written(reset: bool = False) -> bool:
+def json_written(reset: bool = False, mark: bool = False) -> bool:
     was = _JSON_WRITTEN[0]
     if reset:
         _JSON_WRITTEN[0] = False
+    if mark:  # JSON written another way than print_json (history export: JSON lines)
+        _JSON_WRITTEN[0] = True
     return was
 
 
@@ -66,7 +68,9 @@ def strict_hits(job, args) -> bool:
 
 def job_json(res) -> dict:
     """The figures and the problems of a job, as check, print and preview --json write them."""
-    return {"stats": res.stats(), "problems": [n.as_dict() for n in res.visible_nudges()]}
+    shown = res.visible_nudges()
+    problem_log.add(shown, res)
+    return {"stats": res.stats(), "problems": [n.as_dict() for n in shown]}
 
 
 def job_code(job) -> int:
@@ -78,7 +82,7 @@ def job_code(job) -> int:
 ALIASES = {"p": "print", "c": "check", "pv": "preview", "v": "view", "e": "edit", "s": "status", "m": "mode"}
 
 
-GLOBAL_WITH_VALUE = {"--profile", "--printer", "--allow", "--editor", "--problems"}
+GLOBAL_WITH_VALUE = {"--profile", "--printer", "--allow", "--editor", "--problems", "--log"}
 
 
 GLOBAL_FLAGS = {
@@ -176,6 +180,8 @@ def render_problems(items: list, outcome: str) -> list[str]:
     """The problems in the chosen format: pretty (people), plain (one line each, grep), json (one object),
     jsonl (one object per line, for logs). Same fields everywhere: docs/CLI.md 'Problems'."""
     import json as _json
+
+    problem_log.add(items)  # --log FILE: every problem reported in this run
 
     fmt = _FMT[0]
     if fmt == "plain":
@@ -697,7 +703,7 @@ JOB_FLAGS = (
     "yes", "dry_run", "compact_all", "quiet", "strict", "json", "no_color", "verbose", "debug", "force", "pages",
     "sandbox",
 )  # fmt: skip
-JOB_VALUES = ("printer", "profile", "output", "editor", "marks")
+JOB_VALUES = ("printer", "profile", "output", "editor", "marks", "log")
 PLAIN_WORD = re.compile(r"[^\s/\\.@:]+")
 
 
@@ -1016,6 +1022,7 @@ IMAGE_FORMATS = (".png", ".jpg", ".jpeg", ".pdf", ".webp", ".bmp", ".gif", ".tif
 
 def report_nudges(res, args) -> int:
     shown = res.visible_nudges()
+    problem_log.add(shown, res)  # also with -q: the log keeps what the terminal does not show
     strict = strict_hits(shown, args)  # one pass over a 1000-label batch, not two
     left_out = [n for n in shown if n.code in LEFT_OUT_CODES]
     if strict and args.quiet:  # -q hides nudges, but never the reason of a stop
@@ -1110,6 +1117,7 @@ def screen(res, title: str, color: bool, args=None) -> str:
     if name:
         out.append(paper.check(name, res.length_mm, res.nudges if hasattr(res, "nudges") else res.first.nudges))
     shown = res.visible_nudges()
+    problem_log.add(shown, res)
     if shown and _FMT[0] == "pretty":
         out += [""] + nudge_block(shown, "check them before printing")
     elif shown:  # json/jsonl/plain: machine output goes to stderr, the screen stays for people
