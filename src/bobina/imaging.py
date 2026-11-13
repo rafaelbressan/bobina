@@ -64,6 +64,7 @@ def flatten(im: Image.Image) -> Image.Image:
 
 LINE_ART_INK = 0.70  # the 3 main ink colours cover this much of the ink (flat colours, not shading) …
 LINE_ART_SPREAD = 64  # … and the main ink differs from the paper in brightness (not a foggy photo)
+FLAT_DARK = 64  # an image of one colour this dark (or this light) is drawn black (or left white); greys are dithered
 
 
 def line_art(im: Image.Image) -> bool:
@@ -77,8 +78,12 @@ def line_art(im: Image.Image) -> bool:
     colors = sorted(q.getcolors(64 * 64) or [], reverse=True)
     paper, ink = colors[0] if colors else None, colors[1:]
     total_ink = sum(n for n, _ in ink)
-    if paper is None or not total_ink:
-        return True  # one flat colour (a black square, a blank card): a drawing, not shading
+    if paper is None:
+        return False
+    if not total_ink:  # one flat colour: a black square or a blank card is a drawing; a flat grey stays a grey tone
+        r, g, b = paper[1]
+        light = (299 * r + 587 * g + 114 * b) / 1000
+        return light < FLAT_DARK or light > 255 - FLAT_DARK
     if sum(n for n, _ in ink[:3]) / total_ink < LINE_ART_INK:
         return False
 

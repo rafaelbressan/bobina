@@ -120,3 +120,90 @@ def test_a_compact_table_keeps_its_columns_when_aligned(tmp_path):
     ends = {len(x) for x in lines}
     assert ends == {res.profile.columns}  # every line ends at the right edge: the grid is intact
     assert len({x.index("Qty" if "Qty" in x else "6") for x in lines}) <= 2
+
+
+CAPTIONED = ["image", "qr", "barcode", "datamatrix", "pdf417", "pay", "contact"]
+
+
+def captioned(tmp_path, kind, attrs):
+    logo(tmp_path)
+    doc = OBJECTS[kind].format(a=f'caption="Loja" {attrs}').replace(" caption=none", "")
+    return build(doc, base_dir=str(tmp_path))
+
+
+@pytest.mark.parametrize("kind", CAPTIONED)
+@pytest.mark.parametrize(
+    "obj,cap",
+    [(".right", "left"), (".left", "right"), ("width=full", "center")],
+    ids=["object-right-caption-left", "object-left-caption-right", "object-full-caption-center"],
+)
+def test_the_caption_has_its_own_alignment(tmp_path, kind, obj, cap):
+    res = captioned(tmp_path, kind, f"{obj} caption-align={cap}")
+    caption = [r for r in res.rows if isinstance(r, TextRow) and "Loja" in "".join(c.ch for c in r.cells)]
+    assert caption and all(r.align == cap for r in caption), [n.code for n in res.nudges]
+    a, b, w = ink_box(res, (TextRow,))
+    if cap == "left":
+        assert a <= 24
+    elif cap == "right":
+        assert b >= w - 24
+    else:
+        assert abs((a + b) / 2 - w / 2) <= 24
+    obj_a, obj_b, _ = ink_box(res, (BitmapRow, QRRow, BarcodeRow))
+    if obj == ".right":
+        assert obj_b >= w - 24  # the object stays where it was put
+    elif obj == ".left":
+        assert obj_a <= 24
+
+
+@pytest.mark.parametrize("kind", CAPTIONED)
+def test_by_default_the_caption_follows_and_a_bad_value_says_so(tmp_path, kind):
+    res = captioned(tmp_path, kind, ".right")
+    assert all(
+        r.align == "right" for r in res.rows if isinstance(r, TextRow) and "Loja" in "".join(c.ch for c in r.cells)
+    )
+    res = captioned(tmp_path, kind, ".right caption-align=middle")
+    assert any(n.code == "M101" and "caption-align" in n.message for n in res.nudges)
+
+
+# --------------------------------------------------------------- review: edges that must never crash or mislead
+
+
+@pytest.mark.parametrize("given", ["inf", "inf%", "infmm", "nan", "-inf"])
+@pytest.mark.parametrize("kind", ["image", "qr", "barcode", "datamatrix", "pay", "contact"])
+def test_an_infinite_width_is_a_note(tmp_path, kind, given):
+    res = render(tmp_path, kind, f"width={given}", "mtp-ii-58")
+    assert any(n.code == "M101" and "width=" in n.message for n in res.nudges)
+
+
+def test_a_barcode_width_never_goes_below_a_scannable_module(tmp_path):
+    res = build("```barcode {type=code128 width=third}\nABCDEFGHIJ1234567\n```\n")
+    assert "Q108" in [n.code for n in res.nudges]
+    rows = [r for r in res.rows if isinstance(r, BarcodeRow)]
+    assert all(r.module >= 2 for r in rows)
+
+
+def test_a_vertical_barcode_with_a_tiny_width_still_prints():
+    res = build("```barcode {type=code128 orientation=vertical width=5}\nAB12\n```\n")
+    assert [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "barcode"]
+
+
+def test_a_missing_image_prints_no_lonely_caption(tmp_path):
+    res = build('![](nope.png){caption="Loja"}\n', base_dir=str(tmp_path))
+    assert not [r for r in res.rows if isinstance(r, TextRow)]
+
+
+def test_size_on_a_payment_or_contact_is_said_once(tmp_path):
+    for doc in (OBJECTS["contact"], OBJECTS["pay"]):
+        res = build(doc.format(a="size=full"))
+        notes = [n for n in res.nudges if n.code == "M101"]
+        assert len(notes) == 1 and "width=full" in notes[0].suggestion
+
+
+def test_a_datamatrix_fitted_too_small_says_so():
+    res = build("```datamatrix {width=40}\n" + "x" * 40 + "\n```\n")
+    assert "Q101" in [n.code for n in res.nudges]
+
+
+@pytest.mark.parametrize("doc", ["hello {mirror=x}\n", "```qr {mirror=x}\nhi\n```\n", "# Title {mirror=y}\n"])
+def test_mirror_on_anything_but_an_image_is_said_once(doc):
+    assert [n.code for n in build(doc).nudges if "mirror" in n.message] == ["M101"]

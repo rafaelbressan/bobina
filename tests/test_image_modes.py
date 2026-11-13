@@ -199,3 +199,21 @@ def test_a_vector_turned_sideways_is_drawn_at_its_final_size(tmp_path):
     assert box[2] - box[0] <= im.width // 2 + 2  # the turned drawing fits the asked width …
     assert box[3] - box[1] > 1.6 * (box[2] - box[0])  # … and keeps its proportions (tall now)
     assert set(im.tobytes()) <= {0, 255}
+
+
+@pytest.mark.parametrize("grey,drawing", [(0, True), (30, True), (85, False), (127, False), (170, False), (250, True)])
+def test_a_flat_colour_is_a_drawing_only_when_clearly_dark_or_light(grey, drawing):
+    """A black square prints black; a flat grey placeholder is a grey tone (dithered), never a solid black slab."""
+    assert imaging.line_art(Image.new("RGB", (100, 60), (grey, grey, grey))) is drawing
+
+
+def test_a_thin_logo_turned_by_a_slant_is_still_a_drawing(tmp_path):
+    im = Image.new("RGB", (200, 100), "white")
+    d = ImageDraw.Draw(im)
+    for x in range(10, 190, 12):
+        d.line((x, 10, x, 90), fill="black", width=2)
+    im.save(tmp_path / "thin.png")
+    for ang in (0, 30, 45):
+        res = build(f"![](thin.png){{rotate={ang}}}\n", base_dir=str(tmp_path))
+        (note,) = [n for n in res.nudges if n.code == "I109"]
+        assert "drawing" in note.message, ang  # decided on the source: the slant's soft edges never decide

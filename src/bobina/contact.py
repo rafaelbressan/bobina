@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 MARK = "⚠ not tested in the app"
-QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "id"}
+QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "caption-align", "id"}
 
 
 class ContactError(ValueError):

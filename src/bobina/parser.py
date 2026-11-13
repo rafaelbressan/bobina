@@ -37,7 +37,6 @@ KNOWN_CLASSES = {
     "dither",  # images: dithered like a photo, even if bobina sees a logo
 }
 KNOWN_KEYS = {
-    "mirror",  # images: x (left-right), y (top-bottom), xy (both)
     "size",
     "font",
     "align",
@@ -69,6 +68,9 @@ TASK_RE = re.compile(r"^\[([ xX])\]\s+")
 TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)""")
 
 
+CAPTION_KEYS = frozenset({"caption", "caption-align"})  # images and codes: a line under them, placed on its own
+IMAGE_KEYS = CAPTION_KEYS | {"mirror"}  # mirror=x|y|xy: images only
+CODES = ("qr", "barcode", "datamatrix", "pdf417")
 WORD_BLOCKS = {"contact"}  # blocks that take a word after their kind: ```contact whatsapp
 
 
@@ -322,7 +324,7 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
                 ia = _span_attrs(img).merged(extra) if extra else _span_attrs(img)
                 check_attrs(
                     Attrs(ia.classes, {k: v for k, v in ia.kv.items() if k not in ("src", "alt", "title")}), ln, nudges,
-                    extra=frozenset({"caption"}),
+                    extra=IMAGE_KEYS,
                 )  # fmt: skip
                 for k in ("src", "alt", "title"):
                     ia.kv.pop(k, None)
@@ -365,7 +367,7 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
             check_attrs(
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
-                extra=frozenset({"caption"}) if k in ("qr", "image") else frozenset(),
+                extra=IMAGE_KEYS if k == "image" else CAPTION_KEYS if k in CODES else frozenset(),
             )  # fmt: skip
             out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":

@@ -18,7 +18,7 @@ from urllib.parse import quote
 from . import codes
 
 OLD_NAMES = {"key": "to", "txid": "ref", "description": "note"}  # the removed pix block's names, for the hint
-QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "scheme", "id"}
+QR_ATTRS = {"width", "module", "ecc", "align", "render", "caption", "caption-align", "scheme", "id"}
 MARK = "⚠ not tested in a payment app"
 
 

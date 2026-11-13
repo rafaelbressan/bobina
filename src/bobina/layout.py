@@ -72,6 +72,7 @@ IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images re
 MIRRORS = {"x": (True, False), "y": (False, True), "xy": (True, True), "yx": (True, True)}
 OBJECTS = ("qr", "barcode", "pay", "contact", "datamatrix", "pdf417")  # and images: sized by width=, placed by .left…
 FRACTIONS = {"full": 1.0, "half": 1 / 2, "third": 1 / 3}  # width=full|half|third on every object
+SAID_BY_OBJECT = {"size", "align"}  # object_words already says what to write instead (no second warning)
 
 
 def _turn(ang: float) -> tuple[float, float]:
@@ -725,8 +726,8 @@ class Layout:
             return rows
         if isinstance(b, ImageBlock) or (isinstance(b, Fence) and (b.kind or "").lower() == "image"):
             return rows  # images turn their source (Layout.turn): the paper width applies after the turn
-        for name in IMAGE_ONLY:
-            if a.has(name) or name in a.kv:
+        for name in IMAGE_ONLY:  # mirror= is not a key of other blocks: the parser already said "unknown key"
+            if a.has(name) or (name in a.kv and name != "mirror"):
                 self.n.add("M101", f"'{name}' works on images only: it does nothing here", b.line, "remove it")
         if a.has("flip") and not a.kv.get("rotate") and all(isinstance(r, TextRow) and r.native for r in rows):
             for r in rows:
@@ -869,7 +870,8 @@ class Layout:
         if kind == "qr":
             return self.qr(f)
         if kind == "barcode":
-            return self.barcode(f)
+            rows = self.barcode(f)
+            return rows + self.caption_for(f.attrs, f.line, rows)
         if kind == "pay":
             return self.pay(f)
         if kind == "contact":
@@ -878,7 +880,8 @@ class Layout:
             self.n.add("Q111", "the pix block is gone: Pix is pay {scheme=pix}, nothing printed", f.line, PAY_HINT)
             return []
         if kind in ("datamatrix", "pdf417"):
-            return self.matrix_code(f, kind)
+            rows = self.matrix_code(f, kind)
+            return rows + self.caption_for(f.attrs, f.line, rows)
         if kind == "raw":
             if PH_RE.search(f.content):
                 raise SecurityError("M314", "variables cannot be used inside raw blocks", f.line)
@@ -930,12 +933,12 @@ class Layout:
         try:
             if text in FRACTIONS:
                 w = int(self.W * FRACTIONS[text])
-            elif text.endswith("%"):
-                w = int(self.W * float(text[:-1]) / 100)
-            elif text.endswith("mm"):
-                w = self.p.mm_to_dots(float(text[:-2]))
             else:
-                w = int(float(text.removesuffix("px").removesuffix("dots")))
+                unit = next((u for u in ("%", "mm", "px", "dots") if text.endswith(u)), "")
+                n = float(text.removesuffix(unit))
+                if not math.isfinite(n):  # inf, nan: no width (int() of them raised)
+                    raise ValueError
+                w = int(self.W * n / 100) if unit == "%" else self.p.mm_to_dots(n) if unit == "mm" else int(n)
             if w < 1:
                 raise ValueError
         except ValueError:
@@ -947,6 +950,36 @@ class Layout:
         """left, center (the default for objects) or right: the classes .left .center .right, or align=."""
         given = next((a for a in ("left", "right", "center") if attrs.has(a)), attrs.kv.get("align"))
         return given if given in ("left", "right", "center") else "center"
+
+    def caption_align(self, attrs, line: int) -> str:
+        """caption-align=left|center|right; by default the caption follows its object."""
+        given = attrs.kv.get("caption-align")
+        if given is None:
+            return self.object_align(attrs)
+        if given in ("left", "center", "right"):
+            return given
+        self.n.add("M101", f"caption-align={given}", line, "left, center or right")
+        return self.object_align(attrs)
+
+    def caption_for(self, attrs, line: int, rows: list, auto: str = "", alt: str | None = None) -> list:
+        """The caption line under an object that printed (none when it did not): caption="text", caption=auto (the
+        block's own text: a payment's scheme and amount, a contact's network; none for the others), caption=alt
+        (an image's alt text), none/no/off: no line. Placed by caption-align=, else as its object. A value from
+        --data/--set is laid out as text: never Markdown, never an icon."""
+        if not rows:
+            return []
+        raw = attrs.kv.get("caption", "auto" if auto else "")
+        text = self.text(str(raw)).strip()
+        word = text.lower()
+        if word == "auto":
+            text = auto
+        elif word == "alt" and alt is not None:
+            text = self.text(alt).strip()
+            if not text:
+                self.n.add("M101", "caption=alt: this image has no alt text", line, "write it: ![Shop sign](logo.png)")
+        elif word in NO_CAPTION:
+            text = ""
+        return self.caption_rows(text, line, self.caption_align(attrs, line)) if text else []
 
     def object_words(self, attrs, line: int) -> None:
         """One way to size and place an object: width= and .left/.center/.right. size= is a text size and .justify
@@ -961,10 +994,7 @@ class Layout:
         """A QR code, and under it the caption= line if there is one (1 mm of air: glued, it reads as part of it)."""
 
         rows = self._qr_code(f, resolved)
-        caption = self.text(str(f.attrs.kv.get("caption", ""))).strip()
-        if caption.lower() in NO_CAPTION:  # auto: a plain QR has nothing to say on its own
-            caption = ""
-        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
+        return rows + self.caption_for(f.attrs, f.line, rows)  # auto: a plain QR has nothing to say on its own
 
     def caption_rows(self, text: str, line: int, align: str = "center") -> list:
         """The line under a code or an image, aligned as its object (1 mm of air: glued, it reads as part of it)."""
@@ -1067,7 +1097,12 @@ class Layout:
             return []
         units = len(pattern) if pattern else 0
         if units and target and orientation != "vertical":
-            mod = self.fit_module(target, units, mod, 6)  # GS w accepts 1..6
+            fitted = self.fit_module(target, units, mod, 6)  # GS w accepts 1..6
+            lo = int(self.p.get("barcode.min_module", 2))
+            if fitted < lo:
+                self.n.add("Q108", f"width={f.attrs.kv['width']} would give module {fitted}: too thin to scan", f.line,
+                           f"module {lo} is kept; a larger width or less data")  # fmt: skip
+            mod = max(lo, fitted)
         too_wide = bool(units) and units * mod > self.W
         if orientation == "vertical" or (orientation == "auto" and too_wide):
             if not pattern:
@@ -1086,7 +1121,7 @@ class Layout:
                     )
                 else:
                     mod = lo_feed  # feed direction blurs more than the head direction
-            bar_len = min(self.W, target) - 8 if target else height
+            bar_len = max(16, min(self.W, target) - 8) if target else height
             # drawn by bobina, not by the firmware: the readable 3:1 Code39, whatever the printer's GS k does
             im = codes.image(kind, data, mod, bar_len, text, self.em, wide=3).rotate(-90, expand=True)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
@@ -1132,6 +1167,10 @@ class Layout:
                 fitted = self.fit_module(target, max(1, im.width // mod), mod, 64)
                 if fitted != mod:
                     mod, im = fitted, draw(fitted)
+                lo = int(self.p.get("qr.min_module_raster", 4))
+                if kind == "datamatrix" and mod < lo:
+                    self.n.add("Q101", f"width={f.attrs.kv['width']} gives datamatrix module {mod}", f.line,
+                               f"a larger width or less data (module ≥ {lo})")  # fmt: skip
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -1167,7 +1206,7 @@ class Layout:
         example = s.block.replace("\n", " ")
         carries = "amount" in s.attrs
         for k in kv:
-            if k not in s.attrs and k not in pay.QR_ATTRS and k != "amount" and str(kv[k]).strip():  # empty: unused
+            if k not in s.attrs and k not in pay.QR_ATTRS | SAID_BY_OBJECT and k != "amount" and str(kv[k]).strip():
                 hint = f"write {pay.OLD_NAMES[k]}= (the old Pix name)" if k in pay.OLD_NAMES else ""
                 takes = f"it takes {', '.join(s.attrs)} (bobina help pay {s.name})"
                 self.n.add("M101", f"{label} does not use '{k}='", f.line, hint or takes)
@@ -1217,15 +1256,10 @@ class Layout:
             self.n.add(
                 "P302", f"{label}: {why} ({pay.MARK})", f.line, "scan a printed code with the app before using it"
             )
-        caption = str(kv.get("caption", "auto")).strip()
-        if caption.lower() == "auto":
-            caption = pay.caption(s, amount, kv, loc)  # computed text: never a keyword
-        elif caption.lower() in NO_CAPTION:
-            caption = ""
         keep = {k: v for k, v in f.attrs.kv.items() if k in pay.QR_ATTRS - {"caption", "scheme"}}
         rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
                              resolved=True)  # fmt: skip
-        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
+        return rows + self.caption_for(f.attrs, f.line, rows, auto=pay.caption(s, amount, kv, loc))
 
     def contact(self, f: Fence) -> list:
         """A contact or profile QR code (```contact NETWORK, the value in the body): the link from contact.py, a QR
@@ -1244,8 +1278,8 @@ class Layout:
         label = f"contact {n.name}"
         kv = {k: self.text(v) for k, v in f.attrs.kv.items()}
         for k in kv:
-            if k not in contact.QR_ATTRS and k not in (n.attrs or {}):
-                takes = ", ".join([*(n.attrs or {}), "caption", "size", "module", "ecc"])
+            if k not in contact.QR_ATTRS | SAID_BY_OBJECT and k not in (n.attrs or {}):
+                takes = ", ".join([*(n.attrs or {}), "caption", "width", "module", "ecc"])
                 self.n.add("M101", f"{label} does not use '{k}='", f.line, f"it takes {takes} (bobina help contact "
                            f"{n.name})")  # fmt: skip
         body = self.text(f.content).strip()
@@ -1270,15 +1304,10 @@ class Layout:
                 why += f"; {n.proprietary}"
             self.n.add("P303", f"{label}: {why} ({contact.MARK})", f.line,
                        "scan a printed code with the app before handing it out")  # fmt: skip
-        caption = str(kv.get("caption", "auto")).strip()
-        if caption.lower() == "auto":
-            caption = contact.caption(n, detail)
-        elif caption.lower() in NO_CAPTION:
-            caption = ""
         keep = {k: v for k, v in f.attrs.kv.items() if k in contact.QR_ATTRS - {"caption"}}
         rows = self._qr_code(Fence(line=f.line, attrs=Attrs(set(f.attrs.classes), keep), kind="qr", content=payload),
                              resolved=True)  # fmt: skip
-        return rows + self.caption_rows(caption, f.line, self.object_align(f.attrs)) if rows else rows
+        return rows + self.caption_for(f.attrs, f.line, rows, auto=contact.caption(n, detail))
 
     def image_width(self, width, line: int) -> int:
         """width= of an image (object_width: full, half, third, 50%, 30mm, dots); the paper width when absent."""
@@ -1295,23 +1324,8 @@ class Layout:
             raise SecurityError("M312", "an image path cannot come from --data/--set values", line)
         src = self.text(src)
         self.object_words(attrs, line)
-        return self._image(src, attrs, line) + self.image_caption(attrs, alt, line)
-
-    def image_caption(self, attrs, alt: str, line: int) -> list:
-        """caption="text" under an image, centred, as a QR's; caption=alt uses the alt text of ![alt](file). A value
-        from --data/--set prints literally (it is laid out as text, never read as Markdown)."""
-        cap = attrs.kv.get("caption")
-        if cap is None:
-            return []
-        text = self.text(str(cap)).strip()
-        if text.lower() == "alt":
-            text = self.text(alt or "").strip()
-            if not text:
-                self.n.add("M101", "caption=alt: this image has no alt text", line, "write it: ![Shop sign](logo.png)")
-                return []
-        if text.lower() in NO_CAPTION:
-            return []
-        return self.caption_rows(text, line, self.object_align(attrs))
+        rows = self._image(src, attrs, line)
+        return rows + self.caption_for(attrs, line, rows, alt=alt or "")
 
     def _image(self, src: str, attrs, line: int) -> list:
         w = self.image_width(attrs.kv.get("width"), line)
@@ -1363,8 +1377,8 @@ class Layout:
         if across > 2 * w and min(im.size) > 1:  # a 40 MP photo: turned and sampled small, never at full size
             f = max(1, int(across // (2 * w)))
             im = im.reduce(f) if f > 1 else im
+        kind, level = self.treatment(im, attrs, vector, line, src)  # on the source: a slant's soft edges never decide
         im = self.turn(im, ang, attrs, line)
-        kind, level = self.treatment(im, attrs, vector, line, src)
         default_gamma = (
             self.p.get("image.gamma_atkinson", 1.5) if kind == "atkinson" else self.p.get("image.gamma", 1.8)
         )

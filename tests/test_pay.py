@@ -253,7 +253,7 @@ def test_caption_auto_on_a_plain_qr_prints_nothing_and_a_computed_none_is_kept()
 
 
 def test_caption_is_checked_on_blocks_that_do_not_take_it():
-    res = build('```barcode {caption="Order"}\nABC\n```\n')
+    res = build('```text {caption="Order"}\nABC\n```\n')
     assert any("caption" in n.message for n in res.nudges if n.code == "M101")
 
 

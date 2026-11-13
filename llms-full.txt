@@ -850,9 +850,9 @@ printer multipliers `size=2x`, `size=1x2` (width × height; above 4× prints jag
 
 ## 6. Objects (fenced blocks)
 
-The info string carries the object type and its attributes: ` ```qr {width=half .right} `. Every object (image,
-code, `pay`, `contact`) is centred unless `.left` / `.right`; `width=full|half|third|50%|30mm|200` sizes it
-(codes: the largest integer module); captions follow.
+The info string carries the type and attributes: ` ```qr {width=half .right} `. Every object (image, code, `pay`,
+`contact`) is centred unless `.left`/`.right`; `width=full|half|third|50%|30mm|200` sizes it (codes: the largest
+integer module); `caption="…"` follows it unless `caption-align=left|center|right`.
 
 ### 6.1 QR code ✓
 
@@ -863,7 +863,7 @@ https://example.com
 ````
 
 `module=` dots per module (profile default 4; minimum 3 native, 4 raster → `Q101`), `ecc=L|M|Q|H` (`L` → `Q102`),
-`width=` (native: module ≤ 16), `render=raster`, `caption="Menu"` a centred line under the code. Content that does not fit
+`width=` (native: module ≤ 16), `render=raster`, `caption="Menu"`. Content that does not fit
 any QR → `Q109`, nothing printed.
 
 ### 6.2 Barcodes ✓
