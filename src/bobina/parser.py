@@ -271,10 +271,11 @@ def _trim(kids: list) -> list:
     return kids
 
 
-def _segments(inline) -> list[tuple[list, Attrs | None, int]]:
-    """A paragraph's lines cut after each inner line that ends in a standalone `{…}`: that attribute closes the
-    lines above it, as the last line's closes the paragraph. [(children, attributes, lines before them)]; one
-    segment (attributes None) when no inner line has one."""
+def _segments(inline, nudges: Nudges, ln: int) -> list[tuple[list, Attrs | None, int]]:
+    """A paragraph's lines cut after each inner line that ends in a standalone `{…}` with a class or a key (an
+    empty {} or an id alone stays text there): that attribute closes the lines above it, as the last line's closes
+    the paragraph; checked at its own line. [(children, attributes, lines before them)]; one segment (attributes
+    None) when no inner line has one."""
     kids = inline.children
     out, start = [], 0
     for i, k in enumerate(kids):
@@ -282,12 +283,14 @@ def _segments(inline) -> list[tuple[list, Attrs | None, int]]:
             continue
         prev = kids[i - 1]
         m = ATTR_TAIL.search(prev.content)
-        if not m or (a := parse_attrs(m.group(1))) is None:
+        a = parse_attrs(m.group(1)) if m else None
+        if a is None or not (a.classes or set(a.kv) - {"id"}):
             continue
         alone = not _trim(kids[start : i - 1]) and not prev.content[: m.start()].strip()
         if alone and not out:
             continue  # a first line that is only {…}: nothing above it to close, it stays text
         prev.token.content = prev.content[: m.start()]
+        check_attrs(a, ln + _breaks_in(kids[:i]), nudges)
         if alone:  # a line of its own right after a closed segment: it closes the same lines
             seg, a0, before = out[-1]
             out[-1] = (seg, a0.merged(a), before)
@@ -310,7 +313,8 @@ def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", 
     env: dict = {}
     root = SyntaxTreeNode(_md().parse(text, env))
     doc = Document(meta=meta or {}, base_dir=base_dir)
-    doc.blocks = _blocks(root.children, nudges, line_offset, text.splitlines())
+    lines = re.split(r"\r\n?|\n", text)  # as markdown-it counts them (its maps index these)
+    doc.blocks = _blocks(root.children, nudges, line_offset, lines)
     _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
     return doc
 
@@ -356,6 +360,8 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             if am and out and (a0 := parse_attrs(am.group(1))) is not None:  # attribute line: applies above
                 check_attrs(a0, ln, nudges)
                 out[-1].attrs = out[-1].attrs.merged(a0)
+                if isinstance(out[-1], Table):
+                    out[-1].attrs_line = ln
                 continue
             dm = DIVIDER_RE.match(raw)
             if dm and (a := parse_attrs(dm.group(1))) is not None:
@@ -381,15 +387,14 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
                 continue
             paras: list[Paragraph] = []
-            for seg, a, before in _segments(inline):
+            for seg, a, before in _segments(inline, nudges, ln):
                 if a is None and (a := _strip_tail_attrs(_Lines(seg))) is not None:
+                    check_attrs(a, ln + _breaks_in(inline.children), nudges)  # the last line's
                     seg = _trim(seg)
                     if not seg and paras:  # "A {.right}\n{.center}": the last line closes the lines above
                         paras[-1].attrs = paras[-1].attrs.merged(a)
-                        check_attrs(a, ln + _breaks_in(inline.children), nudges)
                         continue
                 a = a or Attrs()
-                check_attrs(a, ln + before + _breaks_in(seg), nudges)
                 paras.append(Paragraph(line=ln + before, attrs=a, runs=inline_runs(_Lines(seg)), follows=bool(paras)))
             out.extend(paras)
         elif t in ("bullet_list", "ordered_list"):
@@ -449,7 +454,8 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     tb = Table(line=ln)
     body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
     if body and body.children and (a := _row_attrs(body.children[-1], src)) is not None:
-        check_attrs(a, _line(body.children[-1], ln - _line(n, 0)), nudges)
+        tb.attrs_line = _line(body.children[-1], ln - _line(n, 0))
+        check_attrs(a, tb.attrs_line, nudges)
         tb.attrs = a
         body.children.pop()
     for section in n.children:

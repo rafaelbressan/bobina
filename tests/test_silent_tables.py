@@ -265,3 +265,74 @@ def test_a_turned_table_without_a_header_has_none():
     longest = max(sum(1 for y in range(table.image.height) if px[x, y] == 0) for x in range(table.image.width))
     assert longest < table.image.height // 2
     assert len(lines(build("| | | | |\n|---|---|---|---|\n| a | b | c | d |\n"))) == 1
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+
+def test_an_empty_or_id_only_brace_on_an_inner_line_stays_text():
+    assert lines(build("Mesa {#5}\nPedido 12\n")) == ["Mesa {#5}", "Pedido 12"]
+    assert lines(build("A {}\nB\n")) == ["A {}", "B"]
+
+
+def test_an_attribute_line_under_a_table_is_found_after_unusual_line_separators():
+    for sep in (" ", "\x0c", "\x85"):
+        res = build(f"Intro x{sep}y\n\n| a | b |\n|---|---|\n| 1 | 2 |\n{{.compact}}\n")
+        table = next(b for b in res.doc.blocks if type(b).__name__ == "Table")
+        assert table.attrs.has("compact") and "{.compact}" not in "".join(lines(res)), repr(sep)
+
+
+def test_a_loose_paragraph_in_a_done_task_is_not_struck_in_any_of_its_segments():
+    res = build("- [x] Done\n\n  More A {.right}\n  More B\n")
+    more = [r for r in text_rows(res) if "More" in "".join(c.ch for c in r.cells)]
+    assert len(more) == 2
+    assert not any(c.strike for r in more for c in r.cells)
+
+
+def test_a_span_size_or_font_in_a_cell_is_said_to_do_nothing():
+    res = build("| [Total]{size=large} | [x]{font=serif} |\n|---|---|\n| 1 | 2 |\n")
+    msgs = " ".join(n.message for n in res.nudges if n.code == "M101")
+    assert "size=" in msgs and "font=" in msgs and "cell" in msgs
+
+
+def test_a_floor_the_paper_cannot_give_does_not_crush_the_other_columns():
+    res = build("| D | V |\n|---|---|\n| 15/11/2026-15/12/2026-15/01/2027 | VL.TOTAL.GERAL.DO.PEDIDO |\n",
+                profile_name="mtp-ii-58")  # fmt: skip
+    words = {w for line in lines(res) for w in line.split()}
+    assert "VL.TOTAL.GERAL." in words  # not wrapped to its 6-column pieces to save the date that is cut anyway
+    assert "L101" in codes(res)
+
+
+def test_a_turned_trial_that_does_not_print_says_nothing():
+    long = "a long remark about this one item " * 6
+    head = "| " + " | ".join(f"Col{c}" for c in range(7)) + " |\n|" + "---|" * 7 + "\n"
+    body = "".join("| " + " | ".join(long if (r, c) == (0, 6) else f"it{r:02}{c}" for c in range(7)) + " |\n"
+                   for r in range(60))  # fmt: skip
+    res = build(head + body + "\n{width=abc}\n")
+    assert not any(isinstance(r, BitmapRow) and r.kind == "table" for r in res.rows)  # it stands
+    assert len([n for n in res.nudges if n.code == "M101" and "width" in n.message]) == 1
+    assert "L104" not in codes(res)
+
+
+def test_attribute_problems_are_reported_on_their_own_line():
+    res = build("A {.center}\nB {.foo}\n{.bar}\nC\n")
+    at = {n.message: n.line for n in res.nudges if n.code == "M101"}
+    assert at == {"unknown class '.foo'": 2, "unknown class '.bar'": 3}
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{font=Terminus}\n")
+    assert [n.line for n in res.nudges if n.code == "M101"] == [4]
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{size=2x}\n")
+    assert [n.line for n in res.nudges if n.code == "M101"] == [5]
+
+
+def test_a_header_of_any_kind_of_blank_is_no_header():
+    res = build("| &#12288; | &nbsp; |\n|---|---|\n| a | b |\n")
+    assert not any(isinstance(r, BitmapRow) and r.kind == "divider" for r in res.rows)
+    assert lines(res)[0].split() == ["a", "b"]
+
+
+def test_the_table_hint_lists_everything_a_table_takes():
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{font=Terminus}\n")
+    hint = next(n.suggestion for n in res.nudges if n.code == "M101")
+    for word in (".compact", ".left", ".center", ".right", ".flip", "align=", "orientation=", "width=", "rotate=",
+                 "#id"):  # fmt: skip
+        assert word in hint

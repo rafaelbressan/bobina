@@ -21,6 +21,11 @@ class Cell:
     wide: bool = False  # occupies two columns (CJK, drawn checkbox)
 
 
+def columns(cells: list[Cell]) -> int:
+    """The columns these cells take on the character grid (a wide character takes 2)."""
+    return sum(2 if c.wide else 1 for c in cells)
+
+
 @dataclass
 class TextRow:
     cells: list[Cell]
@@ -34,7 +39,7 @@ class TextRow:
     gap: int | None = None  # dots between this line and the next (None: profile native.line_gap_dots)
 
     def columns(self) -> int:
-        return sum(2 if c.wide else 1 for c in self.cells)
+        return columns(self.cells)
 
 
 @dataclass

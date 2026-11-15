@@ -89,6 +89,7 @@ class Table(Block):
     header: list[list[Run]] = field(default_factory=list)
     rows: list[list[list[Run]]] = field(default_factory=list)
     aligns: list[str] = field(default_factory=list)
+    attrs_line: int = 0  # the line of its {…} (problems with them are reported there); 0: none
 
 
 @dataclass
