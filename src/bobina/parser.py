@@ -261,7 +261,38 @@ BREAKS = ("softbreak", "hardbreak")
 
 
 def _breaks_in(kids) -> int:
-    return sum(1 if k.type in BREAKS else _breaks_in(k.children) for k in kids)
+    """The source lines these children end, so far: their line breaks, and the newlines inside a code span (which
+    has none: _code_lines counts them)."""
+    n = 0
+    for k in kids:
+        if k.type in BREAKS:
+            n += 1
+        elif k.type == "code_inline":
+            n += k.token.meta.get("newlines", 0)
+        else:
+            n += _breaks_in(k.children)
+    return n
+
+
+def _code_lines(inline) -> None:
+    """Each code span's newlines (its content has spaces for them), found in the paragraph's source in order, kept
+    on its token for _breaks_in."""
+    raw, pos = inline.content, 0
+
+    def spans(kids):
+        for k in kids:
+            if k.type == "code_inline":
+                yield k
+            else:
+                yield from spans(k.children)
+
+    for k in spans(inline.children):
+        body = r"[ \n]".join(re.escape(part) for part in k.content.split(" "))
+        tick = re.escape(k.token.markup)
+        m = re.compile(rf"(?<!`){tick}(?!`)[ \n]?{body}[ \n]?{tick}(?!`)").search(raw, pos)
+        if m:
+            k.token.meta["newlines"] = m.group(0).count("\n")
+            pos = m.end()
 
 
 def _trim(kids: list) -> list:
@@ -361,7 +392,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 check_attrs(a0, ln, nudges)
                 out[-1].attrs = out[-1].attrs.merged(a0)
                 if isinstance(out[-1], Table):
-                    out[-1].attrs_line = ln
+                    _attr_lines(out[-1], a0, ln)
                 continue
             dm = DIVIDER_RE.match(raw)
             if dm and (a := parse_attrs(dm.group(1))) is not None:
@@ -387,9 +418,10 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
                 continue
             paras: list[Paragraph] = []
+            _code_lines(inline)
             for seg, a, before in _segments(inline, nudges, ln):
                 if a is None and (a := _strip_tail_attrs(_Lines(seg))) is not None:
-                    check_attrs(a, ln + _breaks_in(inline.children), nudges)  # the last line's
+                    check_attrs(a, ln + raw.count("\n"), nudges)  # the last line's
                     seg = _trim(seg)
                     if not seg and paras:  # "A {.right}\n{.center}": the last line closes the lines above
                         paras[-1].attrs = paras[-1].attrs.merged(a)
@@ -441,6 +473,11 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
     return out
 
 
+def _attr_lines(tb: Table, a: Attrs, line: int) -> None:
+    """The line each of a table's attributes was written on (.compact, width=): problems are said there."""
+    tb.attr_lines.update({**{f".{c}": line for c in a.classes}, **{f"{k}=": line for k in a.kv}})
+
+
 def _row_attrs(tr, src: list[str]) -> Attrs | None:
     """The attributes of a table's last "row" that is only `{…}`, with no pipe (GFM goes on with the table on the
     line right under it; with a blank line between it is an attribute line already). None: a real row."""
@@ -454,9 +491,10 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     tb = Table(line=ln)
     body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
     if body and body.children and (a := _row_attrs(body.children[-1], src)) is not None:
-        tb.attrs_line = _line(body.children[-1], ln - _line(n, 0))
-        check_attrs(a, tb.attrs_line, nudges)
+        at = _line(body.children[-1], ln - _line(n, 0))
+        check_attrs(a, at, nudges)
         tb.attrs = a
+        _attr_lines(tb, a, at)
         body.children.pop()
     for section in n.children:
         for tr in section.children:
@@ -469,4 +507,5 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
                 tb.header, tb.aligns = cells, aligns
             else:
                 tb.rows.append(cells)
+                tb.row_lines.append(_line(tr, ln - _line(n, 0)) or ln)
     return tb

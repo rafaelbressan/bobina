@@ -89,7 +89,8 @@ class Table(Block):
     header: list[list[Run]] = field(default_factory=list)
     rows: list[list[list[Run]]] = field(default_factory=list)
     aligns: list[str] = field(default_factory=list)
-    attrs_line: int = 0  # the line of its {…} (problems with them are reported there); 0: none
+    attr_lines: dict[str, int] = field(default_factory=dict)  # ".compact"/"width=" -> the line it was written on
+    row_lines: list[int] = field(default_factory=list)  # the source line of each row
 
 
 @dataclass

@@ -295,12 +295,23 @@ def test_a_span_size_or_font_in_a_cell_is_said_to_do_nothing():
     assert "size=" in msgs and "font=" in msgs and "cell" in msgs
 
 
-def test_a_floor_the_paper_cannot_give_does_not_crush_the_other_columns():
+def test_when_not_even_the_data_words_fit_only_the_longest_is_cut():
+    """The date (32 columns, no place to wrap) can never fit 31; the other column keeps its words whole (it wraps
+    at its dots) and only the date is cut, once."""
     res = build("| D | V |\n|---|---|\n| 15/11/2026-15/12/2026-15/01/2027 | VL.TOTAL.GERAL.DO.PEDIDO |\n",
                 profile_name="mtp-ii-58")  # fmt: skip
     words = {w for line in lines(res) for w in line.split()}
-    assert "VL.TOTAL.GERAL." in words  # not wrapped to its 6-column pieces to save the date that is cut anyway
-    assert "L101" in codes(res)
+    assert {"VL.", "TOTAL.", "GERAL.", "DO.", "PEDIDO"} <= words
+    cut = [n for n in res.nudges if n.code == "L101"]
+    assert len(cut) == 1 and "15/11/2026" in cut[0].message
+
+
+def test_a_cut_column_keeps_its_shorter_data_words_whole():
+    """natural [40, 10], data words [40, 4], 31 columns: the 40-letter word is cut, the 25-letter one in the same
+    column stays whole (27 columns), and the header word of the other column gives way (4 columns)."""
+    long, mid = "A" * 40, "B" * 25
+    res = build(f"| H | HEADERWORD |\n|---|---|\n| {long} | abcd |\n| {mid} | ab |\n", profile_name="mtp-ii-58")
+    assert mid in {w for line in lines(res) for w in line.split()}
 
 
 def test_a_turned_trial_that_does_not_print_says_nothing():
@@ -336,3 +347,62 @@ def test_the_table_hint_lists_everything_a_table_takes():
     for word in (".compact", ".left", ".center", ".right", ".flip", "align=", "orientation=", "width=", "rotate=",
                  "#id"):  # fmt: skip
         assert word in hint
+
+
+# --- second review ------------------------------------------------------------------------------------------------
+
+
+def test_one_long_word_is_said_once_in_a_cell_and_in_a_paragraph():
+    word = "".join(chr(65 + i % 26) for i in range(70))  # ABC…: each cut leaves a different rest of the word
+    cell = build(f"| {word} | b |\n|---|---|\n| 1 | 2 |\n{{.compact}}\n", profile_name="mtp-ii-58")
+    para = build(word + "\n", profile_name="mtp-ii-58")
+    for res in (cell, para):
+        assert [n.code for n in res.nudges].count("L101") == 1
+
+
+def test_every_segment_of_a_list_items_first_text_takes_the_same_path_done_or_open():
+    for box in ("[ ] ", "[x] ", ""):
+        res = build(f"- {box}milk {{rotate=90}}\n  bread {{.flip}}\n  eggs\n")
+        out = lines(res)
+        assert out[0].endswith(" milk") and [x.strip() for x in out[1:]] == ["bread", "eggs"], box
+        assert len({len(x) - len(x.lstrip()) for x in out[1:]}) == 1  # the same indent: one path
+        assert not any(isinstance(r, BitmapRow) and r.kind == "rotated" for r in res.rows), box
+        notes = [n for n in res.nudges if n.code == "M101"]
+        assert {n.line for n in notes} == {1, 2} and all("list item" in n.message for n in notes), box
+
+
+def test_a_loose_paragraph_in_a_list_is_still_a_block_of_its_own():
+    res = build("- milk\n\n  bread {rotate=180}\n")
+    assert any(isinstance(r, BitmapRow) and r.kind == "rotated" for r in res.rows)
+    assert "M101" not in codes(res)
+
+
+def test_each_idle_table_attribute_is_said_on_the_line_it_was_written_on():
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{.bold}\n\n{font=Terminus}\n")
+    at = {n.line: n.message for n in res.nudges if n.code == "M101"}
+    assert set(at) == {4, 6} and ".bold" in at[4] and "font=" in at[6]
+
+
+def test_a_span_size_in_a_body_cell_is_said_on_its_row():
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n| [big]{size=large} | 3 |\n")
+    note = next(n for n in res.nudges if n.code == "M101")
+    assert note.line == 4
+    assert "printer font" in note.suggestion and "orientation=" not in note.suggestion  # its own hint, not a table's
+
+
+def test_a_code_span_across_a_newline_keeps_the_line_numbers():
+    res = build("A `x\ny` B\nC {.foo}\nD\n")
+    assert [n.line for n in res.nudges if n.code == "M101"] == [3]
+    res = build("A `x\ny` B\nC {.foo}\n")
+    assert [n.line for n in res.nudges if n.code == "M101"] == [3]
+
+
+def test_a_wide_character_on_a_line_narrower_than_it_is_not_said_to_be_split():
+    from bobina.layout import word_tokens, wrap_words
+    from bobina.rows import Cell
+
+    said = []
+    out = wrap_words(word_tokens([Cell("中", wide=True)]), 1, 0, lambda w, at: said.append(at))
+    assert [[c.ch for c in line] for line in out] == [["中"]] and not said
+    out = wrap_words(word_tokens([Cell("中", wide=True), Cell("文", wide=True)]), 1, 0, lambda w, at: said.append(at))
+    assert [[c.ch for c in line] for line in out] == [["中"], ["文"]] and said == [1]
