@@ -55,10 +55,10 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `#`, `##`, `###` (and deeper, styled as `###`) | headings in the **printer font**: 2×2 bold, 1×2 bold, bold (profile `native.headings`); a raster font with `fonts.title` |
 | paragraph | word-wrapped by bobina, never by the printer (the printer splits words) |
 | a newline inside a paragraph | a **line break** (as in Obsidian), not a space |
-| `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles; italic and strike are drawn as raster on printers without them |
+| `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | monospace grid, header bold with a rule under it, column alignment from `:--`/`--:`, **stretched to the paper width**; `{.compact}` keeps it narrow (`.center`/`.right` place it); `orientation=vertical`/`auto`: turned like a book's spine (`L106`) |
+| `\| a \| b \|` tables | monospace grid, header bold with a rule under it (empty header cells: no header, as in Pandoc), column alignment from `:--`/`--:`, cells wrapped at spaces, **stretched to the paper width**; `{.compact}` keeps it narrow (`.center`/`.right` place it); `orientation=vertical`/`auto`: turned like a book's spine (`L106`) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -69,9 +69,9 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 ## 3. Attributes `{…}` ✓
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
-- at the end of a heading or paragraph line: `# SALE {.invert .center}`
+- at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, on the lines down to the previous `{…}`
 - on a span: `Total: [R$ 42,00]{.bold size=large}`
-- on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}`
+- on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
 
 | Class | Effect |
@@ -96,7 +96,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 | `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, doubled at 2× width on printers that follow the spec (not at 2× on the MTP-II: profile `native.tracking_unscaled_at`); line breaks use the real width | ✓ |
 | `indent=` | left indent: `indent=4` columns, or `indent=3mm` / `24px`; wrapped lines stay aligned | ✓ |
 
-Unknown classes or keys give `M101` and are ignored.
+Unknown classes or keys, and those a table does not take (`font=`, `size=`…: printer font for now), give `M101` and are ignored.
 
 ## 4. Fonts ✓
 
