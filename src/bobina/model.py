@@ -45,6 +45,7 @@ class Heading(Block):
 @dataclass
 class Paragraph(Block):
     runs: list[Run] = field(default_factory=list)
+    follows: bool = False  # the next lines of the paragraph above, after an inner line's {…}: no block gap
 
 
 @dataclass

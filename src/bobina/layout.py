@@ -27,9 +27,9 @@ SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
-TABLE_PAD = "\ufdd0"  # a noncharacter: the second column of an icon in a table grid, never printed
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
+TABLE_TAKES = {"compact", "left", "center", "right", "align", "flip", "rotate", "orientation", "width", "id"}
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
@@ -47,25 +47,35 @@ def fit_columns(s: str, cols: int) -> str:
     return s
 
 
-def _units(s: str) -> list[str]:
-    """A table cell as drawing units: a wide character with its TABLE_PAD is one unit (never split)."""
-    out, i = [], 0
-    while i < len(s):
-        n = 2 if i + 1 < len(s) and s[i + 1] == TABLE_PAD else 1
-        out.append(s[i : i + n])
-        i += n
+def _columns(cells: list[Cell]) -> int:
+    return sum(2 if c.wide else 1 for c in cells)
+
+
+def _groups(cells: list[Cell]) -> list[list[Cell]]:
+    """Cells as runs of spaces and of the rest: the words of a table cell and the gaps between them."""
+    out: list[list[Cell]] = []
+    for c in cells:
+        if out and (out[-1][0].ch == " ") == (c.ch == " "):
+            out[-1].append(c)
+        else:
+            out.append([c])
     return out
 
 
-def wrap_cell(s: str, width: int) -> list[str]:
-    """A table cell cut into lines of at most width columns, never between a wide character and its pad."""
-    parts, cur = [], ""
-    for u in _units(s):
-        if cur and len(cur) + len(u) > width:
-            parts.append(cur)
-            cur = ""
-        cur += u
-    return [*parts, cur]
+def _pieces(word: list[Cell]) -> list[list[Cell]]:
+    """A word in the pieces a table cell may wrap between: after . - / between two letters (VL.|TOTAL, e-|mail),
+    never inside a number (18,00, 15/11)."""
+    out, start = [], 0
+    for k in range(1, len(word) - 1):
+        if word[k].ch in ".-/" and word[k - 1].ch.isalpha() and word[k + 1].ch.isalpha():
+            out.append(word[start : k + 1])
+            start = k + 1
+    return [*out, word[start:]]
+
+
+def _longest(cells_list) -> int:
+    """The widest piece of word in these cells: what a column keeps whole when it can."""
+    return max([0, *(_columns(p) for c in cells_list for g in _groups(c) if g[0].ch != " " for p in _pieces(g))])
 
 
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
@@ -705,7 +715,7 @@ class Layout:
             out = self.block(b, 0)
             if not out:
                 continue
-            if not first:
+            if not first and not (isinstance(b, Paragraph) and b.follows):  # a paragraph's next lines: no gap
                 rows.append(FeedRow(gap))
             rows += out
             first = False
@@ -833,9 +843,9 @@ class Layout:
                 prefix = [Cell("•"), Cell(" ")]
             n += 1
             pw = sum(2 if c.wide else 1 for c in prefix)
+            strike = it.task is True and self.done == "strike"
             for k, child in enumerate(it.children):
                 if k == 0 and isinstance(child, Paragraph):
-                    strike = it.task is True and self.done == "strike"
                     rows += self.text_block(
                         child.runs,
                         line=child.line,
@@ -843,6 +853,10 @@ class Layout:
                         prefix=prefix,
                         indent=indent,
                         extra={"strike": strike},
+                    )
+                elif isinstance(child, Paragraph) and child.follows:  # the item's next lines, struck like the first
+                    rows += self.text_block(
+                        child.runs, line=child.line, attrs=child.attrs, indent=indent + pw, extra={"strike": strike}
                     )
                 else:
                     rows += self.block(child, indent + pw)
@@ -1451,16 +1465,20 @@ class Layout:
     def table(self, t: Table, indent: int) -> list:
         """Monospace grid: columns line up exactly in the native font. orientation=vertical turns it along the
         paper (table_turned); auto (the default) does so only at the top level, when the columns cannot keep
-        TABLE_MIN characters each and the turned print is not much longer than the standing one."""
-
-        def txt(runs):  # a wide character (icon, CJK) takes two columns: a pad after it keeps the grid (not drawn)
-            s = "".join(self.text(r.text) for r in runs).replace("\n", " ").strip()
-            return "".join(ch + TABLE_PAD if is_wide(ch) else ch for ch in s)
-
-        head = [txt(c) for c in t.header]
-        body = [[txt(c) for c in r] for r in t.rows]
-        ncol = len(head)
-        natural = [max([len(head[i])] + [len(r[i]) if i < len(r) else 0 for r in body]) for i in range(ncol)]
+        TABLE_MIN characters each and the turned print is not much longer than the standing one. A header of
+        empty cells is no header (Pandoc's headerless pipe table): no header line, no rule under it."""
+        self.table_attrs(t)
+        head = [self.table_cell(c, bold=True) for c in t.header]
+        body = [[self.table_cell(c) for c in r] for r in t.rows]
+        if not any(head):
+            head = None
+            if not body:
+                return []
+        ncol = len(t.header)
+        cols = [[*([head[i]] if head else []), *(r[i] for r in body if i < len(r))] for i in range(ncol)]
+        natural = [max([0, *(_columns(c) for c in col)]) for col in cols]
+        longest = [_longest(col) for col in cols]
+        in_body = [_longest(col[1:] if head else col) for col in cols]  # a header word gives way before data
         cap = self.cols - indent - (ncol - 1)
         orientation = t.attrs.kv.get("orientation", "auto")
         if orientation not in ("auto", "horizontal", "vertical"):
@@ -1471,7 +1489,11 @@ class Layout:
                        "move the table out of the quote or list")  # fmt: skip
         if orientation == "vertical" and not indent:
             return self.table_turned(t, head, body, natural)
-        standing = self.table_standing(t, head, body, natural, indent, cap)
+        outer, self.n = self.n, Nudges()  # what the standing table would say (L101), said only if it stands
+        try:
+            standing = self.table_standing(t, head, body, natural, (longest, in_body), indent, cap)
+        finally:
+            said, self.n = self.n, outer
         if orientation == "auto" and not indent and sum(min(w, TABLE_MIN) for w in natural) > cap:
             turned = self.table_turned(t, head, body, natural, quiet=True)
             along = self.rows_height(turned)
@@ -1489,21 +1511,56 @@ class Layout:
                     "orientation=horizontal keeps it standing (narrow wrapped columns)",
                 )
                 return turned
+        for x in said:
+            self.n.add(x.code, x.message, x.line, x.suggestion, x.evidence)
         if "width" in t.attrs.kv:
             self.n.add("M101", f"width={t.attrs.kv['width']}: a standing table always fills its width", t.line,
                        "width= places a turned table (orientation=vertical); .compact keeps one narrow")  # fmt: skip
         return standing
+
+    def table_attrs(self, t: Table) -> None:
+        """M101 for the attributes a table does not take (the parser already named the unknown ones, block() the
+        image ones): a table prints in the printer font for now."""
+        from .parser import KNOWN_CLASSES, KNOWN_KEYS
+
+        a = t.attrs
+        idle = [f".{c}" for c in sorted((a.classes & KNOWN_CLASSES) - TABLE_TAKES - set(IMAGE_ONLY))]
+        idle += [f"{k}=" for k in sorted(a.kv) if k in KNOWN_KEYS and k not in TABLE_TAKES and k not in IMAGE_ONLY]
+        if idle:
+            self.n.add(
+                "M101",
+                f"{', '.join(idle)} {'does' if len(idle) == 1 else 'do'} nothing on a table",
+                t.line,
+                "a table prints in the printer font for now (**bold** in a cell works); it takes .compact, "
+                ".left/.center/.right, orientation=, width= and rotate=",
+            )
+
+    def table_cell(self, runs, bold: bool = False) -> list[Cell]:
+        """A cell's text as styled cells (**bold**, *italic*, ~~strike~~ as in a paragraph), on one line."""
+        cells = [c or Cell(" ") for c in self.cells_from_runs(runs, {"bold": bold})]
+        while cells and cells[0].ch == " ":
+            cells.pop(0)
+        while cells and cells[-1].ch == " ":
+            cells.pop()
+        return cells
 
     def rows_height(self, rows: list) -> int:
         from . import preview
 
         return preview.heights(rows, self.p, self.em)
 
-    def table_standing(self, t, head, body, natural, indent: int, cap: int) -> list:
+    def table_standing(self, t, head, body, natural, longest, indent: int, cap: int) -> list:
+        """Columns as wide as their text; when the paper is narrower, the widest gives way first, down to its longest
+        word (`longest`: with the header's, then the body's only), and only then below it: a cut word is said
+        (L101)."""
         widths = list(natural)
-        while sum(widths) > cap and max(widths) > 2:  # 2: a wide character always fits its column
-            i = widths.index(max(widths))
-            widths[i] -= 1
+        floors = [[min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest]
+        for floor in (*floors, [2] * len(widths)):
+            while sum(widths) > cap:  # 2: a wide character always fits its column
+                wider = [i for i, w in enumerate(widths) if w > floor[i]]
+                if not wider:
+                    break
+                widths[max(wider, key=lambda i: widths[i])] -= 1
         if not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
             widths[0] += cap - sum(widths)
         free = cap - sum(widths)  # a .compact table is narrower than the paper: .center and .right place it
@@ -1511,49 +1568,92 @@ class Layout:
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") else 0
         rows = []
 
-        def emit(cells_text, bold):
-            for cells in self.table_lines(t, cells_text, widths, bold):
+        def emit(cells_row):
+            for cells in self.table_lines(t, cells_row, widths):
                 cells = self.lead(indent) + [Cell(" ")] * shift + cells
                 reason = self.native_ok(cells)
                 rows.append(TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason))
 
-        emit(head, True)
-        rows.append(BitmapRow(imaging.divider(self.W, "solid", 2, pad=3), t.line, "divider"))
+        if head:
+            emit(head)
+            rows.append(BitmapRow(imaging.divider(self.W, "solid", 2, pad=3), t.line, "divider"))
         for r in body:
-            emit(r, False)
+            emit(r)
         return rows
 
-    def table_lines(self, t: Table, cells_text: list[str], widths: list[int], bold: bool) -> list[list[Cell]]:
-        """One table row as printed lines of cells: each cell wrapped to its width and aligned (:-- --: :-:)."""
+    def table_lines(self, t: Table, cells_row: list[list[Cell]], widths: list[int]) -> list[list[Cell]]:
+        """One table row as printed lines of cells: each cell wrapped at its spaces to its width and aligned
+        (:-- --: :-:)."""
         ncol = len(widths)
-        wrapped = [wrap_cell(cells_text[i] if i < len(cells_text) else "", widths[i]) for i in range(ncol)]
+        wrapped = [self.wrap_cell(cells_row[i] if i < len(cells_row) else [], widths[i], t.line) for i in range(ncol)]
         out = []
         for k in range(max(len(p) for p in wrapped)):
-            line = ""
+            line: list[Cell] = []
             for i in range(ncol):
-                s = wrapped[i][k] if k < len(wrapped[i]) else ""
-                al = t.aligns[i] if i < len(t.aligns) else "left"
-                fit = {"right": s.rjust, "center": s.center}.get(al, s.ljust)
-                line += fit(widths[i]) + (" " if i < ncol - 1 else "")
-            out.append([Cell(ch, bold=bold, wide=is_wide(ch)) for ch in line.rstrip() if ch != TABLE_PAD])
+                s = wrapped[i][k] if k < len(wrapped[i]) else []
+                free = widths[i] - _columns(s)
+                left = {"right": free, "center": free // 2}.get(t.aligns[i] if i < len(t.aligns) else "left", 0)
+                line += [Cell(" ")] * left + s + [Cell(" ")] * (free - left) + ([Cell(" ")] if i < ncol - 1 else [])
+            while line and line[-1] == Cell(" "):
+                line.pop()
+            out.append(line)
         return out
 
-    def table_turned(self, t: Table, head: list[str], body: list[list[str]], natural: list[int], quiet=False) -> list:
+    def wrap_cell(self, cells: list[Cell], width: int, line: int) -> list[list[Cell]]:
+        """A cell cut into lines of at most `width` columns at its spaces; a word longer than the column is cut
+        (L101), never between the two columns of a wide character."""
+        out: list[list[Cell]] = []
+        cur: list[Cell] = []
+        gap: list[Cell] = []
+        for group in _groups(cells):
+            if group[0].ch == " ":
+                gap = group
+                continue
+            for word in _pieces(group):
+                cur, gap = self._cell_word(out, cur, gap, word, width, line), []
+        return [*out, cur]
+
+    def _cell_word(self, out: list, cur: list[Cell], gap: list[Cell], word: list[Cell], width: int, line: int):
+        """One word (or a piece of one) onto the lines of a cell (`out`, the lines done); the line it leaves open."""
+        if cur and _columns(cur) + _columns(gap) + _columns(word) > width:
+            out.append(cur)
+            cur = []
+        elif cur:
+            cur = cur + gap
+        if _columns(word) > width:
+            self.n.add(
+                "L101",
+                f"word '{''.join(icons.shown(c.ch) for c in word)[:20]}…' split at {width} columns in a table",
+                line,
+                "shorten it, leave out a column, or turn the table: orientation=vertical",
+            )
+        while _columns(word) > width:
+            take, k = 0, 0
+            while k < len(word) and take + _columns(word[k : k + 1]) <= width:
+                take += _columns(word[k : k + 1])
+                k += 1
+            k = max(k, 1)  # a wide character in a column of one: on a line of its own, never lost
+            out.append(word[:k])
+            word = word[k:]
+        return cur + word
+
+    def table_turned(self, t: Table, head, body, natural: list[int], quiet=False) -> list:
         """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
         right, the text read from top to bottom, the paper's length as the table's width. Cells never wrap (the
         length is free); when the rows do not fit across the paper they go on in more turned blocks, the header
-        repeated. The rows are kept as text for the terminal views."""
+        repeated (a table without a header has none). The rows are kept as text for the terminal views."""
         align = self.object_align(t.attrs)
         widths = [max(1, w) for w in natural]
         width = (sum(widths) + len(widths) - 1) * self.em.cw
 
-        def lines(cells_text, bold):
-            return [TextRow(c, (1, 1), "left", t.line) for c in self.table_lines(t, cells_text, widths, bold)]
+        def lines(cells_row):
+            return [TextRow(c, (1, 1), "left", t.line) for c in self.table_lines(t, cells_row, widths)]
 
-        head_rows = lines(head, True)
-        top = [self.em.render_row(r, width) for r in head_rows] + [imaging.divider(width, "solid", 2, pad=3)]
+        head_rows = lines(head) if head else []
+        top = [self.em.render_row(r, width) for r in head_rows]
+        top += [imaging.divider(width, "solid", 2, pad=3)] if head else []
         top_h = sum(p.height for p in top)
-        row_h = self.em.row_height(head_rows[0])
+        row_h = self.em.row_height(TextRow([Cell(" ")]))
         avail = min(self.object_width(t.attrs.kv.get("width"), t.line) or self.W, self.W)
         if avail < top_h + row_h:  # not even the header and one row across: the paper's width instead
             if not quiet:
@@ -1564,7 +1664,7 @@ class Layout:
         chunks = [body[i : i + per_block] for i in range(0, len(body), per_block)] or [[]]
         out = []
         for n, chunk in enumerate(chunks):
-            rows = [r for row in chunk for r in lines(row, False)]
+            rows = [r for row in chunk for r in lines(row)]
             im = imaging.vstack(top + [self.em.render_row(r, width) for r in rows], width)
             turned = im.rotate(-90, expand=True)  # clockwise: the header (the top) goes to the right
             if turned.width > self.W:  # wider than the paper even so (a huge font): never past its edge

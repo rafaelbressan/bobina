@@ -235,7 +235,8 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
 
 
 def _strip_tail_attrs(inline_node) -> Attrs | None:
-    """Removes a trailing `{...}` from the last text child (heading/paragraph attributes)."""
+    """Removes a trailing `{...}` from the last text child (heading/paragraph attributes). A value from --set/--data
+    is still a placeholder here, so its braces never match: data stays literal (FORMAT §7.4)."""
     kids = inline_node.children
     if not kids or kids[-1].type != "text":
         return None
@@ -249,6 +250,55 @@ def _strip_tail_attrs(inline_node) -> Attrs | None:
     return a
 
 
+class _Lines:
+    """Some of an inline node's children, read like the node itself (inline_runs, _strip_tail_attrs)."""
+
+    def __init__(self, children: list):
+        self.children = children
+
+
+BREAKS = ("softbreak", "hardbreak")
+
+
+def _breaks_in(kids) -> int:
+    return sum(1 if k.type in BREAKS else _breaks_in(k.children) for k in kids)
+
+
+def _trim(kids: list) -> list:
+    """Without the line breaks and empty text at the end (left by an attribute line of its own)."""
+    while kids and (kids[-1].type in BREAKS or (kids[-1].type == "text" and not kids[-1].content.strip(" "))):
+        kids = kids[:-1]
+    return kids
+
+
+def _segments(inline) -> list[tuple[list, Attrs | None, int]]:
+    """A paragraph's lines cut after each inner line that ends in a standalone `{…}`: that attribute closes the
+    lines above it, as the last line's closes the paragraph. [(children, attributes, lines before them)]; one
+    segment (attributes None) when no inner line has one."""
+    kids = inline.children
+    out, start = [], 0
+    for i, k in enumerate(kids):
+        if k.type not in BREAKS or i == 0 or kids[i - 1].type != "text":
+            continue
+        prev = kids[i - 1]
+        m = ATTR_TAIL.search(prev.content)
+        if not m or (a := parse_attrs(m.group(1))) is None:
+            continue
+        alone = not _trim(kids[start : i - 1]) and not prev.content[: m.start()].strip()
+        if alone and not out:
+            continue  # a first line that is only {…}: nothing above it to close, it stays text
+        prev.token.content = prev.content[: m.start()]
+        if alone:  # a line of its own right after a closed segment: it closes the same lines
+            seg, a0, before = out[-1]
+            out[-1] = (seg, a0.merged(a), before)
+        else:
+            out.append((_trim(kids[start:i]), a, _breaks_in(kids[:start])))
+        start = i + 1
+    if not out:
+        return [(kids, None, 0)]
+    return [*out, (kids[start:], None, _breaks_in(kids[:start]))]
+
+
 def _line(node, offset: int) -> int:
     return (node.map[0] + 1 + offset) if node.map else 0
 
@@ -260,7 +310,7 @@ def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", 
     env: dict = {}
     root = SyntaxTreeNode(_md().parse(text, env))
     doc = Document(meta=meta or {}, base_dir=base_dir)
-    doc.blocks = _blocks(root.children, nudges, line_offset)
+    doc.blocks = _blocks(root.children, nudges, line_offset, text.splitlines())
     _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
     return doc
 
@@ -282,7 +332,7 @@ def _unknown_icons(found: list[tuple[int, str]], nudges: Nudges, off: int) -> No
         )
 
 
-def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
+def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
     out: list[Block] = []
     for n in nodes:
         ln = _line(n, off)
@@ -330,13 +380,22 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
                     ia.kv.pop(k, None)
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
                 continue
-            a = _strip_tail_attrs(inline) or Attrs()
-            check_attrs(a, ln, nudges)
-            out.append(Paragraph(line=ln, attrs=a, runs=inline_runs(inline)))
+            paras: list[Paragraph] = []
+            for seg, a, before in _segments(inline):
+                if a is None and (a := _strip_tail_attrs(_Lines(seg))) is not None:
+                    seg = _trim(seg)
+                    if not seg and paras:  # "A {.right}\n{.center}": the last line closes the lines above
+                        paras[-1].attrs = paras[-1].attrs.merged(a)
+                        check_attrs(a, ln + _breaks_in(inline.children), nudges)
+                        continue
+                a = a or Attrs()
+                check_attrs(a, ln + before + _breaks_in(seg), nudges)
+                paras.append(Paragraph(line=ln + before, attrs=a, runs=inline_runs(_Lines(seg)), follows=bool(paras)))
+            out.extend(paras)
         elif t in ("bullet_list", "ordered_list"):
             lb = ListBlock(line=ln, ordered=t == "ordered_list", start=int((n.attrs or {}).get("start", 1)))
             for li in n.children:
-                kids = _blocks(li.children, nudges, off)
+                kids = _blocks(li.children, nudges, off, src)
                 task = None
                 if kids and isinstance(kids[0], Paragraph) and kids[0].runs:
                     first = kids[0].runs[0]
@@ -348,7 +407,7 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
                 lb.items.append(Item(children=kids, task=task))
             out.append(lb)
         elif t == "blockquote":
-            out.append(Quote(line=ln, children=_blocks(n.children, nudges, off)))
+            out.append(Quote(line=ln, children=_blocks(n.children, nudges, off, src)))
         elif t == "hr":
             out.append(Divider(line=ln))
         elif t in ("fence", "code_block"):
@@ -371,14 +430,28 @@ def _blocks(nodes, nudges: Nudges, off: int) -> list[Block]:
             )  # fmt: skip
             out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":
-            out.append(_table(n, ln))
+            out.append(_table(n, ln, nudges, src))
         elif n.children:
-            out.extend(_blocks(n.children, nudges, off))
+            out.extend(_blocks(n.children, nudges, off, src))
     return out
 
 
-def _table(n, ln) -> Table:
+def _row_attrs(tr, src: list[str]) -> Attrs | None:
+    """The attributes of a table's last "row" that is only `{…}`, with no pipe (GFM goes on with the table on the
+    line right under it; with a blank line between it is an attribute line already). None: a real row."""
+    if not tr.map or tr.map[0] >= len(src):
+        return None
+    m = re.fullmatch(r"\s*\{([^{}]*)\}\s*", re.sub(r"^[\s>]*", "", src[tr.map[0]]))
+    return parse_attrs(m.group(1)) if m else None
+
+
+def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     tb = Table(line=ln)
+    body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
+    if body and body.children and (a := _row_attrs(body.children[-1], src)) is not None:
+        check_attrs(a, _line(body.children[-1], ln - _line(n, 0)), nudges)
+        tb.attrs = a
+        body.children.pop()
     for section in n.children:
         for tr in section.children:
             cells, aligns = [], []
