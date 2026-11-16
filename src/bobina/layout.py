@@ -1067,6 +1067,8 @@ class Layout:
                            "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
                 im = im.crop(((im.width - room) // 2, 0, (im.width - room) // 2 + room, im.height))
         self.align_word(a, line)
+        if a.kv.get("align") == "justify":  # spreads text; a box is only placed
+            self.n.add("M101", "align=justify", line, "left, center or right")
         align = self.object_align(a, "left")
 
         def place(w: int) -> int:  # where a box w dots wide starts on the paper: on a letter when it can

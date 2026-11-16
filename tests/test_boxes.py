@@ -124,8 +124,7 @@ def test_colons_from_data_stay_text():
 def test_colons_from_data_rendered_as_markdown_cannot_close_the_documents_box():
     res = build("::: {.box}\n{{ d | markdown }}\n\nmine\n:::\n", fields={"d": Tainted("hello\n:::\n# X")})
     (d,) = res.doc.blocks
-    assert d.closed and len(d.children) == 3 and isinstance(d.children[-1], Paragraph)
-    assert any(":::" in ln for ln in seen(res))
+    assert d.closed and isinstance(d.children[-1], Paragraph) and "M123" in codes(res)  # its ::: line: removed
 
 
 def test_a_value_with_spaces_and_no_quotes_keeps_its_words():
@@ -414,12 +413,9 @@ def test_a_raw_block_from_data_never_hides_behind_a_carriage_return():
     assert not [r for r in res.rows if isinstance(r, RawRow)] and "M121" in codes(res)
 
 
-def test_colons_in_a_code_block_of_data_stay_as_written():
+def test_a_code_block_in_data_is_removed_with_its_colons():
     res = build("{{ d | markdown }}\n", fields={"d": Tainted("intro\n```\n::: {.box}\n```")})
-    (fence,) = [b for b in res.doc.blocks if isinstance(b, Fence)]
-    assert fence.content == "::: {.box}\n"
-    res = build("{{ d | markdown }}\n", fields={"d": Tainted("```\n:::\n```")})  # all data: a code block
-    assert not any(isinstance(b, Div) for b in res.doc.blocks)
+    assert not [b for b in res.doc.blocks if isinstance(b, (Fence, Div))] and "M123" in codes(res)
 
 
 def test_a_block_holding_a_box_turns_as_a_block():
@@ -453,3 +449,8 @@ def test_a_wrong_align_is_said(src):
     res = build(src)
     assert said(res, "M101") == ["align=middle"]
     assert [n.suggestion for n in res.nudges if n.code == "M101"] == ["left, center or right"]
+
+
+def test_align_justify_on_a_box_is_said():
+    res = build("::: {.box align=justify}\nx\n:::\n")
+    assert said(res, "M101") == ["align=justify"] and boxes(res)

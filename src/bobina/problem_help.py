@@ -151,8 +151,9 @@ FIX = {
     "M121": "Raw blocks cannot come from data: put them in the document.",
     "M122": "Images cannot come from data values: put the image in the document.",
     "M123": (
-        "Nothing to fix when the value is data: it prints as written. Boxes and code blocks belong in the document; "
-        "put the ::: lines or the fences there, around {{ value | markdown }}."
+        "Nothing to fix when the value is data: it brings text, lists, quotes, tables and headings only. Code "
+        "blocks, boxes and link definitions belong in the document: put the fences or ::: lines there, around "
+        "{{ value | markdown }}."
     ),
     "M130": "Give the variable a value: front matter, --set NAME=VALUE or a data column (the message lists them).",
     "M131": "Give the required field: --set NAME=VALUE, or fill that column in the row.",

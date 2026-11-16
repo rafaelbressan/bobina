@@ -84,6 +84,17 @@ class Tainted(str):
     def __mod__(self, other):
         return Tainted(str.__mod__(self, other))
 
+    def __rmod__(self, other):  # '%s' % d
+        return Tainted(str(other) % str.__str__(self)) if isinstance(other, str) else NotImplemented
+
+    def __mul__(self, n):
+        return Tainted(str.__mul__(self, n))
+
+    __rmul__ = __mul__
+
+    def __iter__(self):  # {% for c in d %}, d|list, d|map(...): each letter is data too
+        return (Tainted(c) for c in str.__str__(self))
+
 
 _STR_METHODS = {
     "capitalize", "casefold", "center", "expandtabs", "format", "format_map", "join", "ljust", "lower", "lstrip",
@@ -697,7 +708,8 @@ class Sandbox(ImmutableSandboxedEnvironment):
                 check_bits(MAX_BITS + 1)
         elif operator == "%" and isinstance(left, str):
             check_format(left, right if isinstance(right, tuple) else (right,))
-        return check_size(super().call_binop(context, operator, left, right))
+        result = check_size(super().call_binop(context, operator, left, right))
+        return taint(result) if _has_taint(left) or _has_taint(right) else result  # '%s' % d, d * 2
 
     def call(__self, __context, __obj, *args, **kwargs):  # noqa: N805 - Jinja's signature
         __self.loops.tick()
@@ -725,7 +737,10 @@ class Sandbox(ImmutableSandboxedEnvironment):
                 check_estimate(translate_size(owner, args[0]))
             elif name == "expandtabs":
                 check_estimate(expandtabs_size(owner, (*args, *kwargs.values(), 8)[0]))
-        return check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
+        result = check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
+        if _has_taint(owner) or any(_has_taint(a) for a in (*args, *kwargs.values())):
+            return taint(result)  # '{}'.format(d), a macro called with data: what they make is data
+        return result
 
     def materialized(self, items, sep=None):
         """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
@@ -986,7 +1001,7 @@ def ambiguity_message(raw, whole: str, frac: str) -> tuple[str, str]:
             f"write {whole}{frac} or {whole}.{frac},00 for thousands, or the amount with 2 decimals")  # fmt: skip
 
 
-def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: bool = True, data=()):
+def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: bool = True):
     decimal = bnumbers.get_decimal_symbol(loc)
 
     def num(v, where: str, then: str = "printed as it is"):
@@ -1136,18 +1151,18 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         cleaned = RAW_FENCE.sub("", text)
         if cleaned != text:
             nudges.add("M121", "a raw block inside a variable was removed")
-        # data: a Tainted value, one derived from it (TaintedMd, a ~ join), or one that holds a data value's text
-        if not (_has_taint(v) or any(len(t) >= 3 and t in text for t in data)):
+        if not _has_taint(v):  # the author's own value: all of Markdown
             return MdSafe(cleaned)
         from . import icons
+        from .parser import data_markdown
 
         # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
-        cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
+        cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(text))
         nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
-        # where it lands in the document is marked: once the whole document is parsed, the parser refuses every
-        # raw block, image, code fence and ::: line that starts in it or that it would close (parser.data_markup)
-        cleaned = cleaned.replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")
-        return TaintedMd(TAINT_OPEN + cleaned + TAINT_CLOSE)
+        cleaned = cleaned.replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")  # data never fakes a mark
+        # only text markup, written so that nothing in it can open or close a block of the document around it;
+        # and where it lands is marked, for the parser's second check (parse)
+        return TaintedMd(TAINT_OPEN + data_markdown(cleaned, nudges) + TAINT_CLOSE)
 
     return {
         **text_filters(loc),
@@ -1336,9 +1351,9 @@ def render(
                 n += (lengths[i] if i < len(lengths) else 0) - len(m.group(0))
         return n
 
-    def finalize(v):
+    def finalize(v):  # what is data stays marked as data in a block's output ({% set x %}…{% endset %}, macros)
         if isinstance(v, MdSafe):
-            return str(v)
+            return Tainted(str.__str__(v)) if isinstance(v, TaintedMd) else str(v)
         if isinstance(v, Undefined):
             str(v)
             return ""
@@ -1346,8 +1361,9 @@ def render(
             return ""
         text = str(v).replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")  # Markdown from data, then made a value
         lengths.append(resolved_len(text))
-        values.append(Value(text, isinstance(v, Tainted)))
-        return f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
+        values.append(Value(text, _has_taint(v)))
+        ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
+        return Tainted(ph) if _has_taint(v) else ph
 
     env = Sandbox(
         budget,
@@ -1361,7 +1377,7 @@ def render(
         comment_start_string="<#",
         comment_end_string="#>",  # `{#id}` stays a Pandoc attribute
     )
-    env.filters.update(make_filters(loc, tz, nudges, choice.explicit, _data_texts(fields)))
+    env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
         if name != "markdown":  # markdown marks data itself (TaintedMd, checked by the parser)
             f = keep_taint(f)

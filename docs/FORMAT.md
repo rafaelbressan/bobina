@@ -374,8 +374,8 @@ them, and `bobina seq set NAME N` starts one at N, even before its first print.
 - can never produce a `raw` block (`M314` for variables inside `raw`), choose an image path (`M312`), or carry
   control characters (removed from all text and barcode data before encoding).
 
-`{{ value | markdown }}` opts one value in: its `raw` blocks are removed (`M121`); for data values images too
-(`M122`), and `:::` lines or fences it does not close print as text (`M123`). Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
+`{{ value | markdown }}` opts one value in: its `raw` blocks are removed (`M121`). A data value keeps only text markup:
+images (`M122`), code blocks, `:::` lines and link definitions (`M123`) go. Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
 iterations or 2 MB of output (`M313`), template paths outside the document folder and
 `~/.config/bobina/templates` (`M315`). See `docs/SECURITY.md`.
 
@@ -521,7 +521,7 @@ Nudges:
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed from a --data/--set value |
-| `M123` | warning | a `:::` line or code fence in a --data/--set value printed as text |
+| `M123` | warning | a code block, `:::` line or link definition removed from a --data/--set value |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |
