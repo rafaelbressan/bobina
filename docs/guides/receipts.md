@@ -1,7 +1,8 @@
 # Receipts: whole recipes
 
 Copy one, change the items, run `bobina check FILE` (it says the width each column got), then print. Every table
-feature used here is explained in the [tables guide](tables.md).
+feature used here is explained in the [tables guide](tables.md) and in `bobina help table`. Whole files with their
+images: [examples/tables](../../examples/tables/) (a table bill, a bar check, a supermarket receipt).
 
 ## Totals
 

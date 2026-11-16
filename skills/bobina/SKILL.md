@@ -22,6 +22,10 @@ user asked for.
   print this; for a long job (many labels, many cm) say the length from `check` first.
 - Text without a file: `bobina print "# TITLE\n- [ ] milk\n- [ ] bread" --yes`.
 - A document: Markdown plus `{.center}`, `{size=large}`, `{.invert}`; QR with a ```qr block. `bobina help format`.
+- Tables (receipts, totals): a Markdown table; where a `{…}` goes is its reach: the line under the table
+  (`{style=receipt font=Terminus size=16px}`), the end of a title cell (`{width=7ch prefix="R$ "}`, that column),
+  the end of a cell (`{span=all}`), after a row's last pipe (`{.bold}`). Empty title cells: no title row.
+  `bobina help table` has it all; `bobina check` says the width each column got.
 - One label per row: `bobina print label.bob.md --data rows.csv --yes`; filters and copies: `--where shelf=A`,
   `--copies-from jars`, `--sheet Estoque` (xlsx), `--join catalog.json --on name`, `--set unit=kg`.
   `bobina help data` lists them. A `{{ name }}` that is not a column prints empty and is reported (M130, with the

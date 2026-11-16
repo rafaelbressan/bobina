@@ -19,6 +19,8 @@ every problem has a code, and every command that returns data has `--json`.
 - `bobina check FILE --json` (and `print`, `preview`) gives `{"stats", "problems"}`; `--problems json|jsonl`
   writes problems to stderr. Schemas: [schemas/README.md](schemas/README.md).
 - `bobina help --json` describes every command, option, topic and problem code.
+- Tables: `bobina help table` (`--json`): where each `{…}` goes (`style=receipt` under the table, a column's
+  settings in its title cell) and the columns per line in each font.
 - Exit codes: 0 ok, 1 usage, 2 document, 3 strict, 4 unreachable, 5 printer not ready, 6 language,
   7 confirmation, 8 security, 9 a payment or contact code left out (`Q111`, `Q112`), 10 a newer release (`bobina update --check`). [CLI.md](CLI.md#exit-codes) has the table.
 - Servers, bots and cron: `BOBINA_NONINTERACTIVE=1`, one process per job

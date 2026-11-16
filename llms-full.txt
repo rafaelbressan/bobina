@@ -199,6 +199,8 @@ every problem has a code, and every command that returns data has `--json`.
 - `bobina check FILE --json` (and `print`, `preview`) gives `{"stats", "problems"}`; `--problems json|jsonl`
   writes problems to stderr. Schemas: [schemas/README.md](docs/schemas/README.md).
 - `bobina help --json` describes every command, option, topic and problem code.
+- Tables: `bobina help table` (`--json`): where each `{…}` goes (`style=receipt` under the table, a column's
+  settings in its title cell) and the columns per line in each font.
 - Exit codes: 0 ok, 1 usage, 2 document, 3 strict, 4 unreachable, 5 printer not ready, 6 language,
   7 confirmation, 8 security, 9 a payment or contact code left out (`Q111`, `Q112`), 10 a newer release (`bobina update --check`). [CLI.md](docs/CLI.md#exit-codes) has the table.
 - Servers, bots and cron: `BOBINA_NONINTERACTIVE=1`, one process per job
@@ -229,7 +231,7 @@ Language: **English everywhere** (messages, help, docs, spec).
 3. **What you check is what you print.** `check`, `preview` and `print` share one engine. Every printing command accepts `--dry-run`.
 4. **Nothing prints without confirmation.** Every command that prints shows the confirmation screen first and waits for `p`. `--yes` (`-y`) skips it, explicitly.
 5. **Readable by humans and agents.** Full command names are canonical. Human-readable output by default, `--json` on every command that returns data, stable exit codes.
-6. **Discoverable.** `bobina help`, `bobina <command> --help`, `bobina help format`, `bobina help data`, `bobina help pay`, `bobina <thing> list`,
+6. **Discoverable.** `bobina help`, `bobina <command> --help`, `bobina help format`, `bobina help table`, `bobina help data`, `bobina help pay`, `bobina <thing> list`,
    `bobina help E302` (what a problem code means and what to do; docs/problems/), `bobina help --json` (the CLI for
    programs). JSON outputs have schemas in docs/schemas/.
 
@@ -255,7 +257,7 @@ Language: **English everywhere** (messages, help, docs, spec).
 | `profile list \| show \| use` | printer profiles | — |
 | `template list \| show \| new` | ready-made documents (receipt, label, todo, card, shop tags…) | — |
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
-| `help [COMMAND \| format \| nudges \| aliases]` | help | — |
+| `help [COMMAND \| TOPIC \| CODE]` | help; topics: format, table, data, pay, contact, icons, nudges, aliases | — |
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](docs/mcp.md) | — |
 | `chat`, `ai` | an AI whose answers print: [chat.md](docs/chat.md) | — |
 
@@ -294,18 +296,7 @@ Shown by every printing command (it is the dry run):
 - No terminal attached (pipes, cron, agents) and no `--yes` → shows the confirmation on stderr, prints nothing, exit code 7.
 - `--copies N`: N identical copies. `--repeat N`: N renders, each with new counter values. The screen shows the total ("10 tickets: A-042 to A-051").
 
-## Drafts and editor (`edit`)
-
-```
-bobina edit                        # blank draft
-bobina edit --template receipt     # draft from a template (fields prefilled, # required / # optional)
-bobina edit list.bob.md            # existing file (or create it)
-```
-
-- A draft is a full `.bob.md` (front matter, variables, counters, templates), stored in `~/.local/state/bobina/drafts/`; the last one is kept for `print --last`.
-- Drafts start with a column ruler as an HTML comment (exact for the native font only; the preview is the truth).
-- Editor: `--editor CMD` > config `editor` > `$VISUAL` > `$EDITOR` > `nano` > `vi` (Notepad on Windows).
-- GUI editors return immediately unless told to wait; bobina adds the flag for known ones (`code`/`cursor --wait`, `subl -w`).
+<!-- 'Drafts and editor (`edit`)' left out here: see docs/CLI.md -->
 
 ## Inline text is an implicit document
 
@@ -749,7 +740,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](docs/guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](docs/guides/table-cells.md); [receipts](docs/guides/receipts.md) |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](docs/guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](docs/guides/table-cells.md); [receipts](docs/guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |

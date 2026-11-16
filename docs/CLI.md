@@ -9,7 +9,7 @@ Language: **English everywhere** (messages, help, docs, spec).
 3. **What you check is what you print.** `check`, `preview` and `print` share one engine. Every printing command accepts `--dry-run`.
 4. **Nothing prints without confirmation.** Every command that prints shows the confirmation screen first and waits for `p`. `--yes` (`-y`) skips it, explicitly.
 5. **Readable by humans and agents.** Full command names are canonical. Human-readable output by default, `--json` on every command that returns data, stable exit codes.
-6. **Discoverable.** `bobina help`, `bobina <command> --help`, `bobina help format`, `bobina help data`, `bobina help pay`, `bobina <thing> list`,
+6. **Discoverable.** `bobina help`, `bobina <command> --help`, `bobina help format`, `bobina help table`, `bobina help data`, `bobina help pay`, `bobina <thing> list`,
    `bobina help E302` (what a problem code means and what to do; docs/problems/), `bobina help --json` (the CLI for
    programs). JSON outputs have schemas in docs/schemas/.
 
@@ -39,7 +39,7 @@ Language: **English everywhere** (messages, help, docs, spec).
 | `profile list \| show \| use` | printer profiles | — |
 | `template list \| show \| new` | ready-made documents (receipt, label, todo, card, shop tags…) | — |
 | `calibrate compare\|tear\|feed` | photo vs preview; tear bar distance (ruler); feeds after images (3 lines) | — |
-| `help [COMMAND \| format \| nudges \| aliases]` | help | — |
+| `help [COMMAND \| TOPIC \| CODE]` | help; topics: format, table, data, pay, contact, icons, nudges, aliases | — |
 | `mcp` | a server for AI agents (Model Context Protocol): [mcp.md](mcp.md) | — |
 | `chat`, `ai` | an AI whose answers print: [chat.md](chat.md) | — |
 
