@@ -520,33 +520,57 @@ class _Source(list):
         self.title_rows = {}
 
 
-def _row_tail(raws: list[str], line: str) -> Attrs | None:
-    """The {…} written after the pipe that closes a table row, with nothing after it: `| TOTAL | 61,00 | {.bold}`.
-    Only on a row written with its leading pipe: without the outer pipes (`Coffee | {.shade}`), and before a
-    closing pipe (`| a | {.shade} |`), a cell that is only {…} is a cell, as GFM reads it. An empty {} or an id
-    alone stays text, as in a cell. None: no row attributes."""
+def _braces(segments: list[str]) -> Attrs | None:
+    """Segments that are each only {…}, merged (none dropped); None when one is not, or when together they say
+    nothing bobina reads (an empty {} or an id alone stays text, as in a cell)."""
+    out = Attrs()
+    for seg in segments:
+        m = ATTRS_ONLY.fullmatch(seg)
+        a = parse_attrs(m.group(1)) if m else None
+        if a is None:
+            return None
+        out = out.merged(a)
+    return out if segments and _meant(out) else None
+
+
+def _row_tail(raws: list[str], line: str, ncol: int) -> tuple[Attrs | None, int]:
+    """A row's own {…} and how many of its last segments it takes: (a) the cells past the title row's count, when
+    each is only {…} (GFM drops them: they can only mean the row), with or without the outer pipes; else (b) on a
+    row written with its leading pipe, the {…} after the pipe that closes it, with nothing after it (a short row,
+    a span's). Otherwise a last cell that is only {…} is a cell: `| a | {.shade} |`, `Coffee | {.shade}`."""
+    if len(raws) > ncol >= 1 and (a := _braces(raws[ncol:])) is not None:
+        return a, len(raws) - ncol
     s = ROW_PREFIX.sub("", line).strip()
-    if len(raws) < 2 or not s.startswith("|") or s.endswith("|"):
-        return None
-    m = ATTRS_ONLY.fullmatch(raws[-1])
-    a = parse_attrs(m.group(1)) if m else None
-    return a if a is not None and _meant(a) else None
+    if len(raws) >= 2 and s.startswith("|") and not s.endswith("|") and (a := _braces(raws[-1:])) is not None:
+        return a, 1
+    return None, 0
+
+
+def _cut_cells(line: str, keep: int) -> str:
+    """A row's line cut after its first `keep` cells (and the pipe that closes them)."""
+    start = len(line) - len(ROW_PREFIX.sub("", line).lstrip())
+    seen, esc = -1 if line[start : start + 1] == "|" else 0, False
+    for i in range(start, len(line)):
+        if line[i] == "|" and not esc:
+            seen += 1
+            if seen == keep:
+                return line[: i + 1]
+        esc = line[i] == "\\" and not esc
+    return line
 
 
 def _title_tails(lines: list[str]) -> dict[int, tuple[str, Attrs]]:
-    """Title rows with a {…} after their closing pipe, over a delimiter row of one cell fewer: (the row without it,
-    its attributes), by line index."""
+    """Title rows with more cells than their delimiter row, the extra ones each only {…}: (the row without them,
+    their attributes), by line index. With or without the outer pipes."""
     out = {}
     for i in range(len(lines) - 1):
         under = ROW_PREFIX.sub("", lines[i + 1]).strip()
         if "|" not in under or not DELIMITER_ROW.fullmatch(under) or "|" not in lines[i]:
             continue
+        n = len(_raw_cells(lines[i + 1]))
         raws = _raw_cells(lines[i])
-        a = _row_tail(raws, lines[i])
-        if a is None or len(_raw_cells(lines[i + 1])) != len(raws) - 1:
-            continue
-        cut = lines[i].rstrip().rindex("{")
-        out[i] = (lines[i][:cut].rstrip(), a)
+        if len(raws) > n and (a := _braces(raws[n:])) is not None:
+            out[i] = (_cut_cells(lines[i], n), a)
     return out
 
 
@@ -681,7 +705,7 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
             at = _line(tr, ln - _line(n, 0)) or ln
             source = src[tr.map[0]] if tr.map and tr.map[0] < len(src) else ""
             raws = _raw_cells(source) if source else []
-            tail = None if section.type == "thead" else _row_tail(raws, source)
+            tail, taken = (None, 0) if section.type == "thead" else _row_tail(raws, source, len(tb.header))
             row = _row_style(tail, at, nudges) if tail is not None else Attrs()
             if section.type == "thead" and tr.map and tr.map[0] in titles:
                 row = _row_style(titles[tr.map[0]], at, nudges)
@@ -690,7 +714,7 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
                 style = (cell.attrs or {}).get("style", "")
                 aligns.append("right" if "right" in style else "center" if "center" in style else "left")
                 raw = raws[k] if k < len(raws) else None
-                if tail is not None and k == len(raws) - 1:  # the row's {…}, which GFM read as a cell
+                if tail is not None and k >= len(raws) - taken:  # the row's {…}, which GFM read as a cell
                     cells.append([])
                     styles.append(Attrs())
                     continue

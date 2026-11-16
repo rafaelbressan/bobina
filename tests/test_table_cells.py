@@ -404,12 +404,46 @@ def test_a_covered_empty_cells_own_braces_are_said():
     assert said(res, "M101") == [".invert on a cell covered by span=all does nothing"]
 
 
-def test_a_row_without_its_leading_pipe_has_no_row_braces_its_last_brace_is_a_cell():
-    res = build("A | B\n---|---\nCoffee | {.shade}\n")
-    assert "P301" in codes(res)  # the B cell is shaded
-    assert not any(isinstance(r, BitmapRow) and r.kind == "band" for r in res.rows)
-    title = build("Item | Price | {.invert}\n---|---\nRice | 9,00\n")
-    assert "M104" not in codes(title)
+def test_a_last_cell_that_is_only_braces_is_a_cell_unless_it_is_extra_or_after_the_closing_pipe():
+    cell = build("A | B\n---|---\nCoffee | {.shade}\n")  # no outer pipes, as many cells as titles: a cell
+    assert "P301" in codes(cell) and drawn_with(cell, "Coffee").kind != "band"
+    extra = build("A | B\n---|---\nCoffee | 9 | {.invert}\n")  # one cell more than the titles: the row's
+    assert drawn_with(extra, "Coffee").kind == "band" and lines(extra)[1].endswith("9")
+    short = build(BILL + "| | Discount {span=all} | {.invert}\n")  # a short row, after its closing pipe
+    assert drawn_with(short, "Discount").kind == "band" and not codes(short)
+
+
+def test_a_title_row_without_outer_pipes_takes_its_braces_too():
+    res = build("Item | Price | {.invert}\n---|---\nRice | 9,00\n")
+    assert said(res, "M104") and drawn_with(res, "Item").kind == "band" and lines(res)[-1].startswith("Rice")
+
+
+def test_several_brace_only_cells_after_the_row_are_merged():
+    res = build("| A | B |\n|---|---|\n| a | b | {.invert} | {.bold}\n")
+    assert drawn_with(res, "a").kind == "band" and all(c.bold for c in cells_of(res, "b")) and not codes(res)
+    title = build("| A | B | {.invert} | {.bold}\n|---|---|\n| a | b |\n")
+    assert drawn_with(title, "A").kind == "band" and said(title, "M104")
+
+
+def test_two_spans_keep_their_words_whole_when_the_paper_has_room_for_both():
+    head = "| A | B | C | D | E |\n|---|---|---|---|---|\n"
+    doc = head + ("| AAAAAAAAAAAA {span=2} | | c | d | eeee eeee eeee eeee |\n"
+                  "| a | b | CCCCCCCCCCCC {span=2} | | e |\n")  # fmt: skip
+    res = build(doc)
+    text = " ".join(lines(res))
+    assert "AAAAAAAAAAAA" in text and "CCCCCCCCCCCC" in text and "L101" not in codes(res)
+
+
+def test_a_span_word_that_cannot_be_whole_leaves_the_widths_alone():
+    head = "| A | B | C |\n|---|---|---|\n| aaaa aaaa | bbbb bbbb | c |\n"
+    plain = build(head)
+    res = build(head + "| | " + "x" * 40 + " {span=all} |\n")
+    assert lines(res)[:2] == lines(plain) and "L101" in codes(res)
+
+
+def test_f204_counts_only_the_cells_that_print():
+    res = build("| A | B | C |\n|---|---|---|\n| Discount {span=all} | {.invert} | |\n{font=Terminus size=16px}\n")
+    assert "F204" not in codes(res) and "M101" in codes(res)
 
 
 def test_header_invert_title_classes_apply_and_what_cannot_show_is_said():

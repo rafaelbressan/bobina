@@ -32,8 +32,9 @@ whole cell), `.shade` (light grey dots behind the text; ⚠ not tested on paper,
 
 - It starts in the cell where it is written: **write one empty cell per column before it**. The cells after it
   need not be written: a row may have fewer cells than the title.
-- Its text wraps in the columns it covers and the spaces between them. It widens them only when a word does not
-  fit, from the room left on the paper. It aligns as the column it starts in, or as its own class (`.center`).
+- Its text wraps in the columns it covers and the spaces between them. When a word does not fit, it widens them
+  from the room left on the paper, then from other columns down to their longest word; if even that is not
+  enough, nothing changes and the word is cut (`L101`). It aligns as the column it starts in, or as its own class (`.center`).
 - A number larger than the columns left goes to the end (`M101`). A covered cell with text stops it before that
   cell (`M101`): nothing disappears. A covered cell's own `{…}` does nothing (`M101`). `span=1` is a plain cell.
 - In `style=grid` no line is drawn inside it; zebra and `.shade` cover all of it. A turned table does the same.
@@ -49,9 +50,9 @@ Starting in the 3rd column, under the description:
 
 ## A row
 
-After the pipe that closes the row, with nothing after it, in a row written with its leading pipe (without the
-outer pipes, a last `{…}` is a cell). GitHub and Obsidian ignore that extra cell, so the
-table stays a table there. Every cell of the row takes the classes; a cell's own alignment wins, styles add up.
+After the pipe that closes the row, with nothing after it. A `{…}` there is the row's when the row has more
+cells than the title row, or when the row starts with a pipe; otherwise a last cell that is only `{…}` is a cell.
+GitHub and Obsidian ignore that extra cell, so the table stays a table there. Every cell of the row takes the classes; a cell's own alignment wins, styles add up.
 `.invert` and `.shade` make one band across the whole row, spaces between columns and spans included.
 
 ```markdown

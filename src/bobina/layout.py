@@ -1544,7 +1544,8 @@ class Layout:
         self.table_title_marks(t, head, style)
         titles = head and style != "header-invert" and _any_class([t.head_row, *t.heads], "invert")
         inverted = [t.line] if titles else []
-        inverted += [at for k, at in enumerate(rows_at) if _any_class([_row(t, k), *_at(t.cells, k, [])], "invert")]
+        shown = [[_cell(t, k, i) for i in range(ncol) if spans[k][i]] for k in range(len(body))]  # covered: none
+        inverted += [at for k, at in enumerate(rows_at) if _any_class([_row(t, k), *shown[k]], "invert")]
         if face and inverted and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted cells at {ink.px}px close up", inverted[0],
                        "use size=20px or more, or leave out .invert", "R2-12")  # fmt: skip
@@ -1884,10 +1885,12 @@ class Layout:
     @staticmethod
     def widen_for_spans(widths: list[int], body, lay: _Lay, ink, free: int | None, keep=None) -> None:
         """After the columns are sized: a spanning cell that does not fit the columns it covers widens the last of
-        them not given a width (all given one: it wraps in them, as asked). Standing, it needs its longest word and
-        takes the free room first, then what the other auto columns have beyond `keep` (their longest word), never
-        past the paper: only then is a word cut (L101). Turned (free None) it needs its whole text: the length is
-        free. A span that fits changes nothing."""
+        them not given a width (all given one: it wraps in them, as asked). Standing, it needs its longest word: the
+        free room first, then what the other auto columns have beyond `keep` (their longest word, or what an earlier
+        span widened them to), never past the paper. When even that cannot keep the word whole, nothing changes and
+        the word is cut (L101). Turned (free None) it needs its whole text: the length is free. A span that fits
+        changes nothing."""
+        keep = list(keep) if keep else [0] * len(widths)
         for row, slots in zip(body, lay.slots, strict=True):
             for s in slots:
                 autos = [i for i in s.cols if lay.fixed[i] is None]
@@ -1897,21 +1900,20 @@ class Layout:
                 need = (ink.units(cells) if free is None else _longest([cells], ink.units)) - _span(widths, s)
                 if need <= 0:
                     continue
-                if free is None:
-                    widths[autos[-1]] += need
-                    continue
-                take = min(need, free)
-                widths[autos[-1]] += take
-                free, need = free - take, need - take
-                while need > 0 and keep:
-                    others = [i for i in range(len(widths)) if i not in s.cols and lay.fixed[i] is None
-                              and widths[i] > keep[i]]  # fmt: skip
-                    if not others:
-                        break
-                    j = max(others, key=lambda i: widths[i] - keep[i])
-                    widths[j] -= 1
-                    widths[autos[-1]] += 1
-                    need -= 1
+                if free is not None:
+                    others = [i for i in range(len(widths)) if i not in s.cols and lay.fixed[i] is None]
+                    take = min(need, free)
+                    if take + sum(max(0, widths[i] - keep[i]) for i in others) < need:
+                        continue  # it cannot be whole: the widths stay
+                    free -= take
+                    left = need - take
+                    for j in sorted(others, key=lambda i: widths[i] - keep[i], reverse=True):  # most room first
+                        give = min(left, max(0, widths[j] - keep[j]))
+                        widths[j] -= give
+                        left -= give
+                widths[autos[-1]] += need
+                for i in s.cols:  # a later span never takes back what this one needs
+                    keep[i] = max(keep[i], widths[i])
 
     def table_squeezed(self, t: Table, why: str, lay: _Lay, style: str, ink) -> None:
         """L107: the columns did not fit across the paper as given. scaled: the widths given shrank in proportion
