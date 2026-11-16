@@ -137,7 +137,7 @@ def encode(rows, profile, em: Emulator | None = None) -> bytes:
         elif isinstance(r, BitmapRow):
             out += raster(r.image, band)
         elif isinstance(r, QRRow):
-            out += ESC + b"a" + bytes([ALIGN.get(r.align, 1)]) + qr(r.data, r.module, r.ecc) + ESC + b"a\x00"
+            out += ESC + b"a" + bytes([ALIGN.get(r.align, 1)]) + qr(r.data, r.param or r.module, r.ecc) + ESC + b"a\x00"
         elif isinstance(r, BarcodeRow):
             from . import codes
 

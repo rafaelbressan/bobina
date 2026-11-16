@@ -19,8 +19,10 @@ def test_line_spacing_set_explicitly():
 
 
 def test_qr_native_command():
-    data = build("```qr\nhttps://example.com\n```").data
+    data = build("```qr\nhttps://example.com\n```", profile_name="netbye-nbtp-5880").data  # module 4 = 4 dots
     assert b"\x1d(k\x03\x001C\x04" in data and b"https://example.com" in data
+    data = build("```qr\nhttps://example.com\n```").data  # MTP-II: the parameter is the minimum version, 3
+    assert b"\x1d(k\x03\x001C\x03" in data and b"https://example.com" in data
 
 
 def test_never_sends_esc_m_1():

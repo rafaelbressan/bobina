@@ -46,7 +46,9 @@ def test_each_qr_is_encoded_once(isolated):
     doc.write_text("```qr\nhttps://exemplo.org/{{ seq.t }}\n```\n")
     assert main(["preview", str(doc), "--repeat", "5", "-o", str(isolated / "q.png"), "--quiet"]) == 0
     info = imaging.qr_matrix.cache_info()
-    assert info.misses == 5 and info.hits >= 5  # layout, heights and drawing share one encoding per label
+    # layout, heights and drawing share the encodings of a label: two on this profile, the version the content
+    # needs (layout) and the one the printer draws (version 3: the module parameter is a minimum version there)
+    assert info.misses == 10 and info.hits >= 5
 
 
 def test_a_big_jpeg_is_decoded_reduced_but_wide_enough(isolated):

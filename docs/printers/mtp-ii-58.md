@@ -65,12 +65,29 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | CODABAR, CODE93, CODE128 | ✅ | module ≥ 2 | native |
 | ITF | ⚠️ | detected but not read | nudge |
 | Module 1 | ❌ | too thin | **minimum 2** |
-| QR (module 3–16, ECC M/H) | ✅ | read | default **module 4, ECC M**; `width=full` = largest integer module |
+| QR (ECC M/H) | ✅ | read; modules always **5 dots** (below) | native, the smallest version; **ECC M**; `module=`/`width=`: 🖼️ |
 | QR ECC L | ⚠️ | read with difficulty | only on request |
 | PDF417 (`GS ( k` cn 48) | ❌ | prints the bytes as text | 🖼️ raster works |
 | Data Matrix | — | raster module 4+ read | 🖼️ |
 | Pix (BR Code) as native QR | ✅ | read by banking apps (CPF, e-mail, phone keys) | native |
 | **Vertical barcode** (raster, bars across the paper) | — | modules 2 and 3 **did not scan**, **4 did**: the feed direction blurs (whole heated lines in a row close thin gaps) | module ≥ 4 + 10-module quiet zone |
+
+**The native QR has no module size.** Paper 13/11, photographed 16/11 next to a raster QR ruler (25 modules × 6
+dots = 150 dots), each code decoded with OpenCV to count its modules:
+
+| Content needs | Module parameter sent (`GS ( k` fn 167) | Printed | Width |
+|---|---|---|---|
+| version 2 (`https://example.com/v2`) | 3 | version 3, 29 modules | ~146 dots |
+| version 2 | 6 · 8 | version 6, 41 modules | ~206 dots |
+| version 5 | 3 | version 5, 37 modules | ~187 dots |
+| version 5 | 6 · 8 | version 6, 41 modules | ~206 dots |
+| (older strips) | 4 · 9 | version 4 · 6 | ~170 · ~210 dots |
+
+Every module is 5 dots. The parameter is read as the **minimum version**, capped at 6, and raised when the content
+needs more. Never tested: parameters 1–2, content above version 6. Profile `[qr]`: `native_module_param =
+"min_version"`, `native_module_dots = 5`, `native_max_version = 6`, `native_param_tested = [3, 9]`. bobina sends
+max(version needed, 3), the smallest code, and previews it as printed; `module=` or `width=` (the firmware cannot
+give that size) and content above version 6 print as an exact image instead (`Q113`).
 
 ## Raster drawing rules
 
@@ -81,7 +98,7 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | Checkerboard / hatching | ≥ 2 dots (1 becomes blurry grey) |
 | Minimum text | **12 px Terminus**, 14 px Atkinson Hyperlegible (8 px illegible, 10 px borderline) |
 | Inverted text (white on black) | bold ≥ 20 px with ≥ 4 dots of margin |
-| QR in raster | **module ≥ 4** (2 and 3 did not read); native reads at 3 |
+| QR in raster | **module ≥ 4** (2 and 3 did not read); native: always 5-dot modules |
 | Raster band height (`GS v 0`) | **16 rows** (13/11: with 64 rows a light line appears at a random height, a different one on the same image, where the Bluetooth link starves the printer; with 16 none) |
 | Light grey behind text (table zebra, `.shade`) | **2-dot squares every 4 dots**, staggered (16/11: every 3 is heavy, every 6 a texture, 3-dot squares look like accents) |
 | Grid and box strokes | **2 dots** (16/11: with 3-dot strokes the text in the same rows printed faded: the head shares its heat across the line) |
@@ -136,4 +153,4 @@ a grid; threshold is for line art. The dot-gain curve and the warm-up effect are
 
 ## Still to measure
 
-UPC-E with 8 digits, the dot-gain curve.
+UPC-E with 8 digits, the dot-gain curve, native QR parameters 1–2 and content above version 6.

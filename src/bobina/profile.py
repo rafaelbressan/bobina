@@ -37,6 +37,25 @@ class Profile:
         """Modules of a wide Code39 element in the firmware's GS k output (python-barcode draws 3)."""
         return int(self.get("barcode.code39_wide", 3))
 
+    def qr_fixed_module(self) -> int | None:
+        """Dots per module of the native QR when the firmware reads the module parameter (GS ( k fn 167) as the
+        minimum version and draws every module the same size (qr.native_module_param = "min_version"; MTP-II, paper
+        13/11). None: standard ESC/POS, the parameter is the module in dots."""
+        if self.get("qr.native_module_param") != "min_version":
+            return None
+        return int(self.get("qr.native_module_dots", 5))
+
+    def qr_native_param(self, needed: int) -> int:
+        """The module parameter to send on such a firmware for content that needs version `needed`: the smallest code
+        within the tested range (qr.native_param_tested)."""
+        lo, hi = self.get("qr.native_param_tested", [3, 9])
+        return max(int(lo), min(int(hi), needed))
+
+    def qr_native_version(self, needed: int, param: int) -> int:
+        """The version such a firmware prints: the parameter is the minimum version, capped at qr.native_max_version,
+        and raised when the content needs more (measured: 3 → version 3; 6, 8, 9 → version 6)."""
+        return max(needed, min(param, int(self.get("qr.native_max_version", 6))))
+
     def get(self, dotted: str, default=None):
         cur = self.data
         for part in dotted.split("."):

@@ -283,16 +283,25 @@ def _scissors(d, x, y):
 
 
 @functools.lru_cache(maxsize=256)
-def qr_matrix(data: str, ecc: str) -> tuple:
-    """Cached: layout, preview heights and drawing each need the matrix (3 encodings per label before)."""
+def qr_matrix(data: str, ecc: str, version: int = 0) -> tuple:
+    """Cached: layout, preview heights and drawing each need the matrix (3 encodings per label before). version: the
+    one a firmware draws (QRRow.version), at the error correction asked; 0: the smallest the content fits."""
     import segno
 
-    q = segno.make(data, error=ecc.lower(), micro=False)
+    if version:
+        q = segno.make(data, error=ecc.lower(), version=version, micro=False, boost_error=False)
+    else:
+        q = segno.make(data, error=ecc.lower(), micro=False)
     return tuple(tuple(r) for r in q.matrix)
 
 
-def qr_image(data: str, module: int, ecc: str, border: int = 0) -> Image.Image:
-    m = qr_matrix(data, ecc)
+def qr_version(data: str, ecc: str) -> int:
+    """The smallest QR version that holds data at this error correction (a version-v symbol is 17 + 4v modules)."""
+    return (len(qr_matrix(data, ecc)) - 17) // 4
+
+
+def qr_image(data: str, module: int, ecc: str, border: int = 0, version: int = 0) -> Image.Image:
+    m = qr_matrix(data, ecc, version)
     n = len(m) + 2 * border
     im = Image.new("1", (n * module, n * module), 1)
     d = ImageDraw.Draw(im)

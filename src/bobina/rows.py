@@ -61,6 +61,9 @@ class QRRow:
     align: str = "center"
     line: int = 0
     native: bool = True
+    version: int = 0  # the version the printer draws (a firmware that takes the module as minimum version, profile
+    # qr.native_module_param); 0: the smallest one the content fits
+    param: int = 0  # the module parameter sent (GS ( k fn 167) when it is not the module in dots; 0: module)
 
 
 @dataclass

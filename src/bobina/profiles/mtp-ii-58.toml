@@ -69,7 +69,14 @@ h3 = { scale = [1, 1], bold = true }
 
 [qr]
 native = true
-default_module = 4        # N6: 3-8 read; 4 is the safe default
+# The native QR does not take a module size (paper 13/11, each code decoded to count its modules): GS ( k fn 167 is
+# read as the MINIMUM VERSION, capped at 6, raised when the content needs more, and every module is 5 dots.
+# Content needing version 2: parameter 3 → version 3, 146 dots; 6 and 8 → version 6, 206 dots.
+native_module_param = "min_version"
+native_module_dots = 5
+native_max_version = 6    # 6, 8, 9 printed version 6; content above version 6 never tested: printed as an image
+native_param_tested = [3, 9]  # 1-2 never printed: bobina sends max(version needed, 3), the smallest code
+default_module = 4        # raster QR (render=raster, or module=/width= asked: an image at that size)
 min_module_native = 3
 min_module_raster = 4     # R5-05: 2 and 3 did not read in raster
 default_ecc = "M"         # ECC L read with difficulty (N6)

@@ -43,8 +43,14 @@ def cmd_profile(args):
         print(f"  {features.MARK}: {names} (docs/TESTED.md)")
     if p.get("measured") is False:
         print(f"  source: {p.get('source', '?')}; not measured on paper: bobina calibrate tear, bobina calibrate feed")
+    fixed = p.qr_fixed_module()
+    qr = (
+        f"native {fixed}-dot modules up to version {p.get('qr.native_max_version', 6)}"
+        if fixed
+        else f"module {p.get('qr.default_module')}"
+    )
     print(
-        f"  qr: module {p.get('qr.default_module')} ecc {p.get('qr.default_ecc')} · images: "
+        f"  qr: {qr} ecc {p.get('qr.default_ecc')} · images: "
         f"{p.get('image.dither')} gamma {p.get('image.gamma')} · preview calibrated: {p.get('preview.calibrated')}"
     )
     return OK

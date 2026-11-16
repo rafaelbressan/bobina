@@ -14,8 +14,11 @@ from bobina.rows import QRRow
 ROOT = Path(__file__).resolve().parents[1]
 
 
+STANDARD = "epson-tm-t20iii"  # a native QR as ESC/POS says (module = dots): any payload stays a QRRow to read back
+
+
 def qr(doc: str, **kw) -> list[str]:
-    res = build(doc, **kw)
+    res = build(doc, **{"profile_name": STANDARD, **kw})
     return [r.data for r in res.rows if isinstance(r, QRRow)]
 
 
@@ -96,8 +99,8 @@ def test_every_network_has_a_case_and_its_example_works():
     covered = {contact.find(n).name for n, *_ in LINKS} | {"vcard", "mecard"}
     assert covered == set(contact.NETWORKS)
     for n in contact.NETWORKS.values():  # the example of the help and the docs builds a code
-        res = build(n.block + "\n")
-        assert [r for r in res.rows if isinstance(r, QRRow)], n.name
+        res = build(n.block + "\n")  # on the MTP-II a vCard needs more than version 6: an image (Q113)
+        assert [r for r in res.rows if isinstance(r, QRRow) or getattr(r, "kind", "") == "qr"], n.name
         assert "Q112" not in codes(res), n.name
 
 

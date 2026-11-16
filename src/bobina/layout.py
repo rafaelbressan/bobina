@@ -1066,8 +1066,9 @@ class Layout:
         if ecc not in ("L", "M", "Q", "H"):
             self.n.add("M101", f"unknown ecc '{ecc}'", f.line, "L, M, Q or H")
             ecc = "M"
+        fixed = self.p.qr_fixed_module() if render == "native" else None  # the module parameter is a version there
         lo = int(self.p.get(f"qr.min_module_{render}", 4))
-        if mod < lo:
+        if mod < lo and not fixed:
             self.n.add("Q101", f"QR module {mod} in {render} mode", f.line, f"use module={lo}")
         try:
             n = len(imaging.qr_matrix(data, ecc))
@@ -1080,6 +1081,15 @@ class Layout:
             )
             return []
         target = self.object_width(f.attrs.kv.get("width"), f.line)
+        if fixed:
+            native = self._fixed_native_qr(f, data, ecc, fixed, align)
+            if native:
+                return native
+            render, lo = "raster", int(self.p.get("qr.min_module_raster", 4))  # an image, at the size asked
+            if "module" not in f.attrs.kv:  # none asked: the printer's own module, as its codes, if it fits the paper
+                mod = max(1, min(fixed, self.W // n))
+            if mod < lo:
+                self.n.add("Q101", f"QR module {mod} in {render} mode", f.line, f"use module={lo}")
         if target:
             mod = self.fit_module(target, n, mod, 16 if render == "native" else 64)
             if mod < lo:
@@ -1095,6 +1105,48 @@ class Layout:
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]
+
+    def _fixed_native_qr(self, f: Fence, data: str, ecc: str, fixed: int, align: str) -> list:
+        """The native QR of a firmware whose modules are always `fixed` dots and whose module parameter is the
+        minimum version (profile qr.native_module_param): drawn as it prints, the smallest code it gives. [] when it
+        must be an image instead (Q113): a size asked (module=, width=; with render=native the size is ignored), or
+        more data than the versions tested on paper."""
+        kv = f.attrs.kv
+        asked = [f"{k}={kv[k]}" for k in ("module", "width") if k in kv and str(kv[k]).strip()]
+        if asked == [f"module={fixed}"]:  # what the printer gives anyway
+            asked = []
+        names = " and ".join(a.split("=")[0] + "=" for a in asked)
+        explicit = kv.get("render") == "native"
+        needed, top = imaging.qr_version(data, ecc), int(self.p.get("qr.native_max_version", 6))
+        if needed > top:
+            self.n.add(
+                "Q113",
+                ("render=native ignored: " if explicit else "")
+                + f"QR version {needed} ({len(data)} characters at ECC {ecc}); this printer's native QR was tested up "
+                f"to version {top}: printed as an image",
+                f.line,
+                "nothing to fix: the image prints exactly; less data gives the printer's own code",
+            )
+            return []
+        if asked and not explicit:
+            self.n.add(
+                "Q113",
+                f"this printer's native QR always has {fixed}-dot modules: {' '.join(asked)} printed as an image",
+                f.line,
+                f"remove {names} for the printer's own code ({fixed}-dot modules), or keep it: the image prints "
+                "exactly",
+            )
+            return []
+        if asked:
+            self.n.add(
+                "Q113",
+                f"render=native: {' '.join(asked)} has no effect, this printer's native QR always has {fixed}-dot "
+                "modules",
+                f.line,
+                f"remove {names}, or remove render=native to print that size as an image",
+            )
+        param = self.p.qr_native_param(needed)
+        return [QRRow(data, fixed, ecc, align, f.line, version=self.p.qr_native_version(needed, param), param=param)]
 
     def barcode(self, f: Fence) -> list:
         from . import codes

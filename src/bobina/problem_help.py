@@ -48,6 +48,11 @@ FIX = {
         "The message says what the network takes, with an example; bobina help contact lists every network. The rest "
         "prints and the exit code is 9 (--allow Q112: 0)."
     ),
+    "Q113": (
+        "Nothing to fix: the image prints exactly the size asked. For the printer's own code, remove module= and "
+        "width= (its modules are always 5 dots), or put less data in it. With render=native, module= and width= "
+        "have no effect."
+    ),
     # L layout
     "L101": "Add a space or a hyphen to the long word, or use a smaller size.",
     "L102": "Nothing to fix: check the length on the confirmation screen before printing.",

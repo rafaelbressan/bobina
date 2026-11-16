@@ -1,5 +1,6 @@
 ---
-# A counter sign: "Pay with …", a big payment code, the receiver, and the amount or "any amount".
+# A counter sign: "Pay with …", a big payment code (an image across the paper: exact on every printer), the
+# receiver, and the amount or "any amount".
 fields:
   scheme: { required: true, example: "pix", help: "pix, upi, epc, promptpay, paynow… (bobina help pay)" }
   to: { required: true, example: "you@example.com", help: "who receives: Pix key, UPI ID, IBAN, phone…" }
@@ -12,7 +13,7 @@ labels:
 ---
 ## {{ label.pay }} {{ scheme | payname }} {.center}
 
-```pay {scheme="{{ scheme }}" to="{{ to }}" name="{{ name }}" amount="{{ amount }}" city="{{ city }}" width=full caption=none}
+```pay {scheme="{{ scheme }}" to="{{ to }}" name="{{ name }}" amount="{{ amount }}" city="{{ city }}" width=full render=raster caption=none}
 ```
 
 **{{ name }}** {.center}

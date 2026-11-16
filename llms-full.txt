@@ -806,10 +806,9 @@ Quality nudges, from the printed tests of the profile:
   a character no font has → printed as a box (`F302`).
 
 **Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
-downloads its Noto font (pinned URL, size and sha256; 38 KB for Thai, 4.5 to 8.3 MB for CJK), says so first (font,
-OFL license, size, source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or
-`bobina config set font_downloads off`: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han
-follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
+downloads its Noto font (pinned, 38 KB for Thai, up to 8.3 MB for CJK), says so first (font, OFL license, size,
+source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or `bobina config set
+font_downloads off`: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
 Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
@@ -846,14 +845,15 @@ integer module); `caption="…"` follows it unless `caption-align=left|center|ri
 ### 6.1 QR code ✓
 
 ````markdown
-```qr {module=4 ecc=M}
+```qr {ecc=M}
 https://example.com
 ```
 ````
 
 `module=` dots per module (profile default 4; minimum 3 native, 4 raster → `Q101`), `ecc=L|M|Q|H` (`L` → `Q102`),
-`width=` (native: module ≤ 16), `render=raster`, `caption="Menu"`. Content that does not fit
-any QR → `Q109`, nothing printed.
+`width=` (native: module ≤ 16), `render=raster`, `caption="Menu"`. Content that fits no QR → `Q109`, nothing printed.
+The MTP-II's own QR always has 5-dot modules (version 3–6, the smallest that fits): `module=`, `width=` or more
+data print it as an image (`Q113`).
 
 ### 6.2 Barcodes ✓
 
@@ -882,9 +882,9 @@ One block for every payment scheme, with the same attributes: `to=` who receives
 `24,90`, in the scheme's currency), `ref=` your reference, `note=` text for the payer; a few schemes take an extra
 (`city=` Pix, `bic=` SEPA, `currency=` PayPal, `label=` other). `caption=auto|none|"text"`: `auto` prints a line
 under the code with the scheme and the amount (`Pix · R$ 10,00`), or the name. The QR attributes (`width=`,
-`module=`, `ecc=`) work too. Pix is one scheme like the others: `pay {scheme=pix to=… name=… city=…}` (the old
-```` ```pix ```` block is gone: it prints as text with `M102` and the way to write it). Attributes take `{{ }}`, so
-a receipt per row carries its own amount. Without `amount=` (or with 0) the code is open: the payer types it.
+`module=`, `ecc=`) work too. Pix is one scheme like the others: `pay {scheme=pix to=… name=… city=…}`. Attributes
+take `{{ }}`, so a receipt per row carries its own amount. Without `amount=` (or with 0) the code is open: the payer
+types it.
 
 | Scheme | `to=` | Tested in the app |
 |---|---|---|
@@ -905,7 +905,7 @@ the command exits with 9 so a script or agent knows (`--allow Q111` for 0). A sc
 real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). No brand logos (they need
 a licence). What each field means in each scheme, its official name and its limit: `bobina help pay SCHEME`
 (`--json` too) and [pay.md](docs/pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
-An amount that reads two ways (`amount=1.890`: R$ 1.890,00 or R$ 1,89?) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
+An amount that reads two ways (`amount=1.890`) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
 The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is printed as typed with `M202`.
 
 ### 6.4 Data Matrix and PDF417 ✓
@@ -1042,10 +1042,9 @@ Previews, `check` and `--dry-run` only show the next values; they take nothing. 
 it is built, so the confirmation screen shows the numbers that will be printed and two prints at the same time never
 get the same number. If the job is then not printed (you quit, the printer is unreachable, the build fails), the
 values go back, unless another print took numbers after them: then they stay skipped. A number is never printed
-twice; a cancelled job may leave a gap (a job that stopped halfway also keeps its numbers; one you stop between
-labels keeps those of the labels that printed). The CLI adds
-`--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them,
-and `bobina seq set NAME N` starts one at N, even before its first print.
+twice; a cancelled job may leave a gap (one stopped halfway keeps the numbers of the labels that printed). The CLI
+adds `--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets
+them, and `bobina seq set NAME N` starts one at N, even before its first print.
 
 ### 7.4 Data is literal
 
@@ -1111,7 +1110,6 @@ labels:
 Categories: **B** drawing · **F** fonts · **Q** codes · **L** layout · **I** images · **P** printer · **M** markup and
 templates. `bobina help nudges` prints the same list; `allow: [CODE]` or `--allow CODE` silences one.
 
-
 Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 
 | Code | Severity | Meaning |
@@ -1176,6 +1174,7 @@ Nudges:
 | `Q110` | warning | barcode turned vertical to fit the paper |
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
+| `Q113` | note | native QR with fixed modules: this QR printed as an image |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
 | `L103` | warning | preformatted line longer than the paper was wrapped |

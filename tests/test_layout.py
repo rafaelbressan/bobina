@@ -160,7 +160,9 @@ def test_barcode_stretches_with_integer_module():
 
 
 def test_qr_width_full_uses_largest_integer_module():
-    r = [r for r in build("```qr {width=full}\nhttps://example.com/full\n```").rows if isinstance(r, QRRow)][0]
+    # a 384-dot printer whose native QR takes the module in dots (the MTP-II's has fixed modules: tests/test_qr_native)
+    res = build("```qr {width=full}\nhttps://example.com/full\n```", profile_name="netbye-nbtp-5880")
+    r = [r for r in res.rows if isinstance(r, QRRow)][0]
     from bobina import imaging
 
     n = len(imaging.qr_matrix("https://example.com/full", "M"))

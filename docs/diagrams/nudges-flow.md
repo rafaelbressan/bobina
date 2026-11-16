@@ -231,8 +231,9 @@ from this list.
 | `Q108` | warning | barcode module too thin to scan | N6 |
 | `Q109` | warning | invalid barcode content |  |
 | `Q110` | warning | barcode turned vertical to fit the paper |  |
-| `Q111` | warning | payment code not built: an attribute is missing or invalid (the code is left out, the rest prints, exit 9) |  |
-| `Q112` | warning | contact code not built: the network or its value is wrong (the code is left out, the rest prints, exit 9) |  |
+| `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9) |  |
+| `Q112` | warning | contact code not built: the network or its value is wrong (left out, the rest prints, exit 9) |  |
+| `Q113` | note | native QR with fixed modules: this QR printed as an image |  |
 
 ### Images
 
