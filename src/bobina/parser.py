@@ -492,15 +492,43 @@ COLUMN_KEYS = ("width", "prefix", "suffix")  # a column's settings, at the end o
 COLUMN_HINT = 'a title cell takes width=, prefix= and suffix= for its column: | Price {width=9ch prefix="R$ "} |'
 
 
-def _cell_attrs(inline) -> Attrs | None:
-    """The `{…}` at the end of a cell, with a class or a key (an empty {} or an id alone stays text), taken out of
-    its text. A value from --set/--data is still a placeholder here: its braces never match (FORMAT §7.4)."""
+def _raw_cells(line: str) -> list[str]:
+    """A table row's source line in its cells as written (backslashes kept), split at the pipes GFM splits at:
+    the unescaped ones."""
+    s = re.sub(r"^[\s>]*", "", line).strip()
+    s = s[1:] if s.startswith("|") else s
+    s = s[:-1] if s.endswith("|") and not s.endswith("\\|") else s
+    cells, cur, esc = [], "", False
+    for ch in s:
+        if ch == "|" and not esc:
+            cells.append(cur)
+            cur = ""
+        else:
+            cur += ch
+        esc = ch == "\\" and not esc
+    return [*cells, cur]
+
+
+ESCAPED_TAIL = re.compile(r"(\\*)\{[^{}]*?(\\*)\}\s*$")
+
+
+def _escaped_tail(raw: str | None) -> bool:
+    """The `{…}` at the end of a cell was written \\{…} (or …\\}): markdown-it already made it a plain brace, so
+    only the source tells. It stays text."""
+    m = ESCAPED_TAIL.search(raw or "")
+    return bool(m) and (len(m.group(1)) % 2 == 1 or len(m.group(2)) % 2 == 1)
+
+
+def _cell_attrs(inline, raw: str | None, want) -> Attrs | None:
+    """The `{…}` at the end of a cell when want(attrs) says it is meant for bobina, taken out of its text; None
+    otherwise (it stays text: an escaped brace, or what want refuses). raw: the cell as written. A value from
+    --set/--data is still a placeholder here: its braces never match (FORMAT §7.4)."""
     kids = inline.children if inline is not None else []
-    if not kids or kids[-1].type != "text":
+    if not kids or kids[-1].type != "text" or _escaped_tail(raw):
         return None
     m = ATTR_TAIL.search(kids[-1].content)
     a = parse_attrs(m.group(1)) if m else None
-    if a is None or not (a.classes or set(a.kv) - {"id"}):
+    if a is None or not want(a):
         return None
     kids[-1].token.content = kids[-1].content[: m.start()]
     return a
@@ -513,9 +541,11 @@ def _idle_names(a: Attrs, used: tuple[str, ...]) -> list[str]:
     ]
 
 
-def _title_settings(cell, ln: int, nudges: Nudges) -> Attrs:
-    """A title cell's column settings (width= prefix= suffix=); the rest of its {…} is said (M101)."""
-    a = _cell_attrs(cell.children[0] if cell.children else None)
+def _title_settings(cell, raw: str | None, ln: int, nudges: Nudges) -> Attrs:
+    """A title cell's column settings (width= prefix= suffix=); the rest of its {…} is said (M101). An empty {} or
+    an id alone stays text."""
+    inline = cell.children[0] if cell.children else None
+    a = _cell_attrs(inline, raw, lambda a: a.classes or set(a.kv) - {"id"})
     if a is None:
         return Attrs()
     check_attrs(a, ln, nudges, extra=frozenset(COLUMN_KEYS))
@@ -526,16 +556,13 @@ def _title_settings(cell, ln: int, nudges: Nudges) -> Attrs:
     return Attrs(set(), {k: v for k, v in a.kv.items() if k in COLUMN_KEYS})
 
 
-def _body_settings(cell, at: int, nudges: Nudges) -> None:
+def _body_settings(cell, raw: str | None, at: int, nudges: Nudges) -> None:
     """width=, prefix=, suffix= at the end of a body cell: said (M101) and taken out of its text; a {…} without
     them stays text."""
     inline = cell.children[0] if cell.children else None
-    kids = inline.children if inline is not None else []
-    m = ATTR_TAIL.search(kids[-1].content) if kids and kids[-1].type == "text" else None
-    a = parse_attrs(m.group(1)) if m else None
-    if a is None or not set(a.kv) & set(COLUMN_KEYS):
+    a = _cell_attrs(inline, raw, lambda a: set(a.kv) & set(COLUMN_KEYS))
+    if a is None:
         return
-    _cell_attrs(inline)
     check_attrs(a, at, nudges, extra=frozenset(COLUMN_KEYS))
     names = [f"{k}=" for k in COLUMN_KEYS if k in a.kv]
     nudges.add("M101", f"{', '.join(names)} {'works' if len(names) == 1 else 'work'} at the end of a title cell, "
@@ -559,13 +586,15 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
         for tr in section.children:
             cells, aligns = [], []
             at = _line(tr, ln - _line(n, 0)) or ln
-            for cell in tr.children:
+            raws = _raw_cells(src[tr.map[0]]) if tr.map and tr.map[0] < len(src) else []
+            for k, cell in enumerate(tr.children):
                 style = (cell.attrs or {}).get("style", "")
                 aligns.append("right" if "right" in style else "center" if "center" in style else "left")
+                raw = raws[k] if k < len(raws) else None
                 if section.type == "thead":
-                    tb.columns.append(_title_settings(cell, ln, nudges))
+                    tb.columns.append(_title_settings(cell, raw, ln, nudges))
                 else:
-                    _body_settings(cell, at, nudges)
+                    _body_settings(cell, raw, at, nudges)
                 cells.append(inline_runs(cell.children[0]) if cell.children else [])
             if section.type == "thead":
                 tb.header, tb.aligns = cells, aligns

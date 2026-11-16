@@ -59,8 +59,8 @@ FIX = {
         "orientation=horizontal keeps it standing, with narrow wrapped columns."
     ),
     "L107": (
-        "Give the columns smaller width= (bobina check lists the width each got), leave one out, or use a smaller "
-        "font on the table's {…} line: {font=Terminus size=16px}."
+        "Give the columns smaller width= (bobina check lists the width each got), leave one out, use a smaller font "
+        "on the table's {…} line ({font=Terminus size=16px}), or turn the table: orientation=vertical."
     ),
     "L108": "Nothing to fix: change a column's width= at the end of its title cell, then check again.",
     # I images

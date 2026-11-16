@@ -83,7 +83,7 @@ def test_a_title_wider_than_its_column_wraps_like_the_body():
 
 @pytest.mark.parametrize(
     ("width", "cols"),
-    [("6ch", 6), ("12mm", 8), ("25%", 8), ("72", 6), ("72px", 6), ("6.9ch", 6), ("auto", None)],
+    [("6ch", 6), ("12mm", 8), ("25%", 7), ("72", 6), ("72px", 6), ("6.9ch", 6), ("auto", None)],
 )
 def test_width_units(width, cols):
     res = build(f"| A {{width={width}}} | B |\n|---|---|\n| x | y |\n")
@@ -104,10 +104,10 @@ def test_a_table_of_given_widths_only_is_as_wide_as_they_are_and_can_be_placed()
 
 def test_widths_wider_than_the_paper_shrink_in_proportion_and_auto_columns_keep_2():
     res = build("| A {width=20ch} | B {width=20ch} | C |\n|---|---|---|\n| a | b | c |\n")
-    assert said(res, "L107") == ["column widths add up to 44 columns, the paper has 32: scaled down"]
-    assert notes(res) == ["column widths: A 14 · B 14 · C 2 (+2 gaps = 32 of 32)"]
+    assert said(res, "L107") == ["column widths add up to 43 columns, the paper has 32: scaled down"]  # c needs 1
+    assert notes(res) == ["column widths: A 15 · B 14 · C 1 (+2 gaps = 32 of 32)"]
     hint = next(n.suggestion for n in res.nudges if n.code == "L107")
-    assert "2 for each auto column" in hint and "font=Terminus size=16px" in hint
+    assert "up to 2 for each auto column" in hint and "font=Terminus size=16px" in hint
 
 
 def test_auto_orientation_keeps_a_table_with_widths_standing():
@@ -194,9 +194,9 @@ def test_a_body_cell_brace_without_column_settings_stays_text():
 @pytest.mark.parametrize("value", ["abc", "-3ch", "0", "0ch", "0.5ch", "9 ch"])
 def test_an_unreadable_width_is_said_and_the_column_is_auto(value):
     res = build(f'| A {{width="{value}"}} | B |\n|---|---|\n| x | y |\n')
-    assert said(res, "M101") == [f"width={value}: not a column width"]
+    assert said(res, "M101") == [f"width={value}"]  # as object_width says it, with the column's units
     hint = next(n.suggestion for n in res.nudges if n.code == "M101")
-    assert "auto, 7ch, 20mm, 30%" in hint
+    assert hint.startswith("auto, 7ch, 20mm, 30% (of the text room)")
     assert notes(res) == ["column widths: A 30 · B 1 (+1 gap = 32 of 32)"]  # auto: as wide as the plain table
 
 
@@ -260,9 +260,116 @@ def test_only_the_given_widths_shrink_and_each_auto_column_keeps_its_2():
     assert notes(res) == ["column widths: A 19 · B 6 · C 2 · D 2 (+3 gaps = 32 of 32)"]
 
 
-def test_check_says_a_tables_widths_once_for_every_data_row(capsys, tmp_path):
-    (tmp_path / "rows.csv").write_text("item\nRice\nBlack beans in a big bag\n")
+def test_check_says_each_distinct_set_of_widths_once_with_data(capsys, tmp_path):
+    (tmp_path / "rows.csv").write_text("item\nRice\nBlack beans in a big bag\nRice\n")
     doc = tmp_path / "label.bob.md"
     doc.write_text("| N {width=3ch} | Item |\n|---|---|\n| 1 | {{ item }} |\n{.compact}\n")
     assert cli.main(["check", str(doc), "--data", str(tmp_path / "rows.csv")]) == cli.OK
-    assert capsys.readouterr().err.count("[L108]") == 1
+    err = capsys.readouterr().err
+    assert err.count("[L108]") == 2  # Rice twice: once; the label whose auto column is wider: its own
+    assert "N 3 · Item 4 (+1 gap = 8 of 32)" in err and "N 3 · Item 24 (+1 gap = 28 of 32)" in err
+
+
+# --- review fixes ------------------------------------------------------------------------------------------------
+
+
+def test_percentages_are_of_the_text_room_and_100_percent_fills_it_without_l107():
+    res = build("| A {width=50%} | B {width=50%} |\n|---|---|\n| x | y |\n")
+    assert "L107" not in codes(res)
+    assert notes(res) == ["column widths: A 15 · B 15 (+1 gap = 31 of 32)"]  # 31 of text room: 15 + 15
+    res = build("| A {width=25%} | B {width=75%} |\n|---|---|\n| x | y |\n{font=Terminus size=16px}\n")
+    assert "L107" not in codes(res) and notes(res)[0].endswith("A 11 · B 35 (+1 gap = 47 of 48)")
+
+
+def test_half_and_third_are_shares_of_the_text_room_too():
+    assert notes(build("| A {width=half} | B |\n|---|---|\n| x | y |\n")) == [
+        "column widths: A 15 · B 16 (+1 gap = 32 of 32)"
+    ]
+
+
+def crowded(extra: str = "") -> str:
+    """8 columns given 2ch and 6 auto ones of 2 characters: 8 + 12 + 13 gaps = 33 of 32 even with the widths
+    shrunk to 1; at 1 each (14 + 13 = 27) they would fit."""
+    head = [f"F{i} {{width=2ch}}" for i in range(8)] + [f"A{i}" for i in range(6)]
+    return "| " + " | ".join(head) + " |\n|" + "---|" * 14 + "\n| " + " | ".join(["ab"] * 14) + " |\n" + extra
+
+
+def test_a_table_with_widths_that_cannot_stand_turns_instead_of_running_past_the_paper():
+    res = build(crowded())
+    assert "L106" in codes(res) and "L107" not in codes(res)
+    assert [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "table"]
+    assert notes(res)[0].startswith("turned table, column widths: F0 2 · F1 2")  # the widths along the paper
+
+
+def test_forced_horizontal_never_prints_past_the_paper_and_says_why():
+    res = build(crowded("{orientation=horizontal}\n"))
+    assert said(res, "L107") == ["a table of 14 columns needs at least 33 columns standing, the paper has 32: "
+                                 "narrowed to fit"]  # fmt: skip
+    assert "orientation=vertical" in next(n.suggestion for n in res.nudges if n.code == "L107")
+    assert all(len(ln) <= 32 for ln in lines(res)) and notes(res)[0].endswith("= 32 of 32)")
+    many = " | ".join(f"C{i}" for i in range(20))
+    cut = build(f"| {many} |\n|" + "---|" * 20 + "\n| " + " | ".join("x" for _ in range(20)) + " |\n"
+                "{orientation=horizontal}\n")  # fmt: skip
+    assert "cut at the paper's edge" in said(cut, "L107")[0] and "column widths" not in said(cut, "L107")[0]
+    assert all(len(ln) <= 32 for ln in lines(cut))
+
+
+def test_a_table_in_a_quote_with_widths_that_cannot_stand_is_narrowed_not_overflowing():
+    cells = " | ".join(f"C{i} {{width=4ch}}" for i in range(9))
+    res = build(f"> | {cells} |\n> |" + "---|" * 9 + "\n> | " + " | ".join("abcd" for _ in range(9)) + " |\n")
+    assert all(len(ln) <= 32 for ln in lines(res)) and "L107" in codes(res)
+
+
+@pytest.mark.parametrize("profile", ["mtp-ii-58", "epson-tm-t20iii"])
+def test_no_combination_of_widths_runs_past_the_paper(profile):
+    import random
+
+    rng = random.Random(7)
+    for _ in range(60):
+        n = rng.randint(1, 9)
+        cols = [rng.choice([None, 1, 2, 3, 7, 12, 20, 40]) for _ in range(n)]
+        head = " | ".join(f"H{i}" + (f" {{width={w}ch}}" if w else "") for i, w in enumerate(cols))
+        body = " | ".join("x" * rng.randint(1, 9) for _ in cols)
+        doc = f"| {head} |\n|" + "---|" * n + f"\n| {body} |\n{{orientation=horizontal}}\n"
+        res = build(doc, profile_name=profile)
+        paper = 32 if profile == "mtp-ii-58" else 48
+        assert all(len(ln) <= paper for ln in lines(res)), (cols, lines(res))
+        note = notes(res)[0]
+        used = int(note.rsplit("= ", 1)[1].split(" of")[0])
+        assert used <= paper or "cut at the paper's edge" in " ".join(said(res, "L107")), (cols, note)
+
+
+def test_shrink_never_exceeds_its_room():
+    from bobina.layout import _shrink
+
+    assert sum(_shrink([40, 1, 1, 1, 1], 32)) <= 32
+    for widths in ([40, 1, 1, 1, 1], [7, 7, 7], [100, 3], [1] * 10, [5, 50, 2, 9]):
+        for cap in range(len(widths), 60):
+            got = _shrink(widths, cap)
+            assert sum(got) <= max(cap, len(widths)) and min(got) >= 1, (widths, cap, got)
+
+
+def test_l108_shows_icons_by_name():
+    res = build("| :fragile: Box {width=8ch} | B |\n|---|---|\n| x | y |\n")
+    assert notes(res)[0].startswith("column widths: ◆ Box 8")  # as L101 shows a word, never the raw character
+
+
+def test_chat_and_every_other_path_never_see_l108():
+    from bobina.nudges import Nudges
+
+    n = Nudges()
+    n.add("L108", "column widths: A 1", 1)
+    n.add("L101", "word split", 1)
+    assert [x.code for x in n] == ["L101"] and [x.code for x in n.check_only] == ["L108"]
+
+
+def test_an_escaped_brace_at_the_end_of_a_cell_stays_text():
+    res = build("| A \\{width=3ch} | B |\n|---|---|\n| x | 9 \\{prefix=x} |\n")
+    assert lines(res)[0].startswith("A {width=3ch}") and lines(res)[1].endswith("9 {prefix=x}")
+    assert not codes(res) and not notes(res)
+
+
+def test_a_real_brace_a_title_cell_does_not_take_is_still_said():
+    res = build("| A {.bold} | B \\| C {width=3ch} |\n|---|---|\n| x | y |\n")
+    assert said(res, "M101") == [".bold at the end of a title cell does nothing"]
+    assert notes(res) == ["column widths: A 28 · B | C 3 (+1 gap = 32 of 32)"]  # an escaped pipe splits nothing

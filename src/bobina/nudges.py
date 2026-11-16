@@ -50,7 +50,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L104": ("warning", "rotated block wider than the paper was cropped", ""),
     "L105": ("warning", "nothing printable: every block was skipped", ""),
     "L106": ("note", "table turned vertical to fit the paper (header on the right)", ""),
-    "L107": ("warning", "table column widths wider than the paper were scaled down", ""),
+    "L107": ("warning", "table columns narrowed to fit the paper (widths scaled down, or too many columns)", ""),
     "L108": ("note", "the width each table column got (said by bobina check only)", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
@@ -183,7 +183,7 @@ class Nudge:
         }
 
 
-CHECK_ONLY = frozenset({"L108"})  # notes bobina check says, kept out of every print (Result.notes)
+CHECK_ONLY = frozenset({"L108"})  # notes only bobina check says: Nudges keeps them apart (Nudges.check_only)
 
 MARK = {"error": "✗", "warning": "!", "note": "·"}
 
@@ -212,10 +212,18 @@ def problems_header(errors: int, warnings: int, notes: int, printed: str) -> str
 
 
 class Nudges(list):
+    """The problems of a job. The notes only bobina check says (CHECK_ONLY) are kept apart, in check_only, where
+    they are made: whatever lists or shows the problems never sees them, unless it asks (Result.visible_nudges)."""
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.check_only: list[Nudge] = []
+
     def add(self, code: str, message: str, line: int | None = None, suggestion: str = "", evidence: str = ""):
         n = Nudge(code, message, line, suggestion, evidence)
-        if not any(x.code == n.code and x.line == n.line and x.message == n.message for x in self):
-            self.append(n)
+        into = self.check_only if code in CHECK_ONLY else self
+        if not any(x.code == n.code and x.line == n.line and x.message == n.message for x in into):
+            into.append(n)
         return n
 
     def filtered(self, allow: set[str]) -> list[Nudge]:

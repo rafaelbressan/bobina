@@ -6,7 +6,7 @@ import functools
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
@@ -43,8 +43,9 @@ TABLE_HINT = (
     + ", ".join([*(f".{c}" for c in sorted(TABLE_CLASSES)), *(f"{k}=" for k in sorted(TABLE_KEYS - {"id"}))])
     + " and #id (docs/guides/tables.md)"
 )
-COLUMN_WIDTH_RE = re.compile(r"^(\d+(?:\.\d+)?)(ch|mm|%|px|dots)?$")  # width= at the end of a title cell
-COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% or dots (96); the column shares what is left (auto)"
+OBJECT_WIDTH_HINT = "full, half, third, 50%, 30mm or dots (200)"
+COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
+COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% (of the text room) or dots (96); the column shares what is left (auto)"
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
@@ -974,9 +975,9 @@ class Layout:
         (no uneven bars)."""
         return max(1, min(hi, int(min(target, self.W) // units))) if target else default
 
-    def object_width(self, value, line: int) -> int | None:
+    def object_width(self, value, line: int, hint: str = OBJECT_WIDTH_HINT) -> int | None:
         """width= on any object (image, QR, barcode, Data Matrix, PDF417, pay, contact): full, half, third, 50%,
-        30mm or dots (200, 200px). None when absent or unreadable (M101)."""
+        30mm or dots (200, 200px). None when absent or unreadable (M101, with `hint`: a table column's says ch)."""
         if value is None or str(value).strip() == "":
             return None
         text = str(value).strip().lower().replace(",", ".")
@@ -992,7 +993,7 @@ class Layout:
             if w < 1:
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"width={value}", line, "full, half, third, 50%, 30mm or dots (200)")
+            self.n.add("M101", f"width={value}", line, hint)
             return None
         return w
 
@@ -1542,9 +1543,9 @@ class Layout:
         in_body = [_longest(col[1:] if head else col, ink.units) for col in cols]  # a header word gives way first
         room = self.cols - indent if ink.native else (self.W - indent * self.p.cell[0]) * 64 // ink.scale
         cap = room - (ncol - 1) - (1 if style == "grid" else 0)  # grid: half a column each side for the border
-        fixed = [self.column_units(w, ink, room) for w, _, _ in given]
+        fixed = [self.column_units(w, ink, cap, t.line) for w, _, _ in given]
         say = face is not None or any(c.kv for c in t.columns)  # L108, in bobina check: settings or a font
-        lay = _Lay(fixed, room, say)
+        lay = _Lay(fixed, [min(2, n) for n in natural], room, say)
         orientation = t.attrs.kv.get("orientation", "auto")
         if orientation not in ("auto", "horizontal", "vertical"):
             self.n.add(
@@ -1561,15 +1562,20 @@ class Layout:
         standing, said = self.trial(
             lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink, lay)
         )
-        # a table with a column width was laid out for the paper standing: auto never turns it (L107 scales it)
+        # a table with column widths turns only when it cannot stand even with them shrunk to 1 column and the auto
+        # ones at 2 (then it must: never past the paper's edge); otherwise L107 scales the widths down
         free = all(w is None for w in fixed)
-        if orientation == "auto" and not indent and free and sum(min(w, TABLE_MIN) for w in natural) > cap:
+        must = _fit_fixed(fixed, lay.lo, cap)[2] in ("squeezed", "cut")  # standing, it would not fit at all
+        cramped = free and sum(min(w, TABLE_MIN) for w in natural) > cap
+        if orientation == "auto" and not indent and (must or cramped):
             turned, said_turned = self.trial(lambda: self.table_turned(t, head, body, natural, style, ink, lay))
             along = self.rows_height(turned)
             # never metres of paper where a few wrapped lines do: up to twice the standing length, or TURN_FREE_MM;
             # but columns of fewer than TABLE_MIN / 2 characters on average cannot be read standing: always turned
-            if cap < ncol * TABLE_MIN / 2 or along <= max(
-                2 * self.rows_height(standing), self.p.mm_to_dots(TURN_FREE_MM)
+            if (
+                must
+                or cap < ncol * TABLE_MIN / 2
+                or along <= max(2 * self.rows_height(standing), self.p.mm_to_dots(TURN_FREE_MM))
             ):
                 self.hear(said_turned)
                 self.n.add(
@@ -1597,7 +1603,7 @@ class Layout:
             self.n = outer
 
     def hear(self, said: Nudges) -> None:
-        for x in said:
+        for x in [*said, *said.check_only]:
             self.n.add(x.code, x.message, x.line, x.suggestion, x.evidence)
 
     @staticmethod
@@ -1651,42 +1657,40 @@ class Layout:
             fam = "Spleen" if px % self.p.cell[1] == 0 else "Terminus"
         return fam, px
 
-    def table_columns(self, t: Table, ncol: int) -> list[tuple[tuple[float, str] | None, str, str]]:
-        """Each column's settings from the end of its title cell: (width, prefix, suffix), width None for auto or
-        (number, unit). A width it cannot read is said (M101) and the column is auto."""
+    def table_columns(self, t: Table, ncol: int) -> list[tuple[str | None, str, str]]:
+        """Each column's settings from the end of its title cell: (width, prefix, suffix), width None for auto. A
+        width in capitals is said (M101) and the column is auto."""
         out = []
         for i in range(ncol):
             kv = t.columns[i].kv if i < len(t.columns) else {}
-            raw = kv.get("width")
-            width = None
-            if raw is not None and raw != "auto":
-                m = COLUMN_WIDTH_RE.match(raw.replace(",", "."))
-                n = float(m.group(1)) if m else 0
-                if m and m.group(2) == "ch":
-                    n = math.floor(n)
-                if n >= 1:
-                    width = (n, m.group(2) or "dots")
-                elif raw.lower() != raw and (
-                    raw.lower() == "auto" or COLUMN_WIDTH_RE.match(raw.lower().replace(",", "."))
-                ):
-                    self.n.add("M101", f"width={raw}: values are lowercase", t.line,
-                               f"write width={raw.lower()} (the column shares what is left until then)")  # fmt: skip
-                else:
-                    self.n.add("M101", f"width={raw}: not a column width", t.line, COLUMN_WIDTH_HINT)
+            width = kv.get("width")
+            if width == "auto":
+                width = None
+            elif width is not None and width != width.lower():
+                self.n.add("M101", f"width={width}: values are lowercase", t.line,
+                           f"write width={width.lower()} (the column shares what is left until then)")  # fmt: skip
+                width = None
             out.append((width, kv.get("prefix", ""), kv.get("suffix", "")))
         return out
 
-    def column_units(self, width: tuple[float, str] | None, ink, room: int) -> int | None:
-        """A column's width= in the ink's columns (the printer font's, or the "0" of a table's font): ch as they
-        are, % of the table's room, mm and dots as many whole columns as fit in them, at least 1. None: auto."""
+    def column_units(self, width: str | None, ink, cap: int, line: int) -> int | None:
+        """A column's width= in the ink's columns (the printer font's, or the "0" of a table's font): 7ch as it is;
+        anything else as object_width reads it (one set of units and hints), 30% (and half, third) of the table's
+        text room `cap`, 20mm and dots as many whole columns as fit in them. None: auto, or unreadable (M101)."""
         if width is None:
             return None
-        n, unit = width
-        if unit == "ch":
-            return int(n)
-        if unit == "%":
-            return max(1, int(room * n / 100))
-        dots = self.p.mm_to_dots(n) if unit == "mm" else int(n)
+        m = COLUMN_CH_RE.fullmatch(width.replace(",", "."))
+        if m:
+            n = math.floor(float(m.group(1)))
+            if n < 1:
+                self.n.add("M101", f"width={width}", line, COLUMN_WIDTH_HINT)
+                return None
+            return n
+        dots = self.object_width(width, line, COLUMN_WIDTH_HINT)
+        if dots is None:
+            return None
+        if width.endswith("%") or width in FRACTIONS:  # a share of the text room: 50% + 50% fill it exactly
+            return max(1, cap * dots // self.W)
         return max(1, ink.from_dots(dots))
 
     def affixed(self, cells: list[Cell], prefix: str, suffix: str) -> list[Cell]:
@@ -1696,8 +1700,7 @@ class Layout:
             return cells
 
         def made(text: str, like: Cell) -> list[Cell]:
-            return [Cell(ch, bold=like.bold, underline=like.underline, invert=like.invert, italic=like.italic,
-                         strike=like.strike, wide=is_wide(ch)) for ch in self.text(text) if ch != "\n"]  # fmt: skip
+            return [replace(like, ch=ch, wide=is_wide(ch)) for ch in self.text(text) if ch != "\n"]
 
         return [*made(prefix, cells[0]), *cells, *made(suffix, cells[-1])]
 
@@ -1708,7 +1711,7 @@ class Layout:
             return
         names = []
         for i, w in enumerate(widths):
-            title = "".join(c.ch for c in head[i]).strip() if head and i < len(head) else ""
+            title = "".join(icons.shown(c.ch) for c in head[i]).strip() if head and i < len(head) else ""
             names.append(f"{title or f'column {i + 1}'} {w}")
         gaps = len(widths) - 1
         border = 1 if style == "grid" else 0
@@ -1746,20 +1749,11 @@ class Layout:
         header word gives way before any data word: a cut word is said (L101). A column given a width keeps it and
         the others share the rest; widths wider than the paper shrink in proportion, the others keeping 2 (L107)."""
         auto = [i for i, f in enumerate(lay.fixed) if f is None]
-        fixed = [f or 0 for f in lay.fixed]
-        given = sum(fixed)
-        if given and given + 2 * len(auto) > cap:  # 2: a wide character always fits its column
-            gaps = len(fixed) - 1 + (1 if style == "grid" else 0)
-            hint = "give the columns smaller width= (bobina check shows what each got)"
-            hint += ", counting 2 for each auto column" if auto else ""
-            hint += ", or a smaller font: {font=Terminus size=16px}" if ink.native else ", or a smaller size="
-            self.n.add("L107", f"column widths add up to {given + 2 * len(auto) + gaps} columns, the paper has "
-                       f"{lay.room}: scaled down", t.line, hint)  # fmt: skip
-            mine = [i for i, f in enumerate(lay.fixed) if f is not None]
-            for i, w in zip(mine, _shrink([fixed[i] for i in mine], max(len(mine), cap - 2 * len(auto))), strict=True):
-                fixed[i] = w
-        widths = fixed
-        sub = self.share([natural[i] for i in auto], [[ws[i] for i in auto] for ws in longest], cap - sum(fixed))
+        widths, most, why = _fit_fixed(lay.fixed, lay.lo, cap)
+        if why:
+            self.table_squeezed(t, why, lay, style, ink)
+        auto_natural = [natural[i] for i in auto]
+        sub = self.share(auto_natural, [[ws[i] for i in auto] for ws in longest], max(0, cap - sum(widths)), most)
         for i, w in zip(auto, sub, strict=True):
             widths[i] = w
         if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
@@ -1773,19 +1767,40 @@ class Layout:
         pieces = [*top, *(p for k, g in enumerate(groups) for p in [*(between if k else []), *g]), *bottom]
         return [self.table_row(p, geo, indent, shift) for p in pieces]
 
+    def table_squeezed(self, t: Table, why: str, lay: _Lay, style: str, ink) -> None:
+        """L107: the columns did not fit across the paper as given. scaled: the widths given shrank in proportion
+        (the auto columns keeping 2); squeezed: even so it did not fit (too many columns), every column narrowed;
+        cut: not even 1 column each fits, the table is cut at the paper's edge."""
+        ncol = len(lay.fixed)
+        gaps = ncol - 1 + (1 if style == "grid" else 0)
+        font = ", or a smaller font: {font=Terminus size=16px}" if ink.native else ", or a smaller size="
+        if why == "scaled":
+            asked = sum(f or lo for f, lo in zip(lay.fixed, lay.lo, strict=True)) + gaps
+            auto = ", counting up to 2 for each auto column" if None in lay.fixed else ""
+            hint = f"give the columns smaller width= (bobina check shows what each got){auto}{font}"
+            self.n.add("L107", f"column widths add up to {asked} columns, the paper has {lay.room}: scaled down",
+                       t.line, hint)  # fmt: skip
+            return
+        least = sum(1 if f else lo for f, lo in zip(lay.fixed, lay.lo, strict=True)) + gaps
+        said = "narrowed to fit" if why == "squeezed" else "cut at the paper's edge, even at 1 column each"
+        self.n.add("L107", f"a table of {ncol} columns needs at least {least} columns standing, the paper has "
+                   f"{lay.room}: {said}", t.line,
+                   f"turn it (orientation=vertical), or leave out a column{font}")  # fmt: skip
+
     @staticmethod
-    def share(natural: list[int], longest, cap: int) -> list[int]:
+    def share(natural: list[int], longest, cap: int, most: list[int] | None = None) -> list[int]:
         """The widths of the auto columns in `cap`: as wide as their text, the widest giving way first (see
-        table_standing)."""
-        widths = list(natural)
+        table_standing), down to 2, then to 1 when the paper has no more room. most: what each may take at most
+        (a squeezed table)."""
+        widths = [min(n, m) for n, m in zip(natural, most, strict=True)] if most else list(natural)
         whole, data = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
         kept = next((f for f in (whole, data) if sum(f) <= cap), None)
         if kept is None:  # not even the data's words fit: only the longest of them give way, the rest stay whole
             kept = list(data)
             while kept and sum(kept) > cap and max(kept) > 2:
                 kept[kept.index(max(kept))] -= 1
-        for floor in (kept, [2] * len(widths)):
-            while sum(widths) > cap:  # 2: a wide character always fits its column
+        for floor in (kept, [2] * len(widths), [1] * len(widths)):
+            while sum(widths) > cap:  # 2: a wide character always fits its column; 1: nothing else fits
                 wider = [i for i, w in enumerate(widths) if w > floor[i]]
                 if not wider:
                     break
@@ -1910,6 +1925,8 @@ class Layout:
             return BitmapRow(imaging.divider(self.W, piece[1], 2, pad=piece[2]), t.line, "divider")
         if kind == "line" and geo.ink.native:
             cells = self.lead(indent) + [Cell(" ")] * shift + piece[1].cells
+            while columns(cells) > self.cols:  # never past the paper's edge (a table cut there says L107)
+                cells = cells[:-1]
             reason = self.native_ok(cells)
             return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
         lines = [piece[1]] if kind == "line" else piece[2]
@@ -2016,24 +2033,57 @@ def _padded(t: Table, segs: list[list[Cell]], widths: list[int]) -> list[Cell]:
 
 @dataclass
 class _Lay:
-    """A table's column settings in the ink's columns: each column's width= (None: auto), the room the table has
-    (its columns and the spaces between them) and whether bobina check says the widths it got (L108)."""
+    """A table's column settings in the ink's columns: each column's width= (None: auto), what an auto column
+    needs at least, the room the table has (its columns and the spaces between them) and whether bobina check says
+    the widths it got (L108)."""
 
     fixed: list[int | None]
+    lo: list[int]  # what each auto column needs at least: its text, up to 2 columns (a wide character)
     room: int
     say: bool
 
 
 def _shrink(widths: list[int], cap: int) -> list[int]:
-    """Widths scaled down in proportion to add up to cap, each at least 1 (the largest remainders get the rest)."""
-    total = sum(widths)
+    """Widths scaled down in proportion to add up to at most cap, each at least 1 (1 each when cap allows no more):
+    floors of their shares, the columns furthest over theirs giving back first, the largest remainders taking
+    what is left."""
+    n, total = len(widths), sum(widths)
+    if total <= cap:
+        return list(widths)
+    if cap <= n:
+        return [1] * n
     exact = [w * cap / total for w in widths]
     out = [max(1, math.floor(x)) for x in exact]
-    for i in sorted(range(len(widths)), key=lambda i: exact[i] - math.floor(exact[i]), reverse=True):
+    while sum(out) > cap:  # the 1s given to tiny shares: taken back from the column most over its share
+        i = max((i for i in range(n) if out[i] > 1), key=lambda i: out[i] - exact[i])
+        out[i] -= 1
+    for i in sorted(range(n), key=lambda i: exact[i] - out[i], reverse=True):
         if sum(out) >= cap:
             break
-        out[i] += 1
+        if out[i] < widths[i]:
+            out[i] += 1
     return out
+
+
+def _fit_fixed(fixed: list[int | None], lo: list[int], cap: int) -> tuple[list[int], list[int] | None, str]:
+    """How the columns given a width fit in cap, the auto ones needing lo each (up to 2: what a wide character
+    takes): (each column's width, 0 for the auto ones, which share the rest; at most what each auto column may take,
+    None: no limit; why it changed). why: "" as given; "scaled": the widths given shrank in proportion; "squeezed":
+    not even that fits, every column narrowed; "cut": not even 1 column each fits."""
+    mine = [i for i, f in enumerate(fixed) if f is not None]
+    widths = [f or 0 for f in fixed]
+    need = sum(lo[i] for i, f in enumerate(fixed) if f is None)
+    if sum(widths) + need <= cap:
+        return widths, None, ""
+    if mine and len(mine) + need <= cap:
+        for i, w in zip(mine, _shrink([widths[i] for i in mine], cap - need), strict=True):
+            widths[i] = w
+        return widths, None, "scaled"
+    if sum(1 if f else min(1, lo[i]) for i, f in enumerate(fixed)) > cap:
+        return [1 if f else 0 for f in fixed], [1] * (len(fixed) - len(mine)), "cut"
+    squeezed = _shrink([f or lo[i] for i, f in enumerate(fixed)], cap)
+    most = [w for w, f in zip(squeezed, fixed, strict=True) if f is None]
+    return [w if f else 0 for w, f in zip(squeezed, fixed, strict=True)], most, "squeezed"
 
 
 @dataclass

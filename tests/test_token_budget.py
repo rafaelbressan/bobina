@@ -18,7 +18,8 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/batch-printing.md": 3500,
     "docs/guides/templates.md": 2500,
     "docs/guides/icons.md": 3800,  # set on 13/11, with icons (generated: one row per icon, not in llms-full.txt)
-    "docs/guides/tables.md": 2200,  # 15/11: styles, fonts, column widths (not in llms-full.txt; FORMAT links it)
+    "docs/guides/tables.md": 1450,  # set on 15/11, with table styles and fonts (not in llms-full.txt; FORMAT links it)
+    "docs/guides/receipts.md": 585,  # set on 16/11, whole receipt recipes split from tables.md (not in llms-full.txt)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,
