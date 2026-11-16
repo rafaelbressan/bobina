@@ -1132,6 +1132,8 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 
             # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
             cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
+            # nor a ::: block: its line of colons stays text, so it can never close the document's own box
+            cleaned = DIV_FENCE.sub(lambda m: m.group(1) + "\\" + m.group(2), cleaned)
             nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
         return MdSafe(cleaned)
 
@@ -1156,6 +1158,7 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 IMAGE_MD = re.compile(r"!\[([^\]]*)\]\([^)]*\)(\{[^}]*\})?")
 IMAGE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*image\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
 RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
+DIV_FENCE = re.compile(r"^([ \t]*)(:{3,})", re.M)  # a ::: line in a value rendered as Markdown: escaped
 
 
 # ---------------------------------------------------------------- render

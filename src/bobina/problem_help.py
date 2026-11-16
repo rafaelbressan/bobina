@@ -68,6 +68,7 @@ FIX = {
         "on the table's {…} line ({font=Terminus size=16px}), or turn the table: orientation=vertical."
     ),
     "L108": "Nothing to fix: change a column's width= at the end of its title cell, then check again.",
+    "L109": "Shorten the title, or use title-style=band or title-style=inside: they wrap a long title into lines.",
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",
@@ -141,6 +142,10 @@ FIX = {
     "M104": (
         "It prints as written. To keep the table a table on GitHub and Obsidian, use style=header-invert on the "
         "table's {…} line, or the classes at the end of each title cell: | Item {.invert} | Price {.invert} |."
+    ),
+    "M105": (
+        "Add a line of colons only (:::) where the block should end: the message lists what it holds now. A line of "
+        "colons always closes the innermost open block."
     ),
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
     "M121": "Raw blocks cannot come from data: put them in the document.",

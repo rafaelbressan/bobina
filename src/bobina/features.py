@@ -26,6 +26,12 @@ FEATURES = {
         "tested_on_paper": False,
         "evidence": "",
     },
+    "box": {
+        "title": "boxes (::: {.box}): a frame around blocks, its title and grey, printed as one image",
+        "where": "documents with ::: {.box} (docs/guides/layout.md); the 2-dot line and the grey were tested alone",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",
         "where": "tables with style=zebra or .shade (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",

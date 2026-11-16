@@ -43,6 +43,19 @@ class TextRow:
 
 
 @dataclass
+class Boxed:
+    """What the terminal views need to draw a ::: box: its frame on the paper's columns and the rows inside it."""
+
+    rows: list  # the content, laid out at the box's inner width (a band title comes first, as its own row)
+    inner: int  # dots: the width the content was laid out at
+    left: int  # columns from the paper's edge to the frame (quote bars and list indents included in `lead`)
+    cols: int  # columns the box takes, its frame included
+    title: str = ""  # a title on the border, as printed (cut with … when it did not fit)
+    style: str = "solid"  # solid, dashed, dotted, double: the frame's line
+    lead: str = ""  # what the view shows before the box: the bars of the quotes it is in
+
+
+@dataclass
 class BitmapRow:
     image: Image.Image  # mode "1", full paper width
     line: int = 0
@@ -51,6 +64,7 @@ class BitmapRow:
     untested: tuple[str, ...] = ()  # features not tested on paper it draws (features.py, "zebra"): note P301
     wide_view: bool = False  # a table in a smaller font whose text rows need more columns than the paper: the
     # terminal views widen their frame to hold them (view.width)
+    box: Boxed | None = None  # a ::: box: the views draw its frame and its content (view.box_lines)
 
 
 @dataclass

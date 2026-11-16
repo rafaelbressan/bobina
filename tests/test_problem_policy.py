@@ -70,12 +70,12 @@ def test_set_get_and_list_the_policy(capsys):
 
 
 def test_an_unknown_code_is_kept_with_a_note_and_a_malformed_one_is_refused(capsys):
-    assert run("config", "set", "problems.allow", "L109") == cli.OK  # no such code: kept, said
+    assert run("config", "set", "problems.allow", "L119") == cli.OK  # no such code: kept, said
     err = capsys.readouterr().err
-    assert "L109 is not a bobina problem code" in err and "did you mean" in err
+    assert "L119 is not a bobina problem code" in err and "did you mean" in err
     assert run("config", "set", "problems.allow", "abc") == cli.USAGE
     assert "'ABC' is not a problem code" in capsys.readouterr().err
-    assert toml()["problems"]["allow"] == ["L109"]
+    assert toml()["problems"]["allow"] == ["L119"]
 
 
 def test_a_table_written_by_hand_is_kept_and_emptied_tables_go(capsys):

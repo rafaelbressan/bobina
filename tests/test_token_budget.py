@@ -21,6 +21,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/tables.md": 1450,  # set on 15/11, with table styles and fonts (not in llms-full.txt; FORMAT links it)
     "docs/guides/receipts.md": 585,  # set on 16/11, whole receipt recipes split from tables.md (not in llms-full.txt)
     "docs/guides/table-cells.md": 1200,  # set on 16/11, cells, rows and span= split from tables.md (not in llms-full)
+    "docs/guides/layout.md": 1150,  # set on 16/11, with boxes (::: {.box}); not in llms-full.txt (FORMAT links it)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,

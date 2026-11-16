@@ -147,6 +147,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             out.append(("✂ " + "┄" * frame)[:frame])  # (not --- rules or table rules: those are "divider")
         elif isinstance(r, TextRow):
             out += [ln + more for ln in text_lines(r, cols, color)]
+        elif isinstance(r, BitmapRow) and r.box is not None:
+            out += [ln + " " * max(0, frame - r.box.left - r.box.cols) for ln in box_lines(r.box, profile, color)]
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
             out.append(TURNED_TABLE.center(frame, "┄")[:frame])
             for tr in r.text_rows:
@@ -169,6 +171,32 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             if im is not None:
                 out += [ln.ljust(frame) for ln in braille(im, profile.cell)]
     return out
+
+
+FRAMES = {"solid": "─│┌┐└┘", "dashed": "╌╎┌┐└┘", "dotted": "┈┊┌┐└┘", "double": "═║╔╗╚╝"}  # a ::: box's line
+
+
+def _cols(s: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def box_lines(b, profile, color: bool = False) -> list[str]:
+    """A ::: box where it is on the paper: ┌─ TITLE ─┐, what it holds between │ and │ (its own rows, drawn by
+    lines() at the box's inner width: a box in a box too), └──┘. Each line is b.left + b.cols columns wide."""
+    from dataclasses import replace
+
+    h, v, tl, tr, bl, br = FRAMES.get(b.style, FRAMES["solid"])
+    sub = replace(profile, width_dots=b.inner)
+    room = b.cols - 2
+    left = (room - sub.columns) // 2  # a thick frame takes two letters each side: the content stays in the middle
+    lead = b.lead + " " * (b.left - len(b.lead))
+    title = f" {b.title} " if b.title else ""
+    run = room - _cols(title)
+    top = tl + h * (run // 2) + title + h * (run - run // 2) + tr
+    out = [lead + top]
+    for ln in lines(b.rows, sub, color, max_feed_lines=0):
+        out.append(lead + v + " " * left + ln + " " * max(0, room - left - sub.columns) + v)
+    return [*out, lead + bl + h * room + br]
 
 
 def boxed(body: list[str], cols: int, title: str, color: bool = False) -> str:

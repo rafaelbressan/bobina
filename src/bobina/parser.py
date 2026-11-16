@@ -10,7 +10,22 @@ from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 from mdit_py_plugins.attrs import attrs_plugin
 
-from .model import Attrs, Block, Divider, Document, Fence, Heading, Image, Item, ListBlock, Paragraph, Quote, Run, Table
+from .model import (
+    Attrs,
+    Block,
+    Div,
+    Divider,
+    Document,
+    Fence,
+    Heading,
+    Image,
+    Item,
+    ListBlock,
+    Paragraph,
+    Quote,
+    Run,
+    Table,
+)
 from .nudges import Nudges
 
 KNOWN_CLASSES = {
@@ -164,10 +179,33 @@ def _icons_rule(state) -> None:
                 child.content = out.replace("a\x01", PH_OPEN).replace("\x02a", PH_CLOSE)
 
 
+DIV_LINE = re.compile(r"(:{3,})(?:(?=\{)|\s+|$)(.*)")  # ::: {…}, ::: word, or a line of colons only (a closer)
+
+
+def _div_rule(state, start: int, end: int, silent: bool) -> bool:
+    """A line of 3 or more colons (Pandoc fenced divs, as in Quarto): with {…} or a word after them it opens a
+    block, alone it closes one. Only the line is read here, as a marker token: _divs pairs them in each container
+    (a closer closes the innermost open block). A code fence's lines never reach this rule, and a value from
+    --set/--data is still a placeholder: it never starts with colons (FORMAT §7.4)."""
+    if state.is_code_block(start):
+        return False
+    pos, stop = state.bMarks[start] + state.tShift[start], state.eMarks[start]
+    m = DIV_LINE.fullmatch(state.src[pos:stop].rstrip())
+    if not m:
+        return False
+    if silent:
+        return True
+    tok = state.push("fenced_div", "div", 0)
+    tok.map, tok.markup, tok.info = [start, start + 1], m.group(1), m.group(2).strip()
+    state.line = start + 1
+    return True
+
+
 def _md() -> MarkdownIt:
     md = MarkdownIt("commonmark", {"breaks": True, "html": False})
     md.enable(["table", "strikethrough"])
     md.use(attrs_plugin, spans=True)
+    md.block.ruler.before("fence", "fenced_div", _div_rule, {"alt": ["paragraph", "reference", "blockquote", "list"]})
     md.core.ruler.before("text_join", "icons", _icons_rule)
     return md
 
@@ -382,9 +420,134 @@ def _unknown_icons(found: list[tuple[int, str]], nudges: Nudges, off: int) -> No
         )
 
 
+class _DivGroup:
+    """The nodes between a ::: opener and its closer (or the end of what holds them), in the node tree's place."""
+
+    type = "div_group"
+
+    def __init__(self, opener, closed: bool = True):
+        self.opener, self.children, self.closed = opener, [], closed
+        self.map = opener.map
+
+
+def _div_info(node) -> str:
+    """What follows the colons, without the colons a fence may end with (::: {.box} :::)."""
+    return re.sub(r"\s*:+$", "", node.info or "").strip()
+
+
+def _divs(nodes, nudges: Nudges, off: int) -> list:
+    """A container's nodes with each ::: opener and what follows it, up to the line of colons that closes it, as a
+    _DivGroup: a closer closes the innermost open block. A block never closed runs to the end of the container
+    (M105, said once its blocks are known); a closer with nothing open is ignored (M101)."""
+    if not any(n.type == "fenced_div" for n in nodes):
+        return list(nodes)
+    stack = [_DivGroup(nodes[0])]  # the container itself
+    for n in nodes:
+        if n.type != "fenced_div":
+            stack[-1].children.append(n)
+        elif _div_info(n):
+            stack.append(_DivGroup(n))
+        elif len(stack) > 1:
+            done = stack.pop()
+            stack[-1].children.append(done)
+        else:
+            nudges.add("M101", f"a line of {n.markup} with no ::: block open: ignored", _line(n, off),
+                       "a line of colons only closes the ::: {…} above it; remove this one")  # fmt: skip
+    while len(stack) > 1:
+        done = stack.pop()
+        done.closed = False
+        stack[-1].children.append(done)
+    return stack[0].children
+
+
+WORD = re.compile(r"[\w-]+")
+
+
+def div_attrs(info: str, line: int, nudges: Nudges) -> Attrs:
+    """A ::: opener's settings: {…}, or one word (::: box is .box, as in Pandoc). Read as far as they can be: a
+    value with spaces and no quotes keeps its words (title=MESA GRANDE), settings without braces are read too;
+    each is said (M101) with the way to write it."""
+    if WORD.fullmatch(info):
+        return Attrs({info})
+    braced = info.startswith("{") and info.endswith("}")
+    inner = info[1:-1] if braced else info
+    a = parse_attrs(inner)
+    if a is None:
+        a, last, odd = Attrs(), None, []
+        for word in re.findall(r"""(?:[^\s"']+|"[^"]*"|'[^']*')+""", inner):
+            got = parse_attrs(word)
+            if got is not None and (got.classes or got.kv):
+                a = a.merged(got)
+                bare = got.kv and word.split("=", 1)[1][:1] not in "\"'"
+                last = next(iter(got.kv)) if bare else None
+            elif last is not None:  # title=MESA GRANDE: the words after an unquoted value are part of it
+                a.kv[last] += " " + word
+            elif WORD.fullmatch(word) and not braced:  # ::: box shade: words are classes
+                a.classes.add(word)
+            else:
+                odd.append(word)
+        spaced = [f'{k}="{v}"' for k, v in a.kv.items() if " " in v and f'"{v}"' not in inner and f"'{v}'" not in inner]
+        if spaced:
+            nudges.add("M101", f"{', '.join(q.replace(chr(34), '') for q in spaced)}: a value with spaces goes in "
+                       "quotes", line, " ".join(spaced))  # fmt: skip
+        if odd:
+            nudges.add("M101", f"::: {info}: {' '.join(odd)} is not a setting (ignored)", line,
+                       '::: {.box title="TABLE 4" width=half}')  # fmt: skip
+    if not braced:
+        nudges.add("M101", f"::: {info}: the settings go in braces", line, f"::: {{{inner}}}")
+    return a
+
+
+DIV_KEYS = frozenset({"title", "title-style"})  # a box's own keys and classes; the rest of a ::: {…}: check_attrs
+DIV_CLASSES = frozenset({"box", "shade"})
+
+
+def _what(b: Block) -> str:
+    """A block as a problem names it: "the heading 109", "the list at line 4"."""
+    at = f"at line {b.line}"
+    if isinstance(b, Heading):
+        text = "".join(r.text for r in b.runs).strip()
+        return f"the heading {text}" if text and len(text) <= 24 and text.isprintable() else f"the heading {at}"
+    if isinstance(b, Div):
+        kind = next((k for k in ("box", "columns", "column") if b.attrs.has(k)), "")
+        return f"the {kind} {at}" if kind else f"the ::: block {at}"
+    if isinstance(b, Fence):
+        names = {"qr": "QR code", "barcode": "barcode", "pay": "payment code", "contact": "contact code",
+                 "image": "image", "datamatrix": "Data Matrix", "pdf417": "PDF417"}  # fmt: skip
+        return f"the {names.get(b.kind, 'code block')} {at}"
+    kinds = {Paragraph: "text", ListBlock: "list", Table: "table", Quote: "quote", Divider: "divider", Image: "image"}
+    return f"the {kinds.get(type(b), 'block')} {at}"
+
+
+def _trapped(blocks: list[Block]) -> str:
+    """What a block never closed holds, for M105: "the heading 109 and the columns at line 4 are"."""
+    names = [_what(b) for b in blocks if not (isinstance(b, Paragraph) and b.follows)]
+    if len(names) > 4:
+        names = [*names[:3], f"{len(names) - 3} more blocks"]
+    said = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"{said} {'is' if len(names) == 1 else 'are'}"
+
+
+def _div(g: _DivGroup, nudges: Nudges, off: int, src: list[str]) -> Div:
+    ln = _line(g.opener, off)
+    info = _div_info(g.opener)
+    fence = f"{g.opener.markup} {info}"
+    a = div_attrs(info, ln, nudges)
+    check_attrs(a, ln, nudges, extra=DIV_KEYS, classes=DIV_CLASSES)
+    kids = _blocks(g.children, nudges, off, src)
+    if not g.closed:
+        inside = f": {_trapped(kids)} inside it" if kids else ", and nothing follows it"
+        nudges.add("M105", f"{fence[:40]} at line {ln} is never closed{inside}", ln,
+                   "add a line of ::: where it should end")  # fmt: skip
+    return Div(line=ln, attrs=a, children=kids, fence=fence, closed=g.closed)
+
+
 def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
     out: list[Block] = []
-    for n in nodes:
+    for n in _divs(nodes, nudges, off):
+        if isinstance(n, _DivGroup):
+            out.append(_div(n, nudges, off, src))
+            continue
         ln = _line(n, off)
         t = n.type
         if t == "heading":

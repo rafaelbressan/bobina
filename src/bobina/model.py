@@ -67,6 +67,15 @@ class Quote(Block):
 
 
 @dataclass
+class Div(Block):
+    """A ::: block: a box (.box), or only a group of blocks (an unknown class: its content prints as it is)."""
+
+    children: list[Block] = field(default_factory=list)
+    fence: str = ""  # the line that opened it, as written (::: {.box title=MESA}): problems name it
+    closed: bool = True  # False: no line of ::: closed it (M105), it runs to the end of what holds it
+
+
+@dataclass
 class Divider(Block):
     pass
 

@@ -1,8 +1,8 @@
 # The `.bob.md` format — `bob/1` (draft v0.4)
 
 Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
-**✓ implemented** (covered by tests) or **◇ planned** (part of the format, not implemented yet;
-using it gives the note `M103` or `M102`, never an error).
+**✓ implemented** (covered by tests) or **◇ planned** (not implemented yet: the note `M103` or `M102`, never an
+error).
 
 A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
 or Obsidian) and maps predictably onto narrow, low-resolution printers.
@@ -27,7 +27,7 @@ File extension: **`.bob.md`** (canonical); `.bob` is accepted. Encoding: UTF-8.
 ---
 bob: 1                         # format version (informational for now)
 profile: mtp-ii-58             # printer profile; the CLI or the printer config can override it
-locale: pt-BR                  # BCP 47: month names, numbers and money, all in it (`lang:` too); default: the machine's (§7.1)
+locale: pt-BR                  # BCP 47: dates, numbers, money (`lang:` too); default: the machine's (§7.1)
 timezone: America/Sao_Paulo    # IANA; default: the system zone
 align: left                    # default alignment: left | center | right | justify
 size: normal                   # default text size (§5)
@@ -61,6 +61,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
+| `::: {.box title="TABLE"}` … `:::` | a **box** around the blocks between the lines: [guides/layout.md](guides/layout.md) ⚠ not tested on paper |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
@@ -220,8 +221,7 @@ types it.
 A missing or invalid attribute (an IBAN with a wrong check digit, a UPI ID without `@`, more decimals than the
 currency has) gives `Q111` with a working example, and the code is not printed: the rest of the document is, and
 the command exits with 9 so a script or agent knows (`--allow Q111` for 0). A scheme nobody has scanned with its
-real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). No brand logos (they need
-a licence). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
+real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
 [pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
 An amount that reads two ways (`amount=1.890`) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
 The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is printed as typed with `M202`.
@@ -358,9 +358,8 @@ counters:
 
 Previews, `check` and `--dry-run` only show the next values; they take nothing. A print **reserves** its values when
 it is built, so the confirmation screen shows the numbers that will be printed and two prints at the same time never
-get the same number. If the job is then not printed (you quit, the printer is unreachable, the build fails), the
-values go back, unless another print took numbers after them: then they stay skipped. A number is never printed
-twice; a cancelled job may leave a gap (one stopped halfway keeps the numbers of the labels that printed). The CLI
+get the same number. If the job is then not printed, the values go back, unless another print took numbers after
+them: then they stay skipped. A number is never printed twice; a cancelled job may leave a gap. The CLI
 adds `--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets
 them, and `bobina seq set NAME N` starts one at N, even before its first print.
 
@@ -506,6 +505,7 @@ Nudges:
 | `L106` | note | table turned vertical |
 | `L107` | warning | table columns narrowed to fit the paper |
 | `L108` | note | the width each table column got (`check` only) |
+| `L109` | warning | a box title on its border was cut (…) |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
@@ -518,7 +518,7 @@ Nudges:
 | `I110` | note | a slanted image prints smaller, to fit its corners |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
-| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
+| `P103` | warning | the roll is not as wide as this printer's paper (recorded anyway) |
 | `P104` | note | roll length not set: no paper estimate |
 | `P105` | note | `--compact`: labels print at once, without stops |
 | `P106` | note | `--step` without a terminal: labels print at once |
@@ -534,21 +534,22 @@ Nudges:
 | `M102` | note | unknown block type, printed as preformatted text |
 | `M103` | note | attribute not implemented yet (ignored) |
 | `M104` | note | a `{…}` after a table's title row: GitHub shows the table as text |
+| `M105` | warning | a `:::` block is never closed: the message lists what it holds |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed from a --data/--set value |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |
-| `M150` | warning | `--join`: rows of the main source without a match (their joined fields print empty) |
+| `M150` | warning | `--join`: rows without a match (their joined fields print empty) |
 | `M151` | warning | `--join`: the joined source repeats a key (the first row is used) |
-| `M152` | warning | `--join`: a column exists in two sources; `{{ col }}` uses the main one, `{{ b.col }}` the other |
-| `M153` | warning | data values lost: a row with more fields than the header, or values under an empty header |
+| `M152` | warning | `--join`: a column in two sources: `{{ col }}` is the main one's, `{{ b.col }}` the other |
+| `M153` | warning | data values lost: extra fields in a row, or values under an empty header |
 | `M154` | warning | the data header repeats a column name (the last one is used) |
 | `M155` | note | a data source was renamed because a column has its name |
 | `M156` | note | an option has no effect here (`--sheet` on a CSV, `--repeat` with `--data`) |
 | `M157` | warning | `--set` replaces a data column of the same name in every row |
-| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco` |
+| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name` |
 | `M159` | warning | two data columns would get the same usable name; the first keeps it |
 | `M160` | note | Excel formula cells without a saved value print empty |
 | `M161` | warning | no icon with that `:name:` (printed as written) |

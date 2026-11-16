@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import math
 import re
@@ -12,10 +13,10 @@ from PIL import Image, ImageChops, ImageDraw, ImageOps
 
 from . import icons, imaging, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
-from .model import Attrs, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
+from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
 from .nudges import Nudges, SecurityError
-from .rows import BarcodeRow, BitmapRow, Cell, FeedRow, QRRow, RawRow, TextRow, columns
+from .rows import BarcodeRow, BitmapRow, Boxed, Cell, FeedRow, QRRow, RawRow, TextRow, columns
 from .templating import PH_RE, Rendered
 
 NO_CAPTION = {"", "auto", "none", "no", "false", "off"}  # caption= words that print no caption on a plain QR
@@ -44,6 +45,18 @@ TABLE_HINT = (
     + " and #id (docs/guides/tables.md)"
 )
 OBJECT_WIDTH_HINT = "full, half, third, 50%, 30mm or dots (200)"
+BOX_LINES = ("solid", "dashed", "dotted", "double")  # a box's frame: the divider's lines
+TITLE_STYLES = ("border", "inside", "band")  # title-style=: on the top line (the default), first line, black band
+BOX_TAKES = (frozenset({"box", *BOX_LINES, "left", "center", "right", "shade", "flip"}),
+             frozenset({"title", "title-style", "thickness", "width", "align", "rotate", "id"}))  # fmt: skip
+BLOCK_TAKES = (frozenset({"flip"}), frozenset({"rotate", "id"}))  # a ::: block that is not a box
+BOX_HINT = (
+    'a box takes title="…" title-style=border|inside|band .solid .dashed .dotted .double thickness= width= .center '
+    ".right .shade (docs/guides/layout.md)"
+)
+BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
+BOX_ROOM = 10  # dots of paper between a box's frame and what it holds, above and below (at least: ink is measured)
+BOX_MIN_SIDE = 6  # … and beside it: the frame and this room take whole letters, so the text keeps the paper's grid
 COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
 COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% (of the text room) or dots (96); the column shares what is left (auto)"
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
@@ -745,23 +758,40 @@ class Layout:
 
     # ------------------------------------------------------------ blocks
     def run(self) -> list:
-        rows: list = [FeedRow(int(self.p.get("margins.top_dots", 24)))]
-        gap = int(self.p.get("margins.block_gap_dots", 12))
-        first = True
-        for b in self.doc.blocks:
-            out = self.block(b, 0)
-            if not out:
-                continue
-            if not first and not (isinstance(b, Paragraph) and b.follows):  # a paragraph's next lines: no gap
-                rows.append(FeedRow(gap))
-            rows += out
-            first = False
+        rows: list = [FeedRow(int(self.p.get("margins.top_dots", 24))), *self.blocks(self.doc.blocks, 0)]
         feed = int(self.p.get("margins.feed_after_dots", 96))
         tear_at = None
         if self.p.get("marks", "none") in ("tear", "both"):  # printed so that the feed leaves it on the tear bar
             tear_at = max(0, feed - min(feed, max(1, int(self.p.get("margins.tear_dots", 40)))))  # 1 dot after it
         rows.append(FeedRow(feed, mark="tear", tear_at=tear_at))
         return rows
+
+    def blocks(self, blocks, indent: int) -> list:
+        """Blocks one under the other, the block gap between them (none before a paragraph's next lines): the
+        document's, and the ones inside a ::: block."""
+        rows: list = []
+        gap = int(self.p.get("margins.block_gap_dots", 12))
+        for b in blocks:
+            out = self.block(b, indent)
+            if not out:
+                continue
+            if rows and not (isinstance(b, Paragraph) and b.follows):
+                rows.append(FeedRow(gap))
+            rows += out
+        return rows
+
+    @contextlib.contextmanager
+    def narrow(self, width: int):
+        """Lays out as if the paper were `width` dots wide (inside a box): text wraps, objects fit and % sizes are
+        of that width. A QR code there is part of the box's image, so it is sized as an image (qr.native off)."""
+        saved = self.p, self.W, self.cols, self.bars
+        qr = {**(self.p.get("qr") or {}), "native": False}
+        self.p = replace(self.p, width_dots=width, data={**self.p.data, "qr": qr})
+        self.W, self.cols, self.bars = width, self.p.columns, ()
+        try:
+            yield
+        finally:
+            self.p, self.W, self.cols, self.bars = saved
 
     def block(self, b, indent: int) -> list:
         rows = self._block(b, indent)
@@ -863,6 +893,12 @@ class Layout:
             return self.image(b.src, b.attrs, b.line, b.alt)
         if isinstance(b, Table):
             return self.table(b, indent)
+        if isinstance(b, Div):
+            if b.attrs.has("box"):
+                return self.box(b, indent)
+            self.idle(b.attrs, b.line, BLOCK_TAKES, "on a ::: block without .box",
+                      "::: {.box} draws a frame around blocks (docs/guides/layout.md)")  # fmt: skip
+            return self.blocks(b.children, indent)  # a ::: block bobina does not draw: what it holds, as it is
         return []
 
     def list_block(self, b: ListBlock, indent: int) -> list:
@@ -913,6 +949,137 @@ class Layout:
         if t < int(self.p.get("raster.min_stroke_dots", 2)):
             self.n.add("B101", f"divider thickness {t} prints broken", b.line, "use thickness=2")
         return BitmapRow(imaging.divider(self.W, style, t), b.line, "divider")
+
+    # ------------------------------------------------------------ boxes (::: {.box})
+    def idle(self, a: Attrs, line: int, takes: tuple, where: str, hint: str) -> None:
+        """The classes and keys bobina knows that a ::: block does not take, said once (M101). Unknown ones: the
+        parser; the images' own ones: block()."""
+        from .parser import DIV_CLASSES, DIV_KEYS, KNOWN_CLASSES, KNOWN_KEYS
+
+        classes, keys = takes
+        names = [f".{c}" for c in sorted(a.classes & (KNOWN_CLASSES | DIV_CLASSES) - classes - set(IMAGE_ONLY))]
+        names += [f"{k}=" for k in sorted(a.kv) if k in KNOWN_KEYS | DIV_KEYS and k not in keys | set(IMAGE_ONLY)]
+        if names:
+            self.n.add("M101", f"{', '.join(names)} {'does' if len(names) == 1 else 'do'} nothing {where}", line, hint)
+
+    def box(self, d: Div, indent: int) -> list:
+        """A frame around blocks (::: {.box}). What it holds is laid out at the width inside the frame by the usual
+        engine, then drawn with the frame, its title and its grey as one image: the frame's sides share the rows
+        with the text, so the text inside is drawn too (in the printer font's look, the same dots). Never wider
+        than the paper; the frame and the room beside it take whole letters, so the text stays on the paper's
+        grid (a full box holds 30 of the 32 letters of 58 mm)."""
+        a, line = d.attrs, d.line
+        self.idle(a, line, BOX_TAKES, "on a box", BOX_HINT)
+        cw, ch = self.p.cell
+        drawn = [s for s in BOX_LINES if a.has(s)]
+        style = drawn[0] if drawn else "solid"
+        if len(drawn) > 1:
+            self.n.add("M101", f"{' '.join('.' + s for s in drawn)}: a box has one line, .{style} is used", line,
+                       "keep one of .solid .dashed .dotted .double")  # fmt: skip
+        t = self.attr_dots(a, "thickness", line, 12)
+        t = 2 if t is None else t
+        if t < int(self.p.get("raster.min_stroke_dots", 2)):
+            self.n.add("B101", f"box thickness {t} prints broken", line, "use thickness=2")
+        t = max(1, t)
+        stroke = 3 * t if style == "double" else t
+        side = cw * -(-(stroke + BOX_MIN_SIDE) // cw)  # the frame and the room beside it, in whole letters
+        room = self.W - indent * cw
+        width = self.box_width(a, line, room, side)
+        inner = width - 2 * side
+        raw = str(a.kv.get("title", ""))
+        title = " ".join(self.text(raw).split())
+        how = a.kv.get("title-style", "border")
+        if how not in TITLE_STYLES:
+            self.n.add("M101", f"title-style={how}", line, "border, inside or band")
+            how = "border"
+        if "title-style" in a.kv and not title:
+            self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
+        kids = d.children
+        if title and how == "inside":  # the first line inside, bold: a paragraph like any other, it wraps
+            kids = [Paragraph(line=line, runs=[Run(raw, bold=True)]), *kids]
+        with self.narrow(inner):
+            band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
+                    if title and how == "band" else [])  # fmt: skip
+            rows = self.blocks(kids, 0)
+            raws = [r for r in rows if isinstance(r, RawRow)]
+            rows = [r for r in rows if not isinstance(r, RawRow)]
+            body = self.compose(rows) if any(not isinstance(r, FeedRow) for r in rows) else None
+            band_im = self.compose(band) if band else None
+        if raws:
+            self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
+                       "put the raw block after the ::: line that closes the box")  # fmt: skip
+        top = (ch - stroke) // 2 if title and how == "border" else 0  # the title sits across the top line
+        y = top + stroke
+        parts = []
+        if band_im is not None:  # black from side to side of the frame, the title centred in it
+            black = Image.new("L", (width - 2 * stroke, band_im.height), 0)
+            black.paste(band_im, (side - stroke, 0))
+            parts.append((black, stroke, y))
+            y += black.height
+        shade_top = y
+        if body is not None:  # BOX_ROOM of white between the ink and the frame, above and below
+            lead, trail = _blank_edges(body)
+            under = ch + 2 - y - lead if top else 0  # and clear of a border title's letters
+            y += max(2, BOX_ROOM - lead, under)
+            parts.append((body, side, y))
+            y += body.height + max(2, BOX_ROOM - trail)
+        else:
+            y += BOX_ROOM
+        height = y + stroke
+        im = imaging.frame(width, height, style, t, top).convert("L")
+        for part, x, py in parts:
+            im.paste(part, (x, py))
+        if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
+            im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
+        shown = self.border_title(im, title, line, top, stroke) if title and how == "border" else ""
+        align = next((x for x in ("left", "center", "right") if a.has(x)), a.kv.get("align", "left"))
+        if align not in ("left", "center", "right"):
+            self.n.add("M101", f"align={align}", line, "left, center or right")
+            align = "left"
+        free = room - width
+        x = indent * cw + {"left": 0, "center": free // cw // 2 * cw, "right": free}[align]
+        full = Image.new("L", (self.W, height), 255)
+        full.paste(im, (x, 0))
+        full = self.draw_bars(full, indent, 0)
+        marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
+        view = Boxed(
+            [*band, *rows], inner, x // cw, width // cw, shown, style, "".join(c.ch for c in self.lead(indent))
+        )
+        return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view), *raws]
+
+    def box_width(self, a: Attrs, line: int, room: int, side: int) -> int:
+        """width= of a box (full, half, third, 50%, 30mm, 16ch: letters, or dots), in whole letters: the paper's
+        room when absent, never more (M101 when asked), never less than 4 letters inside."""
+        cw = self.p.cell[0]
+        given = a.kv.get("width")
+        w = room
+        if given is not None:
+            m = COLUMN_CH_RE.fullmatch(str(given).strip().lower())
+            w = round(float(m.group(1)) * cw) if m else self.object_width(given, line, BOX_WIDTH_HINT) or room
+            if w > room:
+                self.n.add("M101", f"width={given}: wider than the {room // cw} letters there are, the box takes them",
+                           line, "width=full, or less")  # fmt: skip
+                w = room
+        least = min(room, 2 * side + 4 * cw) // cw * cw
+        if w // cw * cw < least:
+            self.n.add("M101", f"width={given}: a box needs {least // cw} letters (4 inside)", line, BOX_WIDTH_HINT)
+        return max(least, w // cw * cw)
+
+    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int) -> str:
+        """The title across a box's top line, centred, bold in the printer font's look, the line cut around it
+        (half a letter each side); longer than the line holds: cut with … (L109). Returns it as printed."""
+        cw = self.p.cell[0]
+        most = max(1, im.width // cw - 6)  # three letters of line each side, as the views draw ┌─ TITLE ─┐
+        if columns([Cell(c, wide=is_wide(c)) for c in title]) > most:
+            self.n.add("L109", f'title "{title[:40]}" is longer than the border holds ({most} letters): cut with …',
+                       line, "title-style=band or title-style=inside wrap a long title into lines")  # fmt: skip
+            title = fit_columns(title, most - 1).rstrip() + "…"
+        cells = [Cell(c, bold=True, wide=is_wide(c)) for c in title]
+        drawn = self.em.line_image(cells)
+        x, gap = (im.width - drawn.width) // 2, cw // 2
+        im.paste(255, (x - gap, top, x + drawn.width + gap, top + stroke))
+        im.paste(0, (x, 0), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
+        return title
 
     def fence(self, f: Fence, indent: int) -> list:
         kind = f.kind
@@ -2325,6 +2492,12 @@ def _marks(pieces: list) -> tuple[str, ...]:
 
 def _bw(im: Image.Image) -> Image.Image:
     return im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
+
+
+def _blank_edges(im: Image.Image) -> tuple[int, int]:
+    """The white rows above and below the ink of an image (all of them above when it has none)."""
+    box = ImageOps.invert(im.convert("L")).getbbox()
+    return (box[1], im.height - box[3]) if box else (im.height, 0)
 
 
 def _at(items: list, i: int, default=None):

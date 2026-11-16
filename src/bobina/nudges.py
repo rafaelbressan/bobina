@@ -35,12 +35,12 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "Q110": ("warning", "barcode turned vertical to fit the paper", ""),
     "Q111": (
         "warning",
-        "payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9)",
+        "payment code not built: an attribute is missing or invalid (left out, exit 9)",
         "",
     ),
     "Q112": (
         "warning",
-        "contact code not built: the network or its value is wrong (left out, the rest prints, exit 9)",
+        "contact code not built: the network or its value is wrong (left out, exit 9)",
         "",
     ),
     "Q113": (
@@ -55,8 +55,9 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L104": ("warning", "rotated block wider than the paper was cropped", ""),
     "L105": ("warning", "nothing printable: every block was skipped", ""),
     "L106": ("note", "table turned vertical to fit the paper (header on the right)", ""),
-    "L107": ("warning", "table columns narrowed to fit the paper (widths scaled down, or too many columns)", ""),
+    "L107": ("warning", "table columns narrowed to fit the paper", ""),
     "L108": ("note", "the width each table column got (said by bobina check only)", ""),
+    "L109": ("warning", "a box title on its border was cut (…)", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),
@@ -68,7 +69,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "I108": ("warning", "image outside the document folder and image_dirs (--sandbox, MCP)", ""),
     "I109": (
         "note",
-        "what an image looks like (drawing or photo) and how it was printed; the other look is one class away",
+        "an image read as a drawing (black and white) or a photo (dithered)",
         "",
     ),
     "I110": ("note", "a turned image prints smaller: its corners need room on the paper", ""),
@@ -115,7 +116,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "P303": ("note", "a contact code nobody has scanned with its app yet", ""),
     "P201": ("warning", "raw bytes bypass every check and are not previewed", ""),
     "P401": ("note", "Bluetooth or USB printers cannot be looked for on this machine (the message says why)", ""),
-    "P402": ("note", "the printer's name does not settle the profile (no match, or several widths): one was taken", ""),
+    "P402": ("note", "the printer's name does not settle the profile: one was taken", ""),
     "P403": ("warning", "a USB printer this user cannot write to", ""),
     "P404": ("warning", "a printer in config.toml names a profile bobina does not know", ""),
     # M markup / templates
@@ -123,6 +124,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "M102": ("note", "unknown block type, printed as preformatted text", ""),
     "M103": ("note", "attribute not implemented yet (ignored)", ""),
     "M104": ("note", "a {…} after a table's title row: GitHub and Obsidian show that table as text", ""),
+    "M105": ("warning", "a ::: block is never closed", ""),
     "M120": ("note", "field rendered as Markdown", ""),
     "M121": ("warning", "raw block removed from a variable", ""),
     "M122": ("warning", "image removed from a --data/--set value", ""),

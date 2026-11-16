@@ -45,6 +45,7 @@ TEXT
     a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
+  ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade} … ::: (docs/guides/layout.md)
 
 OBJECTS (fenced blocks)
   ```qr {module=4 ecc=M width=full|half|30mm caption="Menu" .left|.right}

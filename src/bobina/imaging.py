@@ -274,6 +274,41 @@ def divider(width: int, style: str = "solid", thickness: int = 2, pad: int = 6) 
     return im
 
 
+def frame(width: int, height: int, style: str = "solid", thickness: int = 2, top: int = 0) -> Image.Image:
+    """A box's frame (mode '1'), its top line `top` dots down (a title on the border sits above it), drawn with the
+    divider's lines (dashes of 8 dots, dots as thick as the line; double: two lines, one line apart). The dashes and
+    dots are spread so that each side starts and ends on one: the corners are always inked and the frame reads
+    closed."""
+    t = max(1, thickness)
+    im = Image.new("1", (width, height), 1)
+    d = ImageDraw.Draw(im)
+
+    def rect(x0: int, y0: int, x1: int, y1: int, line: str) -> None:
+        for a0, a1, b, across in ((x0, x1, y0, True), (x0, x1, y1 - t + 1, True), (y0, y1, x0, False),
+                                  (y0, y1, x1 - t + 1, False)):  # fmt: skip
+            for p, q in _pieces(a1 - a0 + 1, line, t):
+                box = (a0 + p, b, a0 + q, b + t - 1) if across else (b, a0 + p, b + t - 1, a0 + q)
+                d.rectangle(box, fill=0)
+
+    if style == "double":
+        rect(0, top, width - 1, height - 1, "solid")
+        rect(2 * t, top + 2 * t, width - 1 - 2 * t, height - 1 - 2 * t, "solid")
+    else:
+        rect(0, top, width - 1, height - 1, style)
+    return im
+
+
+def _pieces(length: int, style: str, t: int) -> list[tuple[int, int]]:
+    """Where the inked pieces of a side `length` dots long go: (start, end) from its start, the first and the last
+    at its ends."""
+    piece, period = (8, 12) if style == "dashed" else (t, max(6, t * 3)) if style == "dotted" else (length, length)
+    if piece >= length:
+        return [(0, length - 1)]
+    n = max(2, round((length - piece) / period) + 1)
+    step = (length - piece) / (n - 1)
+    return [(round(i * step), round(i * step) + piece - 1) for i in range(n)]
+
+
 def _scissors(d, x, y):
     # two rings and crossing blades, 2-dot strokes
     d.ellipse((x, y - 9, x + 7, y - 2), outline=0, width=2)
