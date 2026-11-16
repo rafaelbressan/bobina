@@ -200,6 +200,7 @@ def test_templates():
 def test_help_a_problem_code_and_a_pay_scheme():
     assert output(call("help", {"topic": "Q111"}))["code"] == "Q111"
     assert output(call("help", {"topic": "pay", "name": "pix"}))["kind"] == "pay-scheme"
+    assert "receipt" in output(call("help", {"topic": "table"}))["styles"]
     r = call("help", {"topic": "nonsense"})
     assert r.is_error and "E207" in "\n".join(texts(r))
 

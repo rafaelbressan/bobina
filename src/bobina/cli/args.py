@@ -41,7 +41,7 @@ TEXT
   | table |  (stretches to the paper; {.compact} narrow; {orientation=vertical} turned)    > quote
     on the line under it, all in one {…}: style=plain|receipt|lines|grid|header-invert|zebra
     font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
-    a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (docs/guides/tables.md)
+    a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (bobina help table)
     a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
@@ -153,8 +153,11 @@ def _help_code(code: str, as_json: bool) -> int:
     return OK
 
 
-TOPICS = ("commands", "format", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
+TOPICS = ("commands", "format", "table", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
 NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pix, bobina help contact x
+SAME_AS = {"commands": "bobina help itself", "problems": "nudges"}  # topics also reached under another name
+# what bobina help says it takes, all from TOPICS: its footer, the help command's description, an unknown topic
+LISTED = [t for t in TOPICS if t not in SAME_AS] + ["a problem code (E302)", "a command"]
 
 
 def _help_text(topic: str, name: str | None = None) -> str:
@@ -166,6 +169,10 @@ def _help_text(topic: str, name: str | None = None) -> str:
         return HELP_FORMAT
     if topic == "data":
         return HELP_DATA
+    if topic == "table":
+        from ..table_help import help_text as table_help
+
+        return table_help()
     if topic == "pay":
         from ..pay import help_text
 
@@ -228,6 +235,10 @@ def cmd_help(args):
             out = {"schema": "bobina.help/1", "kind": "pay", "schemes": schemes_json()}
             if name in SCHEMES:
                 out = {"schema": "bobina.help/1", "kind": "pay-scheme", **scheme_json(SCHEMES[name])}
+        elif topic == "table":
+            from ..table_help import help_json as table_json
+
+            out = {"schema": "bobina.help/1", "kind": "table", **table_json(), "text": _help_text("table")}
         elif topic == "contact":
             from .. import contact
 
@@ -251,13 +262,9 @@ def cmd_help(args):
     elif topic in COMMANDS:
         COMMANDS[topic].print_help()
         return OK
-    raise Fail(
-        USAGE,
-        f"unknown help topic '{topic}': commands, format, data, pay, contact, icons, nudges (or problems), aliases,"
-        " a problem code"
-        " (e.g. E302), or a command name",
-        problem="E207",
-    )
+    near = difflib.get_close_matches(str(topic).lower(), [*TOPICS, *COMMANDS], 1, 0.75)
+    raise Fail(USAGE, f"unknown help topic '{topic}'" + (f" (did you mean {near[0]}?)" if near else "") + ": "
+               + ", ".join(LISTED), problem="E207")  # fmt: skip
 
 
 COMMANDS: dict[str, argparse.ArgumentParser] = {}
@@ -580,7 +587,7 @@ def make_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="bobina — print Markdown on thermal roll printers",
         epilog="Every command that prints shows a confirmation first (--yes skips it).\n"
-        "Help: bobina help format | nudges | aliases | COMMAND",
+        "Help: bobina help " + " | ".join([t for t in TOPICS if t not in SAME_AS] + ["E302", "COMMAND"]),
     )
     ap.add_argument("--version", action="version", version=f"bobina {__version__}")
     sub = ap.add_subparsers(dest="command", metavar="COMMAND")
@@ -1005,7 +1012,7 @@ def make_parser():
         sub,
         "help",
         "help topics",
-        "commands, format, data, nudges, aliases, a problem code (E302) or a command; --json for programs",
+        ", ".join(LISTED) + "; --json for programs",
         ["bobina help format", "bobina help print"],
         cmd_help,
     )

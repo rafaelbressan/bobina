@@ -144,6 +144,13 @@ def _meaning(code: int) -> str:
     return EXIT_CODES.get(code, "")
 
 
+def _help_topics() -> list[str]:
+    """What the help tool takes: the topics bobina help lists (one list, in cli/args.py)."""
+    from .cli.args import LISTED
+
+    return LISTED
+
+
 def result(r: Run, *extra):
     """The run as a tool result: the command line and exit code, stdout (the CLI's JSON), stderr (problems as
     JSON, notes). An error unless the exit is 0 or 9 (the job went out without a payment or contact code:
@@ -460,9 +467,7 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
     async def help_(
         topic: Annotated[
             str | None,
-            Field(description="commands, format, data, pay, contact, nudges, aliases, a command, or a problem code"
-                              " (Q111);"
-                              " none: the whole CLI for programs"),
+            Field(description=", ".join(_help_topics()) + "; none: the whole CLI for programs"),
         ] = None,
         name: Annotated[
             str | None, Field(description="with topic pay or contact: one scheme or network, e.g. pix")
