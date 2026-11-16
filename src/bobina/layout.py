@@ -57,7 +57,6 @@ BOX_HINT = (
 BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
 BOX_ROOM = 10  # dots of paper between a box's frame and what it holds, above and below (at least: ink is measured)
 BOX_MIN_SIDE = 6  # … and beside it: the frame and this room take whole letters, so the text keeps the paper's grid
-BOX_LEAST = 6  # letters: the narrowest box, its thinnest frame and room (a letter each side) and 4 letters inside
 COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
 COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% (of the text room) or dots (96); the column shares what is left (auto)"
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
@@ -804,7 +803,7 @@ class Layout:
         for name in IMAGE_ONLY:  # mirror= is not a key of other blocks: the parser already said "unknown key"
             if a.has(name) or (name in a.kv and name != "mirror"):
                 self.n.add("M101", f"'{name}' works on images only: it does nothing here", b.line, "remove it")
-        if isinstance(b, Div) and getattr(rows[0], "kind", "") == "box":
+        if isinstance(b, Div) and b.attrs.has("box") and getattr(rows[0], "kind", "") == "box":
             return rows  # a box turns itself (Layout.box): placed as written, the quote bars upright
         raws = [r for r in rows if isinstance(r, RawRow)]  # bytes cannot be turned: sent after the turned block
         rows = [r for r in rows if not isinstance(r, RawRow)]
@@ -989,8 +988,9 @@ class Layout:
         if "title-style" in a.kv and not title:
             self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
         room = self.W - indent * cw
-        if room < BOX_LEAST * cw:
-            self.n.add("M101", f"no room for a box here ({room // cw} letters, a box needs {BOX_LEAST}): what it "
+        least = _box_least(cw)
+        if room < least:
+            self.n.add("M101", f"no room for a box here ({room // cw} letters, a box needs {least // cw}): what it "
                        "holds prints without its frame", line, "fewer boxes inside each other here")  # fmt: skip
             head = [Paragraph(line=line, runs=[Run(raw, bold=True)])] if title else []
             return self.blocks([*head, *d.children], indent)
@@ -1008,6 +1008,10 @@ class Layout:
         asked = t
         while t > 2 and 2 * _box_side(t, style, cw) + 4 * cw > width:  # 4 letters inside, whatever the line
             t -= 1
+        if style == "double" and 2 * _box_side(t, style, cw) + 4 * cw > width:  # a small cell: one line
+            self.n.add("M101", f".double: no room for two lines in a {width // cw}-letter box, one is drawn", line,
+                       "a wider box")  # fmt: skip
+            style = "solid"
         if t < asked:
             self.n.add("M101", f"thickness={a.kv['thickness']}: no room for that line in a {width // cw}-letter "
                        f"box, {t} dots used", line, "a wider box, or a thinner line")  # fmt: skip
@@ -1062,6 +1066,7 @@ class Layout:
                 self.n.add("L104", f"turned box is {im.width} dots wide: cropped to {room}", line,
                            "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
                 im = im.crop(((im.width - room) // 2, 0, (im.width - room) // 2 + room, im.height))
+        self.align_word(a, line)
         align = self.object_align(a, "left")
 
         def place(w: int) -> int:  # where a box w dots wide starts on the paper: on a letter when it can
@@ -1073,13 +1078,14 @@ class Layout:
         full = self.draw_bars(full, indent, 0)  # after the turn: the bars stay upright, beside the box
         marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
         lead = "".join(c.ch for c in self.lead(indent))
-        view = Boxed([*band, *rows], inner, place(width) // cw, width // cw, shown, style, lead, ang)
+        left = min(place(im.width), indent * cw + room - width) // cw  # where it is, as far as it fits standing
+        view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang)
         return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view), *raws]
 
     def box_width(self, a: Attrs, line: int, room: int) -> int:
         """width= of a box, of the room it has (a quote's or a list's is narrower than the paper): full, half,
         third, 50%, 16ch (letters), or 30mm and dots. In whole letters, the room when absent, never more (M101
-        when asked), never less than BOX_LEAST letters (4 inside)."""
+        when asked), never less than _box_least (4 letters inside)."""
         cw = self.p.cell[0]
         given = a.kv.get("width")
         w = room
@@ -1099,9 +1105,10 @@ class Layout:
                 self.n.add("M101", f"width={given}: wider than the {room // cw} letters there are, the box takes them",
                            line, "width=full, or less")  # fmt: skip
                 w = room
-        if w // cw < BOX_LEAST:
-            self.n.add("M101", f"width={given}: a box needs {BOX_LEAST} letters (4 inside)", line, BOX_WIDTH_HINT)
-        return max(BOX_LEAST * cw, w // cw * cw)
+        least = _box_least(cw)
+        if w // cw * cw < least:
+            self.n.add("M101", f"width={given}: a box needs {least // cw} letters (4 inside)", line, BOX_WIDTH_HINT)
+        return max(least, w // cw * cw)
 
     def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int) -> str:
         """The title across a box's top line (its letters from `y` down), centred, bold in the printer font's look,
@@ -1247,6 +1254,13 @@ class Layout:
             self.n.add("M101", f"size={size} is a text size", line, f"for an object: width={size}")
         if attrs.has("justify") or attrs.kv.get("align") == "justify":
             self.n.add("M101", ".justify spreads text", line, "an object fills the paper with width=full")
+        self.align_word(attrs, line)
+
+    def align_word(self, attrs, line: int) -> None:
+        """align= on an object or a box that is not a placement: said (object_align then uses the default)."""
+        given = attrs.kv.get("align")
+        if given is not None and given not in ("left", "center", "right", "justify"):
+            self.n.add("M101", f"align={given}", line, "left, center or right")
 
     def qr(self, f: Fence, resolved: bool = False) -> list:
         """A QR code, and under it the caption= line if there is one (1 mm of air: glued, it reads as part of it)."""
@@ -2539,6 +2553,11 @@ def _box_side(t: int, style: str, cw: int) -> int:
     letters, at least BOX_MIN_SIDE dots of room."""
     stroke = 3 * t if style == "double" else t
     return cw * -(-(stroke + BOX_MIN_SIDE) // cw)
+
+
+def _box_least(cw: int) -> int:
+    """Dots of the narrowest box: its thinnest frame and room on each side, and 4 letters inside."""
+    return 2 * _box_side(2, "solid", cw) + 4 * cw
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:

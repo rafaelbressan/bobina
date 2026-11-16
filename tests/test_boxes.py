@@ -418,5 +418,38 @@ def test_colons_in_a_code_block_of_data_stay_as_written():
     res = build("{{ d | markdown }}\n", fields={"d": Tainted("intro\n```\n::: {.box}\n```")})
     (fence,) = [b for b in res.doc.blocks if isinstance(b, Fence)]
     assert fence.content == "::: {.box}\n"
-    res = build("{{ d | markdown }}\n", fields={"d": Tainted("```\n:::\n```")})  # the first line joins the
-    assert not any(isinstance(b, Div) for b in res.doc.blocks)  # template's: in doubt, escaped
+    res = build("{{ d | markdown }}\n", fields={"d": Tainted("```\n:::\n```")})  # all data: a code block
+    assert not any(isinstance(b, Div) for b in res.doc.blocks)
+
+
+def test_a_block_holding_a_box_turns_as_a_block():
+    res = build("::: {rotate=90}\n::: {.box}\nx\n:::\n\ntext after\n:::\n")
+    (row,) = [r for r in res.rows if isinstance(r, BitmapRow)]
+    assert row.kind == "rotated"  # the whole block, the box and the text after it
+
+
+def test_the_turned_mark_fits_a_narrow_box():
+    res = build("::: {.box rotate=90 width=8ch}\nx\n:::\n")
+    (b,) = boxes(res)
+    lines = [ln.rstrip() for ln in seen(res) if ln.strip()]
+    assert "↻ 90°" in lines[0] and len(lines[0]) <= b.box.left + b.box.cols
+
+
+def test_a_double_line_too_wide_for_a_small_cell_becomes_one_line():
+    res = build("::: {.box .double width=6ch}\nabcd\n:::\n", overrides={"native.cell": [8, 16]})
+    (b,) = boxes(res)
+    assert b.box.style == "solid" and b.box.inner >= 4 * 8
+    assert said(res, "M101") == [".double: no room for two lines in a 6-letter box, one is drawn"]
+
+
+def test_a_turned_box_is_shown_where_it_prints():
+    (b,) = boxes(build("::: {.box rotate=90 width=10ch .center}\nabc\n:::\n"))
+    x0 = ink(b.image)[0]
+    assert b.box.left == min(x0, W - 120) // 12
+
+
+@pytest.mark.parametrize("src", ["::: {.box align=middle}\nx\n:::\n", "```qr {align=middle}\nhello\n```\n"])
+def test_a_wrong_align_is_said(src):
+    res = build(src)
+    assert said(res, "M101") == ["align=middle"]
+    assert [n.suggestion for n in res.nudges if n.code == "M101"] == ["left, center or right"]

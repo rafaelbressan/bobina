@@ -200,7 +200,9 @@ def box_lines(b, profile, color: bool = False) -> list[str]:
     lead = b.lead + " " * (b.left - len(b.lead))
     title = f" {b.title} " if b.title else ""
     run = room - sum(2 if is_wide(c) else 1 for c in title)
-    out = [lead + f" ↻ box printed turned {b.turned:g}° ".center(room + 2, "┄")] if b.turned else []
+    marks = (f" ↻ box printed turned {b.turned:g}° ", f" ↻ {b.turned:g}° ", "↻")  # the longest that fits the box
+    mark = next((m for m in marks if len(m) <= room + 2), "↻")
+    out = [lead + mark.center(room + 2, "┄")] if b.turned else []
     out.append(lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
     for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
         out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
