@@ -104,7 +104,7 @@ def taint(value):
 
 
 def _has_taint(x) -> bool:
-    if isinstance(x, Tainted):
+    if isinstance(x, (Tainted, TaintedMd)):
         return True
     if isinstance(x, (list, tuple)):
         return any(_has_taint(v) for v in x)
@@ -139,6 +139,15 @@ class MdSafe(str):
     """A value explicitly marked to be interpreted as Markdown."""
 
 
+class TaintedMd(MdSafe):
+    """Data rendered as Markdown (| markdown on a --data/--set value): its text is wrapped in TAINT_OPEN and
+    TAINT_CLOSE, so where it lands in the document is known (data_spans) and parser.data_markup can refuse the
+    markup it must not make. Still data: anything built from it stays tainted."""
+
+
+TAINT_OPEN, TAINT_CLOSE = "\ue002", "\ue003"  # private use, next to the placeholders' (PH_OPEN, PH_CLOSE)
+
+
 @dataclass
 class Value:
     text: str
@@ -151,6 +160,7 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
+    spans: list[tuple[int, int]] = field(default_factory=list)  # where data rendered as Markdown is in text
 
     def resolve(self, s: str) -> str:
         from . import icons
@@ -653,7 +663,8 @@ class Sandbox(ImmutableSandboxedEnvironment):
         """a ~ b ~ c: as Jinja's str_join, with its size known before it is joined (call() ticks)."""
         texts = [str(p) for p in parts]
         check_estimate(sum(len(t) for t in texts))
-        return "".join(texts)
+        joined = "".join(texts)
+        return Tainted(joined) if any(_has_taint(p) for p in parts) else joined  # d ~ "" is still data
 
     def bobina_concat(self, buffer):
         """The output of a block kept as a value: it stops growing at MAX_OUTPUT, as the document does."""
@@ -662,7 +673,8 @@ class Sandbox(ImmutableSandboxedEnvironment):
             size += len(chunk)
             check_estimate(size)
             out.append(chunk)
-        return "".join(out)
+        joined = "".join(out)
+        return Tainted(joined) if any(_has_taint(c) for c in out) else joined
 
     def call_binop(self, context, operator, left, right):
         self.loops.tick()
@@ -974,7 +986,7 @@ def ambiguity_message(raw, whole: str, frac: str) -> tuple[str, str]:
             f"write {whole}{frac} or {whole}.{frac},00 for thousands, or the amount with 2 decimals")  # fmt: skip
 
 
-def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: bool = True):
+def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: bool = True, data=()):
     decimal = bnumbers.get_decimal_symbol(loc)
 
     def num(v, where: str, then: str = "printed as it is"):
@@ -1124,20 +1136,18 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         cleaned = RAW_FENCE.sub("", text)
         if cleaned != text:
             nudges.add("M121", "a raw block inside a variable was removed")
-        if isinstance(v, Tainted):  # data never chooses files: no images, no image fences
-            c2 = IMAGE_FENCE.sub("", IMAGE_MD.sub(lambda m: m.group(1), cleaned))
-            if c2 != cleaned:
-                nudges.add("M122", "an image inside a --data/--set value was removed (data cannot choose files)")
-            cleaned = c2
-        if isinstance(v, Tainted):
-            from . import icons
+        # data: a Tainted value, one derived from it (TaintedMd, a ~ join), or one that holds a data value's text
+        if not (_has_taint(v) or any(len(t) >= 3 and t in text for t in data)):
+            return MdSafe(cleaned)
+        from . import icons
 
-            # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
-            cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
-            # nor a ::: block: its line of colons stays text, so it can never open or close the document's boxes
-            cleaned = _no_divs(cleaned)
-            nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
-        return MdSafe(cleaned)
+        # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
+        cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
+        nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
+        # where it lands in the document is marked: once the whole document is parsed, the parser refuses every
+        # raw block, image, code fence and ::: line that starts in it or that it would close (parser.data_markup)
+        cleaned = cleaned.replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")
+        return TaintedMd(TAINT_OPEN + cleaned + TAINT_CLOSE)
 
     return {
         **text_filters(loc),
@@ -1157,36 +1167,34 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     }
 
 
-IMAGE_MD = re.compile(r"!\[([^\]]*)\]\([^)]*\)(\{[^}]*\})?")
-IMAGE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*image\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
 RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
 LINE_BREAK = re.compile(r"\r\n?")
-LINE_MARKS = re.compile(r"(?:[ \t]*(?:>|[-+*](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*")  # a quote's, a list item's
-CODE_OPEN = re.compile(r"(`{3,})[^`]*|(~{3,}).*")  # a fence that opens at the start of a line (CommonMark)
 
 
-def _no_divs(text: str) -> str:
-    """A value rendered as Markdown with no ::: line: a run of colons at the start of a line, after the marks of a
-    quote or a list item (> ::: and - ::: open blocks there too), gets a backslash, so it prints as colons. Lines
-    of a code block in the value are left as written (colons there are text already), but only when the value
-    surely makes one wherever it is put: a fence that opens at the very start of a line after its first (the first
-    joins the template's text). Any doubt escapes: a backslash in code is shown, a ::: from data never acts.
-    `text` has \\n line breaks only."""
-    out, fence = [], ""
-    for k, line in enumerate(text.split("\n")):
-        if fence:
-            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", line):
-                fence = ""
-            out.append(line)
-            continue
-        opens = CODE_OPEN.fullmatch(line) if k else None
-        if opens:
-            fence = opens.group(1) or opens.group(2)
-        marks = LINE_MARKS.match(line).end()
-        if line[marks:].startswith(":::"):
-            line = line[:marks] + "\\" + line[marks:]
-        out.append(line)
-    return "\n".join(out)
+def data_spans(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """The rendered document without the TAINT_OPEN/TAINT_CLOSE marks of data rendered as Markdown, its line breaks
+    as markdown-it reads them (\\n), and where that data now is: [(start, end)] in the text returned. Nested marks
+    (data rendered twice) count as their outermost pair."""
+    text = LINE_BREAK.sub("\n", text)
+    if TAINT_OPEN not in text:
+        return text.replace(TAINT_CLOSE, ""), []
+    out, spans, depth, start = [], [], 0, 0
+    size = 0
+    for piece in re.split(f"([{TAINT_OPEN}{TAINT_CLOSE}])", text):
+        if piece == TAINT_OPEN:
+            depth += 1
+            if depth == 1:
+                start = size
+        elif piece == TAINT_CLOSE:
+            if depth == 1 and size > start:
+                spans.append((start, size))
+            depth = max(0, depth - 1)
+        else:
+            out.append(piece)
+            size += len(piece)
+    if depth and size > start:  # a mark never closed (a filter cut it): to the end, never less
+        spans.append((start, size))
+    return "".join(out), spans
 
 
 # ---------------------------------------------------------------- render
@@ -1336,7 +1344,7 @@ def render(
             return ""
         if v is None:
             return ""
-        text = str(v)
+        text = str(v).replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")  # Markdown from data, then made a value
         lengths.append(resolved_len(text))
         values.append(Value(text, isinstance(v, Tainted)))
         return f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
@@ -1353,9 +1361,9 @@ def render(
         comment_start_string="<#",
         comment_end_string="#>",  # `{#id}` stays a Pandoc attribute
     )
-    env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
+    env.filters.update(make_filters(loc, tz, nudges, choice.explicit, _data_texts(fields)))
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
-        if name != "markdown":  # markdown already handles data (no images, no raw) and returns MdSafe
+        if name != "markdown":  # markdown marks data itself (TaintedMd, checked by the parser)
             f = keep_taint(f)
         env.filters[name] = _size_guard(name, f, env)
 
@@ -1421,4 +1429,5 @@ def render(
         if given:
             hint += "; the data and --set give: " + ", ".join(given[:12]) + (" …" if len(given) > 12 else "")
         nudges.add("M130", f"variable '{name}' is not defined", suggestion=hint)
-    return Rendered("".join(out), values, store, _data_texts(fields))
+    text, spans = data_spans("".join(out))
+    return Rendered(text, values, store, _data_texts(fields), spans)

@@ -150,6 +150,10 @@ FIX = {
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
     "M121": "Raw blocks cannot come from data: put them in the document.",
     "M122": "Images cannot come from data values: put the image in the document.",
+    "M123": (
+        "Nothing to fix when the value is data: it prints as written. Boxes and code blocks belong in the document; "
+        "put the ::: lines or the fences there, around {{ value | markdown }}."
+    ),
     "M130": "Give the variable a value: front matter, --set NAME=VALUE or a data column (the message lists them).",
     "M131": "Give the required field: --set NAME=VALUE, or fill that column in the row.",
     "M140": "The counter passed its stop: bobina seq set NAME N, a higher stop, or wrap: true.",

@@ -26,7 +26,7 @@ from .model import (
     Run,
     Table,
 )
-from .nudges import Nudges
+from .nudges import Nudges, SecurityError
 
 KNOWN_CLASSES = {
     "center",
@@ -382,8 +382,109 @@ def _line(node, offset: int) -> int:
 BROKEN_IMAGE = re.compile(r"!\[([^\]]*)\]\(((?!<)[^)\n]*\s[^)\n]*)\)")
 
 
-def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", meta: dict | None = None) -> Document:
+FROM_DATA = {  # what data rendered as Markdown may not make: (code, what the problem says)
+    "raw": ("M121", "a raw block in a --data/--set value was removed"),
+    "image": ("M122", "an image inside a --data/--set value was removed (data cannot choose files)"),
+    "div": ("M123", "a ::: line in a --data/--set value printed as text (data cannot open or close blocks)"),
+    "fence": ("M123", "a code fence in a --data/--set value printed as text (it does not open and close there)"),
+    "close": ("M123", "a --data/--set value would close the document's code block: its line printed as text"),
+}
+
+
+class _Taint:
+    """Where data rendered as Markdown (| markdown) is in the document's text: spans of offsets
+    (templating.data_spans), asked by offset range or by line."""
+
+    def __init__(self, text: str, spans):
+        self.spans = sorted(spans)
+        self.lined(text)
+
+    def lined(self, text: str) -> None:
+        """The offset each line of `text` starts at (and one past the end)."""
+        self.starts = [0]
+        for line in text.split("\n"):
+            self.starts.append(self.starts[-1] + len(line) + 1)
+
+    def __bool__(self) -> bool:
+        return bool(self.spans)
+
+    def any(self, lo: int, hi: int) -> bool:
+        """Some of text[lo:hi] came from data."""
+        return any(s < hi and lo < e for s, e in self.spans)
+
+    def lines(self, first: int, last: int) -> bool:
+        """Some of lines first..last-1 (markdown-it's map) came from data."""
+        return self.any(self.starts[first], self.starts[min(last, len(self.starts) - 1)])
+
+    def shift(self, at: int) -> None:
+        """A character was put in at offset `at`: the spans after it move, one around it grows."""
+        self.spans = [(s + (s >= at), e + (e >= at)) for s, e in self.spans]
+
+
+def data_markup(text: str, taint: _Taint, nudges: Nudges, off: int) -> str:
+    """The text with the markup data rendered as Markdown may not make turned into text, decided on the parse of
+    the whole document (so a value split in two, a value inside a quote or a list item, or one joined to the
+    template's line is seen as markdown-it sees it): a code fence or a ::: line whose line, from its marker on,
+    holds data; and a fence the template opened that data would close. Each gets a backslash before its marker
+    (it prints as written) and its problem: M121 for raw, M122 for an image, M123 for the rest. A code block that
+    data opens and closes stays one, unless it is raw or an image."""
+    for _ in range(64):  # each round turns at least one line into text; a document has far fewer
+        lines = text.split("\n")
+        fixes: dict[int, tuple[str, str, int]] = {}
+        for tok in _md().parse(text, {}):
+            if tok.type not in ("fence", "fenced_div") or not tok.map:
+                continue
+            first, last = tok.map[0], tok.map[1] - 1
+            at = taint.starts[first] + lines[first].find(tok.markup)
+            if taint.any(at, taint.starts[first + 1] - 1):
+                kind = "div" if tok.type == "fenced_div" else (tok.info.split() or [""])[0].lower()
+                if kind not in ("div", "raw", "image"):
+                    shut = last > first and _closes(lines[last], tok.markup)
+                    if shut and taint.any(at, taint.starts[last + 1] - 1) and _whole(taint, at, last):
+                        continue  # a code block data opens and closes: text anyway
+                    kind = "fence"
+                fixes[at] = (*FROM_DATA[kind], first)
+            elif tok.type == "fence" and last > first and _closes(lines[last], tok.markup):
+                close = taint.starts[last] + lines[last].find(tok.markup[0])
+                if taint.any(close, close + len(tok.markup)):
+                    fixes[close] = (*FROM_DATA["close"], last)
+        if not fixes:
+            return text
+        for at in sorted(fixes, reverse=True):
+            code, message, line = fixes[at]
+            nudges.add(code, message, line + 1 + off, "data prints as text; markup belongs in the document")
+            text = text[:at] + "\\" + text[at:]
+            taint.shift(at)
+        taint.lined(text)
+    raise SecurityError("M313", "a --data/--set value holds too much markup to check")
+
+
+def _closes(line: str, markup: str) -> bool:
+    """The line closes a fence opened with `markup` (after the marks of a quote or a list item it is in)."""
+    rest = ROW_PREFIX.sub("", line)
+    return bool(re.fullmatch(rf"{re.escape(markup[0])}{{{len(markup)},}}[ \t]*", rest))
+
+
+def _whole(taint: _Taint, at: int, last: int) -> bool:
+    """Every character from offset `at` to the end of line `last` came from data (one value, no template between)."""
+    end = taint.starts[last + 1] - 1
+    return any(s <= at and end <= e for s, e in taint.spans)
+
+
+def parse(
+    text: str,
+    nudges: Nudges,
+    line_offset: int = 0,
+    base_dir: str = ".",
+    meta: dict | None = None,
+    tainted: list[tuple[int, int]] | None = None,
+) -> Document:
+    """tainted: where data rendered as Markdown is in `text` (Rendered.spans): its markup is checked first."""
+    taint = _Taint(text, tainted or [])
+    if taint:
+        text = data_markup(text, taint, nudges, line_offset)
     lines = _Source(re.split(r"\r\n?|\n", text))  # as markdown-it counts them (its maps index these)
+    lines.taint = taint
     tails = _title_tails(lines)
     while True:  # a {…} after a title row is taken out first: GFM would not see a table with one cell too many
         src = _Source(lines)
@@ -396,6 +497,7 @@ def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", 
             break
         tails = {i: v for i, v in tails.items() if i in heads}  # not a table after all (a code block): as written
     src.title_rows = {i: a for i, (_row, a) in tails.items()}
+    src.taint = taint
     root = SyntaxTreeNode(tokens)
     doc = Document(meta=meta or {}, base_dir=base_dir)
     doc.blocks = _blocks(root.children, nudges, line_offset, src)
@@ -593,6 +695,9 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 )  # fmt: skip
                 for k in ("src", "alt", "title"):
                     ia.kv.pop(k, None)
+                if _from_data(n, src):  # data never chooses a file
+                    nudges.add(*FROM_DATA["image"], ln, "data prints as text; markup belongs in the document")
+                    continue
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
                 continue
             paras: list[Paragraph] = []
@@ -643,12 +748,21 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
                 extra=IMAGE_KEYS if k == "image" else CAPTION_KEYS if k in CODES else frozenset(),
             )  # fmt: skip
+            if k in ("raw", "image") and _from_data(n, src):  # its bytes or its path would come from data
+                nudges.add(*FROM_DATA[k], ln, "data prints as text; markup belongs in the document")
+                continue
             out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":
             out.append(_table(n, ln, nudges, src))
         elif n.children:
             out.extend(_blocks(n.children, nudges, off, src))
     return out
+
+
+def _from_data(node, src) -> bool:
+    """Some of the node's lines came from data rendered as Markdown (parse's tainted spans)."""
+    taint = getattr(src, "taint", None)
+    return bool(taint) and bool(node.map) and taint.lines(node.map[0], node.map[1])
 
 
 def _attr_lines(tb: Table, a: Attrs, line: int) -> None:
@@ -677,10 +791,12 @@ class _Source(list):
     """The document's lines, and the {…} written after a table's title row (its line index -> Attrs)."""
 
     title_rows: dict[int, Attrs]
+    taint: _Taint | None  # where data rendered as Markdown is (parse)
 
     def __init__(self, lines=()):
         super().__init__(lines)
         self.title_rows = {}
+        self.taint = None
 
 
 def _braces(segments: list[str]) -> Attrs | None:

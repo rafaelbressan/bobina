@@ -374,8 +374,8 @@ them, and `bobina seq set NAME N` starts one at N, even before its first print.
 - can never produce a `raw` block (`M314` for variables inside `raw`), choose an image path (`M312`), or carry
   control characters (removed from all text and barcode data before encoding).
 
-`{{ value | markdown }}` opts one value in: its `raw` blocks are removed (`M121`), and for data values images too
-(`M122`). Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
+`{{ value | markdown }}` opts one value in: its `raw` blocks are removed (`M121`); for data values images too
+(`M122`), and `:::` lines or fences it does not close print as text (`M123`). Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
 iterations or 2 MB of output (`M313`), template paths outside the document folder and
 `~/.config/bobina/templates` (`M315`). See `docs/SECURITY.md`.
 
@@ -436,38 +436,19 @@ templates. `bobina help nudges` prints the same list; `allow: [CODE]` or `--allo
 
 Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 
-| Code | Meaning |
-|---|---|
-| `E101` | command line usage |
-| `E102` | this command takes one document |
-| `E103` | a job option was given twice with different values |
-| `E104` | --then / --compact misuse |
-| `E105` | --last / --again misuse, or nothing printed yet |
-| `E106` | only one part can read stdin |
-| `E107` | a terminal is needed (confirmation or --ask) |
-| `E201` | file not found or unreadable |
-| `E202` | file type not supported as a target |
-| `E203` | image, PDF page or page range not usable |
-| `E204` | network target needs --allow-net |
-| `E205` | nothing to print |
-| `E206` | saved label (library) problem |
-| `E207` | unknown template, profile, font or help topic |
-| `E208` | output file problem (exists, format) |
-| `E209` | a bobina state file is damaged or busy (counters, paper, library, config) |
-| `E301` | data file unreadable or in an unsupported format |
-| `E302` | no data rows (or none match --rows/--where) |
-| `E303` | unknown column or sheet |
-| `E304` | invalid value (--rows, --copies-from, --set, length) |
-| `E305` | job too large (1000 labels, 100 copies) |
-| `E401` | no printer configured or unknown printer |
-| `E402` | printer unreachable |
-| `E403` | printer not ready (paper, cover, error) |
-| `E405` | printer busy: another bobina job kept it too long |
-| `E406` | `bobina init` found no printer to set up |
-| `E501` | document error |
-| `E601` | no AI found, or an unknown AI name |
-| `E602` | the AI did not answer |
-| `E701` | could not check for a new bobina (`bobina update`) |
+`E101` command line usage · `E102` this command takes one document · `E103` a job option was given twice with
+different values · `E104` --then / --compact misuse · `E105` --last / --again misuse, or nothing printed yet · `E106`
+only one part can read stdin · `E107` a terminal is needed (confirmation or --ask) · `E201` file not found or
+unreadable · `E202` file type not supported as a target · `E203` image, PDF page or page range not usable · `E204`
+network target needs --allow-net · `E205` nothing to print · `E206` saved label (library) problem · `E207` unknown
+template, profile, font or help topic · `E208` output file problem (exists, format) · `E209` a bobina state file is
+damaged or busy (counters, paper, library, config) · `E301` data file unreadable or in an unsupported format · `E302`
+no data rows (or none match --rows/--where) · `E303` unknown column or sheet · `E304` invalid value (--rows,
+--copies-from, --set, length) · `E305` job too large (1000 labels, 100 copies) · `E401` no printer configured or
+unknown printer · `E402` printer unreachable · `E403` printer not ready (paper, cover, error) · `E405` printer busy:
+another bobina job kept it too long · `E406` `bobina init` found no printer to set up · `E501` document error · `E601`
+no AI found, or an unknown AI name · `E602` the AI did not answer · `E701` could not check for a new bobina
+(`bobina update`)
 
 Nudges:
 
@@ -540,6 +521,7 @@ Nudges:
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed from a --data/--set value |
+| `M123` | warning | a `:::` line or code fence in a --data/--set value printed as text |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |

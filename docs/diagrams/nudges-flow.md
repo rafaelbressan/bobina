@@ -168,6 +168,7 @@ from this list.
 | `M120` | note | field rendered as Markdown |  |
 | `M121` | warning | raw block removed from a variable |  |
 | `M122` | warning | image removed from a --data/--set value |  |
+| `M123` | warning | a ::: line or code fence in a --data/--set value printed as text |  |
 | `M130` | warning | undefined variable printed as empty |  |
 | `M131` | warning | required template field is empty |  |
 | `M140` | warning | counter passed its stop value |  |
