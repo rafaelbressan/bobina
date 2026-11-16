@@ -163,6 +163,7 @@ from this list.
 | `M101` | warning | unknown attribute |  |
 | `M102` | note | unknown block type, printed as preformatted text |  |
 | `M103` | note | attribute not implemented yet (ignored) |  |
+| `M104` | note | a {…} after a table's title row: GitHub and Obsidian show that table as text |  |
 | `M120` | note | field rendered as Markdown |  |
 | `M121` | warning | raw block removed from a variable |  |
 | `M122` | warning | image removed from a --data/--set value |  |

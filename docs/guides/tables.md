@@ -3,7 +3,9 @@
 A table in a `.bob.md` is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
 
 - for the whole table, on the line right under it (with or without a blank line): `{style=receipt .compact}`;
-- for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`.
+- for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`;
+- for one cell, at the end of its text, and for one row, after its closing pipe; a cell over several columns
+  (`span=all`): [table-cells.md](table-cells.md).
 
 Everything with the same reach goes in the same `{…}`. Names and values are lowercase. Whole receipts to copy:
 [receipts.md](receipts.md).
@@ -22,8 +24,7 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
   (the first column takes what is left); `.compact` keeps it narrow, `.center` or `.right` places it.
 - The printer font has 32 columns on 58 mm paper and 48 on 80 mm, the spaces included: 4 columns on 58 mm leave
   29 for text. A cell wraps at its spaces; a word longer than an `auto` column is cut (`L101`).
-- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.underline}`, `[word]{.invert}`; `font=` and `size=`
-  go to the whole table (`M101`).
+- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`; `font=` and `size=` go to the whole table.
 
 ## Tables without a title row
 
@@ -48,7 +49,7 @@ At the end of a column's title cell:
 | Ground coffee 500 g | 18,75 | |
 ```
 
-No sale price for the coffee: nothing there. Without a title row: `| | {prefix="R$ "} |` (still empty).
+Without a title row: `| | {prefix="R$ "} |` (still empty).
 `bobina check FILE` says the width each column got (`L108`): `column widths: Product 14 · Price 8 · Sale 8 (+2 gaps =
 32 of 32)`. Widths wider than the paper shrink in proportion, `auto` columns keeping 2 (`L107`). With `font=`, `7ch`
 is 7 times that font's `0`.
@@ -101,7 +102,7 @@ bobina prints anyway and says what to fix (`bobina check FILE`: the same list, n
 | Code | When | Example message |
 |---|---|---|
 | `M101` | an unknown style; it prints `plain` | `style=recibo: unknown style; plain, receipt, …` |
-| `M101` | a value in capitals | `style=RECEIPT: values are lowercase`, `width=9CH: values are lowercase` |
+| `M101` | a value in capitals | `style=RECEIPT: values are lowercase` |
 | `M101` | a width it cannot read; the column is `auto` | `width=abc` |
 | `M101` | a column setting in a body cell | `prefix= works at the end of a title cell, for its column` |
 | `M101` | something a table does not take | `leading= does nothing on a table` |

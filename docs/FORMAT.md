@@ -58,7 +58,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md), [receipts](guides/receipts.md) |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -509,7 +509,7 @@ Nudges:
 | `L108` | note | the width each table column got (`check` only) |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
-| `I103` | warning | network image skipped: fetching tells the server you print and can reach your network; `--allow-net` if trusted |
+| `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
 | `I104` | note | image fetched from the network (the server sees the print) |
 | `I105` | warning | PDF/SVG support not installed |
 | `I106` | warning | network source refused (private address, redirect, type, size) |
@@ -534,6 +534,7 @@ Nudges:
 | `M101` | warning | unknown attribute |
 | `M102` | note | unknown block type, printed as preformatted text |
 | `M103` | note | attribute not implemented yet (ignored) |
+| `M104` | note | a `{…}` after a table's title row: GitHub shows the table as text |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed from a --data/--set value |
@@ -545,10 +546,10 @@ Nudges:
 | `M152` | warning | `--join`: a column exists in two sources; `{{ col }}` uses the main one, `{{ b.col }}` the other |
 | `M153` | warning | data values lost: a row with more fields than the header, or values under an empty header |
 | `M154` | warning | the data header repeats a column name (the last one is used) |
-| `M155` | note | a data source was renamed because a column has its name (`produto.csv` with a `produto` column → `produto_src`) |
+| `M155` | note | a data source was renamed because a column has its name |
 | `M156` | note | an option has no effect here (`--sheet` on a CSV, `--repeat` with `--data`) |
-| `M157` | warning | `--set` replaces a data column of the same name in every row (decided: what you type wins) |
-| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco`; `{{ row['Product Name'] }}` keeps the exact name |
+| `M157` | warning | `--set` replaces a data column of the same name in every row |
+| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco` |
 | `M159` | warning | two data columns would get the same usable name; the first keeps it |
 | `M160` | note | Excel formula cells without a saved value print empty |
 | `M161` | warning | no icon with that `:name:` (printed as written) |

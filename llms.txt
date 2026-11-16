@@ -33,6 +33,7 @@ Facts an agent needs first:
 - [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
 - [Payment codes](docs/pay.md): every `pay` scheme (Pix, UPI, SEPA…), what each field means in it and its limits
 - [Tables guide](docs/guides/tables.md): table styles (`style=receipt`, `grid`, `zebra`…), smaller fonts and how many columns fit, column widths and `prefix=`, tables without titles
+- [Table cells guide](docs/guides/table-cells.md): a cell's or a row's `{.bold .invert .shade .right}`, `span=all`
 - [Receipts guide](docs/guides/receipts.md): whole receipts to copy: totals, a bar bill, a 7-column supermarket receipt on 58 mm
 - [Templates guide](docs/guides/templates.md): label, card and to-do recipes, and a gallery of shop tags
 - [Security](docs/SECURITY.md): data is printed literally, templates run in a sandbox

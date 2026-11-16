@@ -27,8 +27,8 @@ FEATURES = {
         "evidence": "",
     },
     "zebra": {
-        "title": "the light grey rows of a style=zebra table (dots behind the text)",
-        "where": "any table with style=zebra (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",
+        "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",
+        "where": "tables with style=zebra or .shade (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",
         "tested_on_paper": False,
         "evidence": "",
     },

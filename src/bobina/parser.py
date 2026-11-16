@@ -97,10 +97,12 @@ def parse_attrs(s: str) -> Attrs | None:
     return a
 
 
-def check_attrs(a: Attrs, line: int, nudges: Nudges, keys: bool = True, extra: frozenset = frozenset()):
+def check_attrs(
+    a: Attrs, line: int, nudges: Nudges, keys: bool = True, extra: frozenset = frozenset(), classes=frozenset()
+):
     """keys=False: the block checks its own keys (pay: each scheme names the ones it takes); extra: keys only this
-    block takes (caption= on a QR)."""
-    for c in a.classes - KNOWN_CLASSES:
+    block takes (caption= on a QR); classes: classes only it takes (.shade in a table cell)."""
+    for c in a.classes - KNOWN_CLASSES - classes:
         nudges.add("M101", f"unknown class '.{c}'", line, "see: bobina help format")
     for k in set(a.kv) - KNOWN_KEYS - extra if keys else ():
         nudges.add("M101", f"unknown key '{k}='", line, "see: bobina help format")
@@ -342,11 +344,22 @@ BROKEN_IMAGE = re.compile(r"!\[([^\]]*)\]\(((?!<)[^)\n]*\s[^)\n]*)\)")
 
 
 def parse(text: str, nudges: Nudges, line_offset: int = 0, base_dir: str = ".", meta: dict | None = None) -> Document:
-    env: dict = {}
-    root = SyntaxTreeNode(_md().parse(text, env))
+    lines = _Source(re.split(r"\r\n?|\n", text))  # as markdown-it counts them (its maps index these)
+    tails = _title_tails(lines)
+    while True:  # a {…} after a title row is taken out first: GFM would not see a table with one cell too many
+        src = _Source(lines)
+        for i, (row, _a) in tails.items():
+            src[i] = row
+        env: dict = {}
+        tokens = _md().parse("\n".join(src) if tails else text, env)
+        heads = {t.map[0] for t in tokens if t.type == "thead_open" and t.map}
+        if set(tails) <= heads:
+            break
+        tails = {i: v for i, v in tails.items() if i in heads}  # not a table after all (a code block): as written
+    src.title_rows = {i: a for i, (_row, a) in tails.items()}
+    root = SyntaxTreeNode(tokens)
     doc = Document(meta=meta or {}, base_dir=base_dir)
-    lines = re.split(r"\r\n?|\n", text)  # as markdown-it counts them (its maps index these)
-    doc.blocks = _blocks(root.children, nudges, line_offset, lines)
+    doc.blocks = _blocks(root.children, nudges, line_offset, src)
     _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
     return doc
 
@@ -493,6 +506,46 @@ COLUMN_HINT = 'a title cell takes width=, prefix= and suffix= for its column: | 
 
 
 ROW_PREFIX = re.compile(r"^(?:\s*(?:>|[-+*](?=\s)|\d{1,9}[.)](?=\s)))*\s*")  # what holds a table row: > - 1.
+DELIMITER_ROW = re.compile(r"\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?")  # |---|--:| under a table's titles
+ATTRS_ONLY = re.compile(r"\s*\{([^{}]*)\}\s*")
+
+
+class _Source(list):
+    """The document's lines, and the {…} written after a table's title row (its line index -> Attrs)."""
+
+    title_rows: dict[int, Attrs]
+
+    def __init__(self, lines=()):
+        super().__init__(lines)
+        self.title_rows = {}
+
+
+def _row_tail(raws: list[str], line: str) -> Attrs | None:
+    """The {…} written after the pipe that closes a table row, with nothing after it: `| TOTAL | 61,00 | {.bold}`.
+    A cell that is only {…} followed by a closing pipe (`| a | {.shade} |`) is a cell. None: no row attributes."""
+    s = ROW_PREFIX.sub("", line).strip()
+    if len(raws) < 2 or s.endswith("|"):
+        return None
+    m = ATTRS_ONLY.fullmatch(raws[-1])
+    a = parse_attrs(m.group(1)) if m else None
+    return a if a is not None and (a.classes or a.kv) else None
+
+
+def _title_tails(lines: list[str]) -> dict[int, tuple[str, Attrs]]:
+    """Title rows with a {…} after their closing pipe, over a delimiter row of one cell fewer: (the row without it,
+    its attributes), by line index."""
+    out = {}
+    for i in range(len(lines) - 1):
+        under = ROW_PREFIX.sub("", lines[i + 1]).strip()
+        if "|" not in under or not DELIMITER_ROW.fullmatch(under) or "|" not in lines[i]:
+            continue
+        raws = _raw_cells(lines[i])
+        a = _row_tail(raws, lines[i])
+        if a is None or len(_raw_cells(lines[i + 1])) != len(raws) - 1:
+            continue
+        cut = lines[i].rstrip().rindex("{")
+        out[i] = (lines[i][:cut].rstrip(), a)
+    return out
 
 
 def _raw_cells(line: str) -> list[str]:
@@ -512,6 +565,7 @@ def _raw_cells(line: str) -> list[str]:
     return [*cells, cur]
 
 
+EMPTY_SPAN = re.compile(r"(?<![\w-])span=(?=\s|$)")
 ESCAPED_TAIL = re.compile(r"(\\*)\{[^{}]*?(\\*)\}\s*$")
 
 
@@ -531,49 +585,82 @@ def _cell_attrs(inline, raw: str | None, want) -> Attrs | None:
         return None
     m = ATTR_TAIL.search(kids[-1].content)
     a = parse_attrs(m.group(1)) if m else None
+    if a is None and m and EMPTY_SPAN.search(m.group(1)):  # {span=}: said as an empty value (M101), not kept
+        a = parse_attrs(EMPTY_SPAN.sub('span=""', m.group(1)))
     if a is None or not want(a):
         return None
     kids[-1].token.content = kids[-1].content[: m.start()]
     return a
 
 
-def _idle_names(a: Attrs, used: tuple[str, ...]) -> list[str]:
+CELL_CLASSES = frozenset({"bold", "italic", "underline", "strike", "invert", "shade", "left", "center", "right"})
+ROW_CLASSES = CELL_CLASSES - {"strike"}  # what a row's {…} takes, after its closing pipe
+CELL_KEYS = frozenset({*COLUMN_KEYS, "span"})  # keys a cell's {…} is read for (said where they do nothing)
+CELL_TAKES = "a cell takes .bold .italic .underline .strike .invert .shade .left .center .right, and span= in the body"
+ROW_HINT = "a row takes .bold .italic .underline .invert .shade .left .center .right: | TOTAL | 61,00 | {.invert .bold}"
+
+
+def _idle_names(a: Attrs, used: tuple[str, ...], classes: frozenset = CELL_CLASSES) -> list[str]:
     """The known classes and keys in a cell's {…} that do nothing there (check_attrs says the unknown ones)."""
-    return [f".{c}" for c in sorted(a.classes & KNOWN_CLASSES)] + [
-        f"{k}=" for k in sorted(a.kv) if k in KNOWN_KEYS and k not in used
+    return [f".{c}" for c in sorted(a.classes & (KNOWN_CLASSES | CELL_CLASSES) - classes)] + [
+        f"{k}=" for k in sorted(a.kv) if k in KNOWN_KEYS | CELL_KEYS and k not in used
     ]
 
 
-def _title_settings(cell, raw: str | None, ln: int, nudges: Nudges) -> Attrs:
-    """A title cell's column settings (width= prefix= suffix=); the rest of its {…} is said (M101). An empty {} or
-    an id alone stays text."""
+def _meant(a: Attrs) -> bool:
+    """A cell's {…} is bobina's when it has a class or a key; an empty {} or an id alone stays text."""
+    return bool(a.classes or set(a.kv) - {"id"})
+
+
+def _title_settings(cell, raw: str | None, ln: int, nudges: Nudges) -> tuple[Attrs, Attrs]:
+    """A title cell's column settings (width= prefix= suffix=) and its own classes (.bold .invert .right…); the
+    rest of its {…} is said (M101): span= spans nothing in a title. An empty {} or an id alone stays text."""
     inline = cell.children[0] if cell.children else None
-    a = _cell_attrs(inline, raw, lambda a: a.classes or set(a.kv) - {"id"})
+    a = _cell_attrs(inline, raw, _meant)
     if a is None:
-        return Attrs()
-    check_attrs(a, ln, nudges, extra=frozenset(COLUMN_KEYS))
-    idle = _idle_names(a, COLUMN_KEYS)
+        return Attrs(), Attrs()
+    check_attrs(a, ln, nudges, extra=CELL_KEYS, classes=CELL_CLASSES)
+    if "span" in a.kv:
+        nudges.add("M101", f"span={a.kv['span']} in a title cell: a title spans nothing (ignored)", ln,
+                   "span= goes at the end of a body cell: | | Discount {span=all} |")  # fmt: skip
+    idle = _idle_names(a, (*COLUMN_KEYS, "span"))
     if idle:
         nudges.add("M101", f"{', '.join(idle)} at the end of a title cell {'does' if len(idle) == 1 else 'do'} "
-                   "nothing", ln, COLUMN_HINT)  # fmt: skip
-    return Attrs(set(), {k: v for k, v in a.kv.items() if k in COLUMN_KEYS})
+                   "nothing", ln, f"{COLUMN_HINT}; {CELL_TAKES}")  # fmt: skip
+    return Attrs(set(), {k: v for k, v in a.kv.items() if k in COLUMN_KEYS}), Attrs(a.classes & CELL_CLASSES)
 
 
-def _body_settings(cell, raw: str | None, at: int, nudges: Nudges) -> None:
-    """width=, prefix=, suffix= at the end of a body cell: said (M101) and taken out of its text; a {…} without
-    them stays text."""
+def _body_settings(cell, raw: str | None, at: int, nudges: Nudges) -> Attrs:
+    """A body cell's own classes and span=, taken out of its text; width=, prefix=, suffix= there are said
+    (M101). An empty {} or an id alone stays text."""
     inline = cell.children[0] if cell.children else None
-    a = _cell_attrs(inline, raw, lambda a: set(a.kv) & set(COLUMN_KEYS))
+    a = _cell_attrs(inline, raw, _meant)
     if a is None:
-        return
-    check_attrs(a, at, nudges, extra=frozenset(COLUMN_KEYS))
+        return Attrs()
+    check_attrs(a, at, nudges, extra=CELL_KEYS, classes=CELL_CLASSES)
     names = [f"{k}=" for k in COLUMN_KEYS if k in a.kv]
-    nudges.add("M101", f"{', '.join(names)} {'works' if len(names) == 1 else 'work'} at the end of a title cell, "
-               "for its column", at, f"move it to the title cell of that column ({COLUMN_HINT})")  # fmt: skip
-    idle = _idle_names(a, COLUMN_KEYS)
+    if names:
+        nudges.add("M101", f"{', '.join(names)} {'works' if len(names) == 1 else 'work'} at the end of a title "
+                   "cell, for its column", at, f"move it to the title cell of that column ({COLUMN_HINT})")  # fmt: skip
+    idle = _idle_names(a, tuple(CELL_KEYS))
     if idle:
         nudges.add("M101", f"{', '.join(idle)} at the end of a table cell {'does' if len(idle) == 1 else 'do'} "
-                   "nothing", at, "a cell takes **bold**, *italic*, [word]{.underline}, [word]{.invert}")  # fmt: skip
+                   "nothing", at, CELL_TAKES)  # fmt: skip
+    return Attrs(a.classes & CELL_CLASSES, {k: v for k, v in a.kv.items() if k == "span"})
+
+
+def _row_style(a: Attrs, at: int, nudges: Nudges) -> Attrs:
+    """A row's {…} (after its closing pipe): its classes; every key, and what a row does not take, said (M101)."""
+    check_attrs(a, at, nudges, extra=CELL_KEYS, classes=CELL_CLASSES)
+    idle = _idle_names(a, (), ROW_CLASSES)
+    if idle:
+        nudges.add("M101", f"{', '.join(idle)} after a table row {'does' if len(idle) == 1 else 'do'} nothing", at,
+                   ROW_HINT)  # fmt: skip
+    return Attrs(a.classes & ROW_CLASSES)
+
+
+TITLE_ROW_NOTE = "a {…} after the title row makes GitHub and Obsidian show the table as text"
+TITLE_ROW_HINT = "style=header-invert or classes at the end of each title cell print the same and stay a table there"
 
 
 def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
@@ -585,23 +672,38 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
         tb.attrs = a
         _attr_lines(tb, a, at)
         body.children.pop()
+    titles = getattr(src, "title_rows", {})
     for section in n.children:
         for tr in section.children:
-            cells, aligns = [], []
+            cells, aligns, styles = [], [], []
             at = _line(tr, ln - _line(n, 0)) or ln
-            raws = _raw_cells(src[tr.map[0]]) if tr.map and tr.map[0] < len(src) else []
+            source = src[tr.map[0]] if tr.map and tr.map[0] < len(src) else ""
+            raws = _raw_cells(source) if source else []
+            tail = None if section.type == "thead" else _row_tail(raws, source)
+            row = _row_style(tail, at, nudges) if tail is not None else Attrs()
+            if section.type == "thead" and tr.map and tr.map[0] in titles:
+                row = _row_style(titles[tr.map[0]], at, nudges)
+                nudges.add("M104", TITLE_ROW_NOTE, at, TITLE_ROW_HINT)
             for k, cell in enumerate(tr.children):
                 style = (cell.attrs or {}).get("style", "")
                 aligns.append("right" if "right" in style else "center" if "center" in style else "left")
                 raw = raws[k] if k < len(raws) else None
+                if tail is not None and k == len(raws) - 1:  # the row's {…}, which GFM read as a cell
+                    cells.append([])
+                    styles.append(Attrs())
+                    continue
                 if section.type == "thead":
-                    tb.columns.append(_title_settings(cell, raw, ln, nudges))
+                    column, own = _title_settings(cell, raw, ln, nudges)
+                    tb.columns.append(column)
+                    styles.append(own)
                 else:
-                    _body_settings(cell, raw, at, nudges)
+                    styles.append(_body_settings(cell, raw, at, nudges))
                 cells.append(inline_runs(cell.children[0]) if cell.children else [])
             if section.type == "thead":
-                tb.header, tb.aligns = cells, aligns
+                tb.header, tb.aligns, tb.heads, tb.head_row = cells, aligns, styles, row
             else:
                 tb.rows.append(cells)
                 tb.row_lines.append(at)
+                tb.cells.append(styles)
+                tb.row_attrs.append(row)
     return tb

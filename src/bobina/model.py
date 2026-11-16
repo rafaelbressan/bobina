@@ -92,6 +92,10 @@ class Table(Block):
     attr_lines: dict[str, int] = field(default_factory=dict)  # ".compact"/"width=" -> the line it was written on
     row_lines: list[int] = field(default_factory=list)  # the source line of each row
     columns: list[Attrs] = field(default_factory=list)  # each column's settings, from the end of its title cell
+    heads: list[Attrs] = field(default_factory=list)  # each title cell's own classes (.bold .invert .shade .right…)
+    cells: list[list[Attrs]] = field(default_factory=list)  # each body cell's classes and span=, row by row
+    head_row: Attrs = field(default_factory=Attrs)  # the {…} after the title row's closing pipe: its classes
+    row_attrs: list[Attrs] = field(default_factory=list)  # the same for each body row
 
 
 @dataclass

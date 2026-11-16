@@ -18,7 +18,7 @@ there with the evidence (printer, date, what was printed), and the mark and the 
 | native text through code pages (ESC t) | ⚠ not tested on paper | profiles with `encoding = "codepage"` (most imported profiles) |
 | automatic cutter (GS V) where a label ends (not between --compact labels: glued on purpose) | ⚠ not tested on paper | profiles with `cutter = "full"` or `"partial"` |
 | native barcodes (GS k) on an imported profile | ⚠ not tested on paper | imported profiles whose printer has barcode commands |
-| the light grey rows of a style=zebra table (dots behind the text) | ⚠ not tested on paper | tables with `style=zebra` ([guides/tables.md](guides/tables.md)) |
+| the light grey dots behind table text (style=zebra, .shade on a cell or row) | ⚠ not tested on paper | tables with `style=zebra` or `.shade` ([guides/tables.md](guides/tables.md), [table-cells](guides/table-cells.md)) |
 | Imported printer profiles as a whole | ⚠ not tested on paper (model facts only) | every profile with `measured = false` |
 
 Have one of these printers? Print `bobina calibrate tear`, `bobina calibrate feed` and a label with accents and a

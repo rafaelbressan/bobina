@@ -231,8 +231,9 @@ def test_an_attribute_line_right_under_a_table_applies_to_it():
 
 
 def test_a_row_that_only_looks_like_attributes_stays_a_row():
-    res = build("| a | b |\n|---|---|\n| {.compact} | 2 |\n")  # a cell, written with its pipes: data
-    assert "{.compact}" in "".join(lines(res))
+    res = build("| a | b |\n|---|---|\n| {.compact} | 2 |\n")  # a cell, written with its pipes: not the table's
+    assert lines(res)[-1].endswith("2") and len(lines(res)[0]) > 20  # the row prints, the table is not compact
+    assert [n.message for n in res.nudges] == [".compact at the end of a table cell does nothing"]
     res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{not attributes here}\n")
     assert "{not attributes here}" in "".join(lines(res))
 

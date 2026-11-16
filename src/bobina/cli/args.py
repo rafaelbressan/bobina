@@ -42,6 +42,7 @@ TEXT
     on the line under it, all in one {…}: style=plain|receipt|lines|grid|header-invert|zebra
     font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
     a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (docs/guides/tables.md)
+    a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
 

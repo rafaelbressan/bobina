@@ -186,9 +186,10 @@ def test_a_column_setting_in_a_body_cell_is_said_and_not_printed(key):
     assert res.nudges[0].line == 3 and "{" not in "".join(lines(res))
 
 
-def test_a_body_cell_brace_without_column_settings_stays_text():
-    res = build("| A | B |\n|---|---|\n| x | {.bold} |\n")
-    assert lines(res)[1].endswith("{.bold}") and not codes(res)
+def test_a_body_cell_brace_with_only_an_id_or_nothing_stays_text():
+    for brace in ("{}", "{#x}"):
+        res = build(f"| A | B |\n|---|---|\n| x | y {brace} |\n")
+        assert lines(res)[1].endswith(f"y {brace}") and not codes(res)
 
 
 @pytest.mark.parametrize("value", ["abc", "-3ch", "0", "0ch", "0.5ch", "9 ch"])
@@ -213,8 +214,8 @@ def test_an_unknown_key_in_a_title_cell_is_an_unknown_key():
 
 
 def test_other_names_in_a_title_cell_do_nothing_and_say_so():
-    res = build("| A {.bold align=right} | B |\n|---|---|\n| x | y |\n")
-    assert said(res, "M101") == [".bold, align= at the end of a title cell do nothing"]
+    res = build("| A {.compact align=right} | B |\n|---|---|\n| x | y |\n")
+    assert said(res, "M101") == [".compact, align= at the end of a title cell do nothing"]
 
 
 # --- L108: bobina check says the width each column got -------------------------------------------------------------
@@ -379,8 +380,8 @@ def test_an_escaped_brace_at_the_end_of_a_cell_stays_text():
 
 
 def test_a_real_brace_a_title_cell_does_not_take_is_still_said():
-    res = build("| A {.bold} | B \\| C {width=3ch} |\n|---|---|\n| x | y |\n")
-    assert said(res, "M101") == [".bold at the end of a title cell does nothing"]
+    res = build("| A {.flip} | B \\| C {width=3ch} |\n|---|---|\n| x | y |\n")
+    assert said(res, "M101") == [".flip at the end of a title cell does nothing"]
     assert notes(res) == ["column widths: A 28 · B | C 3 (+1 gap = 32 of 32)"]  # an escaped pipe splits nothing
 
 

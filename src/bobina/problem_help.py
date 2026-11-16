@@ -133,6 +133,10 @@ FIX = {
     "M101": "Check the attribute name (bobina help format).",
     "M102": "Use a block type bobina knows (bobina help format); the block printed as plain text.",
     "M103": "Nothing to do yet: the attribute is ignored.",
+    "M104": (
+        "It prints as written. To keep the table a table on GitHub and Obsidian, use style=header-invert on the "
+        "table's {…} line, or the classes at the end of each title cell: | Item {.invert} | Price {.invert} |."
+    ),
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
     "M121": "Raw blocks cannot come from data: put them in the document.",
     "M122": "Images cannot come from data values: put the image in the document.",
