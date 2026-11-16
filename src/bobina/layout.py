@@ -25,7 +25,7 @@ PAY_HINT = 'write ```pay {scheme=pix to="your key" name="Shop" city="Rio" amount
 # no glyph for them, so the whole line would become an image. They print as a plain space.
 SPACES = str.maketrans({c: " " for c in "\u00a0\u2007\u2009\u202f\u2002\u2003\u205f"})
 CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # never let text carry printer commands
-SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")
+SIZE_RE = rasterfont.SIZE_RE
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
@@ -210,7 +210,6 @@ class Layout:
         lang = str(meta.get("locale") or meta.get("lang") or "")
         self.scripts = scriptfonts.Resolver(nudges, lang)  # fonts for other scripts, downloaded once
         self.bars: tuple[int, ...] = ()  # the column (at 1x) of the bar of each quote being laid out, outermost first
-        self.used: set[str] = set()  # features not tested on paper this job drew (features.py): P301
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -803,7 +802,8 @@ class Layout:
             im = im.crop(((im.width - self.W) // 2, 0, (im.width - self.W) // 2 + self.W, im.height))
         align = attrs.kv.get("align") or next((x for x in ("left", "right", "center") if attrs.has(x)), "center")
         bw = im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
-        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated")
+        marks = tuple(sorted({u for r in rows if isinstance(r, BitmapRow) for u in r.untested}))  # P301 stays
+        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks)
 
     def _block(self, b, indent: int) -> list:
         if isinstance(b, Heading):
@@ -1506,7 +1506,6 @@ class Layout:
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted titles at {ink.px}px close up", self.said_at(t, "style="),
                        "use size=20px or more, or style=receipt", "R2-12")  # fmt: skip
-        look = _Look(style, ink)
         ncol = len(t.header)
         cols = [[*([head[i]] if head else []), *(r[i] for r in body if i < len(r))] for i in range(ncol)]
         natural = [max([0, *(ink.units(c) for c in col)]) for col in cols]
@@ -1524,12 +1523,14 @@ class Layout:
             self.n.add("M101", "orientation=vertical: only a table outside quotes and lists turns",
                        self.said_at(t, "orientation="), "move the table out of the quote or list")  # fmt: skip
         if orientation == "vertical" and not indent:
-            return self.table_turned(t, head, body, natural, look)
+            return self.table_turned(t, head, body, natural, style, ink)
         # each way of printing it says its own problems; only the one that prints is heard
         floors = (longest, in_body)
-        standing, said = self.trial(lambda: self.table_standing(t, head, body, natural, floors, indent, cap, look))
+        standing, said = self.trial(
+            lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink)
+        )
         if orientation == "auto" and not indent and sum(min(w, TABLE_MIN) for w in natural) > cap:
-            turned, said_turned = self.trial(lambda: self.table_turned(t, head, body, natural, look))
+            turned, said_turned = self.trial(lambda: self.table_turned(t, head, body, natural, style, ink))
             along = self.rows_height(turned)
             # never metres of paper where a few wrapped lines do: up to twice the standing length, or TURN_FREE_MM;
             # but columns of fewer than TABLE_MIN / 2 characters on average cannot be read standing: always turned
@@ -1599,10 +1600,10 @@ class Layout:
         return "plain"
 
     def table_font(self, t: Table) -> tuple[str, int] | None:
-        """(family, px) when the table's {…} line gives font= or size=: it is drawn in that font, as a raster
-        paragraph is; 2x and 1x2 are the printer font's height times that. size= alone keeps the body font; with
-        the printer font it is Terminus (made for small sizes), or the printer font's own look (Spleen, cut for
-        its height) at a whole multiple of that height. None: the printer font, natively."""
+        """(family, px) when the table's {…} line gives font= or size=: it is drawn in that font at that size, as
+        a raster paragraph is (rasterfont.px_for). size= alone keeps the body font; with the printer font it is
+        Terminus (made for small sizes), or the printer font's own look (Spleen, cut for its height) at a whole
+        multiple of that height. None: the printer font, natively."""
         kv = t.attrs.kv
         if "font" not in kv and "size" not in kv:
             return None
@@ -1610,15 +1611,7 @@ class Layout:
         size = str(kv.get("size") or "")
         if fam.lower() == "native" and not size:
             return None
-        m = SIZE_RE.match(size)
-        at = self.said_at(t, "size=")
-        if m:
-            px = self.p.cell[1] * int(m.group(2) or m.group(1))
-        else:
-            if size and not (size in rasterfont.SIZES_MM or UNIT_RE.match(size) or size.isdigit()):
-                self.n.add("M101", f"size={size}: not a size", at, "16px, 2mm, small, normal, large or 2x")
-                size = ""
-            px = rasterfont.px_for(size or self.size, self.p, 20, self.n, at)
+        px = rasterfont.px_for(size or self.size, self.p, 20, self.n, self.said_at(t, "size="))
         if fam.lower() == "native":
             fam = "Spleen" if px % self.p.cell[1] == 0 else "Terminus"
         return fam, px
@@ -1643,7 +1636,7 @@ class Layout:
 
         return preview.heights(rows, self.p, self.em)
 
-    def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, look: _Look) -> list:
+    def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, style: str, ink) -> list:
         """Columns as wide as their text; when the paper is narrower, the widest gives way first, down to its longest
         word (`longest`: with the header's, else the body's only, else the body's with its longest words cut), so a
         header word gives way before any data word: a cut word is said (L101)."""
@@ -1665,10 +1658,10 @@ class Layout:
         free = cap - sum(widths)  # a .compact table is narrower than the paper: .center and .right place it
         place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") else 0
-        geo = _Geo.of(t, look, widths, self.W, indent * self.p.cell[0] + look.ink.dots(shift))
-        heads = self.table_wrap(t, head, widths, look.ink) if head else []
-        top, groups, bottom = self.table_pieces(heads, [self.table_wrap(t, r, widths, look.ink) for r in body], geo)
-        return [self.table_row(p, geo, indent, shift) for p in [*top, *(p for g in groups for p in g), *bottom]]
+        geo = _Geo.of(t, style, ink, widths, self.W, indent * self.p.cell[0] + ink.dots(shift))
+        top, groups, between, bottom = self.table_pieces(*self.table_rows(t, head, body, widths, ink), geo)
+        pieces = [*top, *(p for k, g in enumerate(groups) for p in [*(between if k else []), *g]), *bottom]
+        return [self.table_row(p, geo, indent, shift) for p in pieces]
 
     def table_wrap(self, t: Table, cells_row: list[list[Cell]], widths: list[int], ink) -> list[_TLine]:
         """One table row as printed lines: each cell wrapped at its spaces to its width (in the ink's measure) and
@@ -1690,47 +1683,48 @@ class Layout:
             )  # fmt: skip
             for i in range(ncol)
         ]
-        out = []
-        for k in range(max(len(p) for p in wrapped)):
-            segs = [wrapped[i][k] if k < len(wrapped[i]) else [] for i in range(ncol)]
-            out.append(_TLine(_padded(t, segs, widths), segs))
-        return out
+        return [_TLine([], [wrapped[i][k] if k < len(wrapped[i]) else [] for i in range(ncol)])
+                for k in range(max(len(p) for p in wrapped))]  # fmt: skip
 
-    def table_lines(self, t: Table, cells_row: list[list[Cell]], widths: list[int]) -> list[list[Cell]]:
-        """One table row as lines of cells on the printer font's grid (table_wrap)."""
-        return [ln.cells for ln in self.table_wrap(t, cells_row, widths, _NativeInk(self))]
+    def table_rows(self, t: Table, head, body, widths: list[int], ink) -> tuple[list[_TLine], list[list[_TLine]]]:
+        """The title's lines and each body row's lines (table_wrap), each also on a grid of character columns: the
+        printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as the
+        widest text in them, so the terminal views show every column of it, lined up."""
+        heads = self.table_wrap(t, head, widths, ink) if head else []
+        groups = [self.table_wrap(t, r, widths, ink) for r in body]
+        every = [*heads, *(ln for g in groups for ln in g)]
+        grid = widths if ink.native else [max([0, *(columns(ln.segs[i]) for ln in every)]) for i in range(len(widths))]
+        for ln in every:
+            ln.cells = _padded(t, ln.segs, grid)
+        return heads, groups
 
-    def table_pieces(self, head: list[_TLine], body: list[list[_TLine]], geo: _Geo) -> tuple[list, list, list]:
-        """What a style= draws: (the pieces before the body, the pieces of each body row, the pieces after it). A
-        piece is ("line", line): a line of text, native when the ink is the printer font; ("rule", style, pad): a
-        divider across the canvas; ("image", image, lines): a drawn piece and the lines it shows. A table without
-        titles gets no title band or rule."""
+    def table_pieces(self, head: list[_TLine], body: list[list[_TLine]], geo: _Geo) -> tuple[list, list, list, list]:
+        """What a style= draws: (the pieces before the body, the pieces of each body row, the pieces between two
+        rows of the same block, the pieces after the body). A piece is ("line", line): a line of text, native when
+        the ink is the printer font; ("rule", style, pad): a divider across the canvas; ("image", image, lines,
+        kind): a drawn piece, the lines it shows, and its kind ("drawn", "band": white on black, "zebra": on grey
+        dots, not tested on paper). A table without titles gets no title band or rule."""
         style = geo.style
 
         def lines(ls):
             return [("line", ln) for ln in ls]
 
         if style == "grid":
-            top = [("image", self.grid_piece([], geo), [])]
-            top += [("image", self.grid_piece(head, geo), head)] if head else []
-            return top, [[("image", self.grid_piece(g, geo), g)] for g in body], []
+            top = [("image", self.grid_piece([], geo), [], "drawn")]
+            top += [("image", self.grid_piece(head, geo), head, "drawn")] if head else []
+            return top, [[("image", self.grid_piece(g, geo), g, "drawn")] for g in body], [], []
         top: list = []
         if head and style == "receipt":
             top = [("rule", "dashed", 3), *lines(head), ("rule", "dashed", 3)]
         elif head and style == "header-invert":
-            top = [("image", self.table_band(head, geo), head)]
+            top = [("image", self.table_band(head, geo), head, "band")]
         elif head:
             top = [*lines(head), ("rule", "solid", 3)]
-        groups = []
-        for k, g in enumerate(body):
-            piece = lines(g)
-            if style == "zebra" and k % 2:
-                self.used.add("zebra")
-                piece = [("image", self.table_shaded(g, geo), g)]
-            if style == "lines" and k:
-                piece = [("rule", "dotted", 2), *piece]
-            groups.append(piece)
-        return top, groups, []
+        groups = [
+            [("image", self.table_shaded(g, geo), g, "zebra")] if style == "zebra" and k % 2 else lines(g)
+            for k, g in enumerate(body)
+        ]
+        return top, groups, [("rule", "dotted", 2)] if style == "lines" else [], []
 
     def table_canvas(self, lines: list[_TLine], geo: _Geo, top: int = 0, extra: int = 0) -> Image.Image:
         """The lines drawn one under the other on a white canvas as wide as the paper (or the turned table), `top`
@@ -1787,12 +1781,13 @@ class Layout:
             return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
+        drawn = "drawn" if kind == "line" else piece[3]
         pad = [Cell(" ")] * shift if geo.ink.native else []
-        view = [TextRow(self.view_with_bars((pad + ln.cells)[: self.cols - indent], indent), (1, 1), "left", t.line)
-                for ln in lines]  # fmt: skip
-        return BitmapRow(self.draw_bars(im, indent, 0), t.line, "text", view)
+        view = [TextRow([*self.lead(indent), *pad, *ln.cells], (1, 1), "left", t.line) for ln in lines]
+        return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if drawn == "band" else "drawn", view,
+                         untested=("zebra",) if drawn == "zebra" else ())  # fmt: skip
 
-    def table_turned(self, t: Table, head, body, natural: list[int], look: _Look) -> list:
+    def table_turned(self, t: Table, head, body, natural: list[int], style: str, ink) -> list:
         """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
         right, the text read from top to bottom, the paper's length as the table's width. Cells never wrap (the
         length is free); when the rows do not fit across the paper they go on in more turned blocks, the header
@@ -1800,13 +1795,14 @@ class Layout:
         terminal views."""
         align = self.object_align(t.attrs)
         widths = [max(1, w) for w in natural]
-        geo = _Geo.of(t, look, widths, None, 0)
-        heads = self.table_wrap(t, head, widths, look.ink) if head else []
-        top, groups, bottom = self.table_pieces(heads, [self.table_wrap(t, r, widths, look.ink) for r in body], geo)
-        top_im, end_im = ([self.piece_image(p, geo) for p in ps] for ps in (top, bottom))
+        geo = _Geo.of(t, style, ink, widths, None, 0)
+        heads, rows = self.table_rows(t, head, body, widths, ink)
+        top, groups, between, bottom = self.table_pieces(heads, rows, geo)
+        top_im, sep_im, end_im = ([self.piece_image(p, geo) for p in ps] for ps in (top, between, bottom))
+        sep_h = sum(p.height for p in sep_im)
         drawn = [[self.piece_image(p, geo) for p in g] for g in groups]
         top_h = sum(p.height for p in top_im + end_im)
-        row_h = sum(p.height for p in drawn[0]) if drawn else look.ink.line_h
+        row_h = sum(p.height for p in drawn[0]) if drawn else ink.line_h
         avail = min(self.object_width(t.attrs.kv.get("width"), self.said_at(t, "width=")) or self.W, self.W)
         if avail < top_h + row_h:  # not even the header and one row across: the paper's width instead
             self.n.add("M101", f"width={t.attrs.kv.get('width')}: too narrow for a turned table",
@@ -1814,16 +1810,16 @@ class Layout:
             avail = self.W
         chunks: list[list[int]] = [[]]
         used = top_h
-        for k, g in enumerate(drawn):
+        for k, g in enumerate(drawn):  # the rules between rows only between two rows of the same block
             h = sum(p.height for p in g)
-            if chunks[-1] and used + h > avail:
+            if chunks[-1] and used + sep_h + h > avail:
                 chunks.append([])
                 used = top_h
+            used += h + (sep_h if chunks[-1] else 0)
             chunks[-1].append(k)
-            used += h
         out = []
         for n, chunk in enumerate(chunks):
-            parts = top_im + [p for k in chunk for p in drawn[k]] + end_im
+            parts = top_im + [p for j, k in enumerate(chunk) for p in [*(sep_im if j else []), *drawn[k]]] + end_im
             im = imaging.vstack(parts, geo.width)
             turned = im.rotate(-90, expand=True)  # clockwise: the header (the top) goes to the right
             if turned.width > self.W:  # wider than the paper even so (a huge font): never past its edge
@@ -1836,7 +1832,8 @@ class Layout:
                 TextRow(ln.cells, (1, 1), "left", t.line)
                 for ln in heads + [ln for k in chunk for ln in _body_lines(groups[k])]
             ]
-            out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table", view))
+            marks = tuple(sorted({p[3] for k in chunk for p in groups[k] if p[0] == "image" and p[3] == "zebra"}))
+            out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table", view, untested=marks))
         return out
 
     def piece_image(self, piece, geo: _Geo) -> Image.Image:
@@ -1857,13 +1854,18 @@ def _bw(im: Image.Image) -> Image.Image:
     return im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
 
 
+def _offset(t: Table, i: int, free: int) -> int:
+    """How far into its column the text of column i starts, `free` being the room it leaves (:-- --: :-:)."""
+    return {"right": free, "center": free // 2}.get(t.aligns[i] if i < len(t.aligns) else "left", 0)
+
+
 def _padded(t: Table, segs: list[list[Cell]], widths: list[int]) -> list[Cell]:
     """A table line on the column grid: each cell's text aligned in its width, one column of space between cells."""
     ncol, line = len(widths), []
     for i in range(ncol):
         s = segs[i]
         free = widths[i] - columns(s)
-        left = {"right": free, "center": free // 2}.get(t.aligns[i] if i < len(t.aligns) else "left", 0)
+        left = _offset(t, i, free)
         line += [Cell(" ")] * left + s + [Cell(" ")] * (free - left) + ([Cell(" ")] if i < ncol - 1 else [])
     while line and line[-1] == Cell(" "):
         line.pop()
@@ -1877,12 +1879,6 @@ class _TLine:
 
     cells: list[Cell]
     segs: list[list[Cell]]
-
-
-@dataclass
-class _Look:
-    style: str
-    ink: _NativeInk | _FontInk
 
 
 @dataclass
@@ -1901,11 +1897,11 @@ class _Geo:
     pad: int
 
     @classmethod
-    def of(cls, t: Table, look: _Look, widths: list[int], width: int | None, x0: int) -> _Geo:
-        ink = look.ink
-        pad = ink.unit // 2 if look.style == "grid" else 0
+    def of(cls, t: Table, style: str, ink: _NativeInk | _FontInk, widths: list[int], width: int | None, x0: int):
+        """width None: the table's own width (turned)."""
+        pad = ink.unit // 2 if style == "grid" else 0
         inner = ink.dots(sum(widths) + len(widths) - 1)
-        return cls(t, look.style, ink, widths, inner + 2 * pad if width is None else width, x0, inner, pad)
+        return cls(t, style, ink, widths, inner + 2 * pad if width is None else width, x0, inner, pad)
 
     def strip(self, ln: _TLine) -> Image.Image:
         return self.ink.strip(self.t, ln, self.widths, self.inner)
@@ -2000,9 +1996,7 @@ class _FontInk:
         im = Image.new("L", (width, self.line_h), 255)
         x64 = 0
         for i, seg in enumerate(ln.segs):
-            free = widths[i] * self.scale - self.measure(seg)
-            left = {"right": free, "center": free // 2}.get(t.aligns[i] if i < len(t.aligns) else "left", 0)
-            self.draw(im, x64 + max(0, left), seg)
+            self.draw(im, x64 + max(0, _offset(t, i, widths[i] * self.scale - self.measure(seg))), seg)
             x64 += (widths[i] + 1) * self.scale
         return im
 

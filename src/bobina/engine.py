@@ -177,9 +177,9 @@ class NothingToPrint(JobError):
     code = "E304"
 
 
-def _note_untested(prof, rows, nudges, drawn: set[str] = frozenset()) -> None:
-    """P301 once per label when it uses a feature nobody has seen on paper yet (features.py); drawn: the ones the
-    layout drew (a zebra table)."""
+def _note_untested(prof, rows, nudges) -> None:
+    """P301 once per label when it uses a feature nobody has seen on paper yet (features.py): the profile's, and
+    the ones a row says it draws (a zebra table)."""
     from . import features
     from .profile import plain_ascii
     from .rows import BarcodeRow
@@ -193,7 +193,8 @@ def _note_untested(prof, rows, nudges, drawn: set[str] = frozenset()) -> None:
         used.append("cutter")
     if "native-barcode-imported" in on and any(isinstance(r, BarcodeRow) for r in rows):
         used.append("native-barcode-imported")
-    used += [f for f in features.FEATURES if f in drawn and f in features.untested()]
+    drawn = {u for r in rows if isinstance(r, BitmapRow) for u in r.untested}
+    used += [f for f in features.untested() if f in drawn]
     if used:
         names = "; ".join(features.FEATURES[u]["title"] for u in used)
         nudges.add("P301", f"not tested on paper yet: {names}", None, "look at the result (docs/TESTED.md)")
@@ -288,11 +289,10 @@ def build(
             labels=labels, quiet_names=frozenset(empty_required), locale=choice,
         )  # fmt: skip
         doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta)
-    lay = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs)
-    rows = lay.run()
+    rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")
-    _note_untested(prof, rows, nudges, lay.used)
+    _note_untested(prof, rows, nudges)
     own = meta.get("allow") or []
     if isinstance(own, str):  # allow: L102 or allow: F301,L101, as on the command line
         own = re.split(r"[,\s]+", own)

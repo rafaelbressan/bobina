@@ -39,6 +39,9 @@ TEXT
   a line with only {.compact} applies to the block above (e.g. a table)
   - item · 1. item · - [ ] todo · - [x] done (struck; tasks: {done: check|plain})
   | table |  (stretches to the paper; {.compact} narrow; {orientation=vertical} turned)    > quote
+    on the line under it, all in one {…}: style=plain|receipt|lines|grid|header-invert|zebra
+    font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
+    (docs/guides/tables.md)
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
 

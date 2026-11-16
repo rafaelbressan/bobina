@@ -8,6 +8,7 @@ by measuring the stem."""
 from __future__ import annotations
 
 import dataclasses
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ from PIL import Image, ImageDraw, ImageFont
 from . import paths
 
 SIZES_MM = {"small": 1.5, "normal": 2.5, "large": 3.5, "title": 5.0, "huge": 8.0}
+SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")  # 2x, 1x2: the printer font's multipliers (width x height)
+SIZE_HINT = "16px, 2mm, small, normal, large, title, huge or 2x"
 
 # family -> (regular, bold) bundled files
 BUNDLED = {
@@ -81,7 +84,14 @@ PX_MIN, PX_MAX = 6, 400  # 400 px = 50 mm: taller than the paper is wide
 
 
 def px_for(size: str | None, profile, default_px: int = 20, nudges=None, line: int | None = None) -> int:
+    """A raster font's size in dots, the same for every block that draws text: a name (small…huge, physical), Npx,
+    Nmm, N, or a printer multiplier (2x, 1x2: the printer font's height times the second digit). Out of range:
+    clamped (F205); not a size: default_px (M101)."""
     px = _px(size, profile, default_px)
+    if px is None:
+        if nudges is not None:
+            nudges.add("M101", f"size={size}: not a size", line, SIZE_HINT)
+        return default_px
     if PX_MIN <= px <= PX_MAX:
         return px
     clamped = min(max(px, PX_MIN), PX_MAX)
@@ -90,19 +100,22 @@ def px_for(size: str | None, profile, default_px: int = 20, nudges=None, line: i
     return clamped
 
 
-def _px(size, profile, default_px: int) -> int:
+def _px(size, profile, default_px: int) -> int | None:
     if not size:
         return default_px
     s = str(size)
     if s in SIZES_MM:
         return profile.mm_to_dots(SIZES_MM[s])
-    if s.endswith("px") and s[:-2].replace(".", "").isdigit():
+    if s.endswith("px") and s[:-2].replace(".", "", 1).isdigit():
         return int(float(s[:-2]))
-    if s.endswith("mm") and s[:-2].replace(".", "").isdigit():
+    if s.endswith("mm") and s[:-2].replace(".", "", 1).isdigit():
         return profile.mm_to_dots(float(s[:-2]))
     if s.isdigit():
         return int(s)
-    return default_px
+    m = SIZE_RE.match(s)
+    if m:
+        return profile.cell[1] * int(m.group(2) or m.group(1))
+    return None
 
 
 def stem_width(path: str, size: int) -> int:

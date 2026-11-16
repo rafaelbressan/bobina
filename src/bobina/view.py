@@ -122,6 +122,9 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1) -> list[s
             out.append(TURNED_TABLE.center(cols, "┄")[:cols])
             for tr in r.text_rows:
                 out += [ln[:cols] for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
+        elif isinstance(r, BitmapRow) and r.kind == "drawn" and r.text_rows:  # a table drawn as an image: its text
+            for tr in r.text_rows:
+                out += text_lines(tr, cols, color)
         elif isinstance(r, BitmapRow) and r.text_rows:
             for tr in r.text_rows:
                 inv = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)

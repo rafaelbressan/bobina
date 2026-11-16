@@ -31,7 +31,7 @@ def dividers(res) -> list:
 
 
 def drawn(res) -> list:
-    return [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "text"]
+    return [r for r in res.rows if isinstance(r, BitmapRow) and r.kind in ("drawn", "band")]
 
 
 def ink(im) -> int:
@@ -336,3 +336,92 @@ def test_a_grid_in_a_quote_keeps_the_quote_bar():
     piece = drawn(res)[1].image.convert("L")
     assert any(piece.getpixel((5, y)) < 128 for y in range(piece.height))  # the bar, in the quote's gutter
     assert "M101" not in codes(res)
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("size", ["0x", "1x0", "0"])
+def test_a_size_of_nothing_is_clamped_never_a_failed_job(size):
+    for doc in (BILL + "{size=" + size + "}\n", "Hello {font=Terminus size=" + size + "}\n"):
+        res = build(doc)
+        assert "F205" in codes(res) and res.rows, doc
+
+
+def test_a_size_means_the_same_in_a_table_and_in_a_paragraph():
+    def height(doc):
+        im = build(doc).image.convert("L")
+        box = im.point(lambda v: 255 - v).getbbox()
+        return box[3] - box[1]
+
+    assert height("W {font=Terminus size=2x}\n") == height("W {font=Terminus size=48px}\n")  # was 20px, silently
+    table = styled("| W |\n|---|\n| W |\n", "font=Terminus size=2x")
+    assert table.image.tobytes() == styled("| W |\n|---|\n| W |\n", "font=Terminus size=48px").image.tobytes()
+    for doc in ("Hello {font=Terminus size=tiny}\n", BILL + "{size=tiny}\n"):
+        assert any(n.code == "M101" and "size=tiny: not a size" in n.message for n in build(doc).nudges), doc
+
+
+def view_of(res) -> list[str]:
+    from bobina import view
+
+    return view.lines(res.rows, res.profile, color=True)
+
+
+@pytest.mark.parametrize("attrs", ["style=grid", "style=zebra", "font=Terminus size=16px"])
+def test_a_drawn_table_reads_as_plain_text_in_the_terminal(attrs):
+    shown = view_of(styled(BILL, attrs))
+    assert not any("\x1b[7m" in ln for ln in shown)  # reverse video is for white-on-black bands only
+    assert any("Cheese" in ln for ln in shown)
+
+
+def test_only_the_header_invert_band_reads_reversed_in_the_terminal():
+    import re
+
+    shown = view_of(styled(BILL, "style=header-invert"))
+    assert [re.sub(r"\x1b\[[0-9;]*m", "", ln).split() for ln in shown if "\x1b[7m" in ln] == [["Item", "Qty", "Price"]]
+
+
+def test_the_view_of_a_table_in_a_font_shows_every_column_lined_up():
+    res = styled(BILL, "font=Terminus size=small")
+    shown = [ln for r in drawn(res) for ln in ("".join(c.ch for c in t.cells) for t in r.text_rows)]
+    assert [ln.split() for ln in shown] == [["Item", "Qty", "Price"], ["Espresso", "2", "9,00"],
+                                            ["Cheese", "bread", "1", "39,00"], ["Pie", "1", "28,00"],
+                                            ["Water", "3", "12,00"]]  # fmt: skip
+    assert len({len(ln.rstrip()) for ln in shown}) == 1  # the price column, right-aligned, ends in one place
+
+
+def test_a_turned_lines_table_has_no_dotted_rule_under_the_titles_of_any_block():
+    rows = "".join(f"| item {k} | {k} |\n" for k in range(12))
+    table = "| Item | Qty |\n|---|--:|\n" + rows
+
+    def blocks(attrs):
+        res = styled(table, attrs + " orientation=vertical width=200")
+        out = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "table"]
+        boxes = [r.image.convert("L").point(lambda v: 255 - v).getbbox() for r in out]
+        return [(len(r.text_rows) - 1, box[2] - box[0]) for r, box in zip(out, boxes, strict=True)]
+
+    plain = blocks("style=plain")  # titles and n rows: top + n * row dots along the paper
+    (n1, w1), (n2, w2) = plain[0], plain[-1]
+    row = (w1 - w2) // (n1 - n2)
+    top = w1 - n1 * row
+    lines = blocks("style=lines")
+    assert len(lines) > 1
+    for n, w in lines:  # a dotted rule (6 dots) between two rows of a block, none right under its titles
+        assert w == top + n * row + 6 * (n - 1)
+
+
+def test_zebra_is_marked_on_the_rows_that_draw_it_even_turned_or_rotated():
+    res = styled(BILL, "style=zebra")
+    assert [r.untested for r in res.rows if isinstance(r, BitmapRow) and r.untested] == [("zebra",)] * 2
+    for attrs in ("style=zebra orientation=vertical", "style=zebra rotate=90"):
+        assert "P301" in codes(styled(BILL, attrs)), attrs
+    assert "P301" not in codes(styled(BILL, "style=grid rotate=90"))
+
+
+def test_the_format_cheat_sheet_shows_what_a_table_takes(capsys):
+    from bobina import cli
+
+    cli.main(["help", "format"])
+    out = capsys.readouterr().out
+    assert "style=plain|receipt|lines|grid|header-invert|zebra" in out
+    assert "font=Terminus size=16px" in out and "48 columns on 58 mm" in out and "| | |" in out

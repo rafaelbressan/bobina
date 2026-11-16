@@ -48,6 +48,7 @@ class BitmapRow:
     line: int = 0
     kind: str = "image"
     text_rows: list | None = None  # for text drawn as an image (inverted bands): shown as text in views
+    untested: tuple[str, ...] = ()  # features not tested on paper it draws (features.py, "zebra"): note P301
 
 
 @dataclass
