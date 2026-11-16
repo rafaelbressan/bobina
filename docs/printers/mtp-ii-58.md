@@ -69,11 +69,11 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | QR ECC L | ⚠️ | read with difficulty | only on request |
 | PDF417 (`GS ( k` cn 48) | ❌ | prints the bytes as text | 🖼️ raster works |
 | Data Matrix | — | raster module 4+ read | 🖼️ |
-| Pix (BR Code) as native QR | ✅ | read by banking apps (CPF, e-mail, phone keys) | native |
+| Pix (BR Code) as native QR | ✅ | read by banking apps (CPF, e-mail, phone keys) | native up to version 7, 🖼️ above |
 | **Vertical barcode** (raster, bars across the paper) | — | modules 2 and 3 **did not scan**, **4 did**: the feed direction blurs (whole heated lines in a row close thin gaps) | module ≥ 4 + 10-module quiet zone |
 
-**The native QR has no module size.** Paper 13/11, photographed 16/11 next to a raster QR ruler (25 modules × 6
-dots = 150 dots), each code decoded with OpenCV to count its modules:
+**The native QR has no module size.** Strips of 13/11 and 16/11, photographed next to a raster QR ruler (25 modules
+× 6 dots = 150 dots), each code decoded with OpenCV to count its modules:
 
 | Content needs | Module parameter sent (`GS ( k` fn 167) | Printed | Width |
 |---|---|---|---|
@@ -81,13 +81,19 @@ dots = 150 dots), each code decoded with OpenCV to count its modules:
 | version 2 | 6 · 8 | version 6, 41 modules | ~206 dots |
 | version 5 | 3 | version 5, 37 modules | ~187 dots |
 | version 5 | 6 · 8 | version 6, 41 modules | ~206 dots |
+| version 3 (100 digits, numeric mode) | 4 | version 4, 33 modules | ~165 dots |
+| version 7 | 4 | version 7, 45 modules | ~225 dots |
+| version 8 · version 10 | 4 | **no code**: the text `2QR CREAT ERR!` (16/11) | — |
 | (older strips) | 4 · 9 | version 4 · 6 | ~170 · ~210 dots |
 
 Every module is 5 dots. The parameter is read as the **minimum version**, capped at 6, and raised when the content
-needs more. Never tested: parameters 1–2, content above version 6. Profile `[qr]`: `native_module_param =
-"min_version"`, `native_module_dots = 5`, `native_max_version = 6`, `native_param_tested = [3, 9]`. bobina sends
-max(version needed, 3), the smallest code, and previews it as printed; `module=` or `width=` (the firmware cannot
-give that size) and content above version 6 print as an exact image instead (`Q113`).
+needs more, up to version 7; content needing version 8 or more prints the error text instead of a code. bobina
+before this measure sent such codes natively (module parameter 4), so they printed that text. 100 digits printed
+version 4 under parameter 4: the firmware uses numeric mode (bytes would need version 6) and bobina sizes with the
+same mode choice (segno). Profile `[qr]`: `native_module_param = "min_version"`, `native_module_dots = 5`,
+`native_param_max_version = 6`, `native_content_max_version = 7`, `native_param_tested = [3, 9]`. bobina sends
+max(version needed, 3), the smallest code, and previews it as printed. `width=` prints an exact image of that
+width; `module=` (a size the firmware cannot give) and content above version 7 print an exact image with `Q113`.
 
 ## Raster drawing rules
 
@@ -153,4 +159,5 @@ a grid; threshold is for line art. The dot-gain curve and the warm-up effect are
 
 ## Still to measure
 
-UPC-E with 8 digits, the dot-gain curve, native QR parameters 1–2 and content above version 6.
+UPC-E with 8 digits, the dot-gain curve, native QR parameters 1–2, and whether the native QR uses alphanumeric
+mode (upper-case content printed version 4 under parameter 4, the minimum it forces, so the test could not tell).

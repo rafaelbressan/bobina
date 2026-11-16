@@ -165,7 +165,7 @@ def test_qr_width_full_uses_largest_integer_module():
     r = [r for r in res.rows if isinstance(r, QRRow)][0]
     from bobina import imaging
 
-    n = len(imaging.qr_matrix("https://example.com/full", "M"))
+    n = len(imaging.qr_matrix("https://example.com/full", "M", 0))
     assert r.module == min(16, 384 // n) and (r.module + 1) * n > 384
 
 

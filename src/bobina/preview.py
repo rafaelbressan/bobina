@@ -23,7 +23,7 @@ def row_image(r, profile, em: Emulator):
     if isinstance(r, BitmapRow):
         return r.image
     if isinstance(r, QRRow):
-        return imaging.place(imaging.qr_image(r.data, r.module, r.ecc, version=r.version), W, r.align)
+        return imaging.place(imaging.qr_image(r.data, r.module, r.ecc, 0, r.version), W, r.align)
     if isinstance(r, BarcodeRow):
         return imaging.place(barcode_image(r, em), W, r.align)
     return None

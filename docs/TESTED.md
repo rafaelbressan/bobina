@@ -11,7 +11,7 @@ there with the evidence (printer, date, what was printed), and the mark and the 
 | Feature | Tested on paper | Where it is used |
 |---|---|---|
 | Native text, buttons and lists in UTF-8 | ✅ Goldensky MTP-II (docs/printers/mtp-ii-58.md) | the measured profile `mtp-ii-58` |
-| Raster images, QR (native and raster), codes on the MTP-II | ✅ MTP-II (its native QR: always 5-dot modules, versions 3–6, 13/11) | every profile |
+| Raster images, QR (native and raster), codes on the MTP-II | ✅ MTP-II (its native QR: always 5-dot modules, versions 3–7; version 8 and above print `2QR CREAT ERR!`, 13/11 and 16/11) | every profile |
 | Feeds after images as white raster rows (safe mode) | ✅ MTP-II, 08/11 | every profile not calibrated with `bobina calibrate feed` |
 | `--marks` cut and tear lines | ✅ MTP-II, 08/11 | any profile, when asked |
 | Label by label (`--step`): one send per label, the Bluetooth link closed while you tear | ✅ MTP-II, 13/11 (3 labels, 20 s and 60 s idle between them: each whole, above the tear bar) | any print of several labels at a terminal |

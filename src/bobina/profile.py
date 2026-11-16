@@ -13,6 +13,30 @@ from . import paths
 BUILTIN = "mtp-ii-58"
 
 
+@dataclass(frozen=True)
+class FixedQR:
+    """A native QR whose modules are always `dots` and whose module parameter is the minimum version (profile [qr]
+    native_module_param = "min_version"). The defaults are the MTP-II's, measured on paper."""
+
+    dots: int = 5  # every module, whatever is sent
+    param_max_version: int = 6  # the parameter is capped there: 6, 8 and 9 printed version 6
+    content_max_version: int = 7  # content needing more printed the firmware's "2QR CREAT ERR!" (8 and 10, 16/11)
+    tested: tuple[int, int] = (3, 9)  # the parameters printed (1 and 2 never)
+
+    def printed_version(self, needed: int, param: int) -> int:
+        """The version the firmware prints for content that needs version `needed`, sent `param`: the minimum,
+        capped at param_max_version, raised when the content needs more (3 → 3; 6, 8, 9 → 6)."""
+        return max(needed, min(param, self.param_max_version))
+
+    def code(self, needed: int) -> tuple[int, int] | None:
+        """(parameter to send, version printed) for the smallest code within the tested parameters; None when the
+        content needs more than the firmware prints (an image instead)."""
+        if needed > self.content_max_version:
+            return None
+        param = max(self.tested[0], min(self.tested[1], needed))
+        return param, self.printed_version(needed, param)
+
+
 @dataclass
 class Profile:
     id: str
@@ -37,24 +61,19 @@ class Profile:
         """Modules of a wide Code39 element in the firmware's GS k output (python-barcode draws 3)."""
         return int(self.get("barcode.code39_wide", 3))
 
-    def qr_fixed_module(self) -> int | None:
-        """Dots per module of the native QR when the firmware reads the module parameter (GS ( k fn 167) as the
-        minimum version and draws every module the same size (qr.native_module_param = "min_version"; MTP-II, paper
-        13/11). None: standard ESC/POS, the parameter is the module in dots."""
+    def qr_fixed(self) -> FixedQR | None:
+        """The native QR of a firmware that reads the module parameter (GS ( k fn 167) as the minimum version and
+        draws every module the same size (qr.native_module_param = "min_version"; MTP-II, paper 13/11 and 16/11).
+        None: standard ESC/POS, the parameter is the module in dots."""
         if self.get("qr.native_module_param") != "min_version":
             return None
-        return int(self.get("qr.native_module_dots", 5))
-
-    def qr_native_param(self, needed: int) -> int:
-        """The module parameter to send on such a firmware for content that needs version `needed`: the smallest code
-        within the tested range (qr.native_param_tested)."""
-        lo, hi = self.get("qr.native_param_tested", [3, 9])
-        return max(int(lo), min(int(hi), needed))
-
-    def qr_native_version(self, needed: int, param: int) -> int:
-        """The version such a firmware prints: the parameter is the minimum version, capped at qr.native_max_version,
-        and raised when the content needs more (measured: 3 → version 3; 6, 8, 9 → version 6)."""
-        return max(needed, min(param, int(self.get("qr.native_max_version", 6))))
+        lo, hi = self.get("qr.native_param_tested", FixedQR.tested)
+        return FixedQR(
+            dots=int(self.get("qr.native_module_dots", FixedQR.dots)),
+            param_max_version=int(self.get("qr.native_param_max_version", FixedQR.param_max_version)),
+            content_max_version=int(self.get("qr.native_content_max_version", FixedQR.content_max_version)),
+            tested=(int(lo), int(hi)),
+        )
 
     def get(self, dotted: str, default=None):
         cur = self.data

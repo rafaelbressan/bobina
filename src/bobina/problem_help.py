@@ -49,8 +49,8 @@ FIX = {
         "prints and the exit code is 9 (--allow Q112: 0)."
     ),
     "Q113": (
-        "Nothing to fix: the image prints exactly the size asked. For the printer's own code, remove module= and "
-        "width= (its modules are always 5 dots), or put less data in it. With render=native, module= and width= "
+        "Nothing to fix: the image prints exactly. For the printer's own code, remove module= (its modules are "
+        "always 5 dots) or put less data in it (it prints up to version 7). With render=native, module= and width= "
         "have no effect."
     ),
     # L layout
