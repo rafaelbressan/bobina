@@ -276,9 +276,9 @@ def test_check_says_each_distinct_set_of_widths_once_with_data(capsys, tmp_path)
 def test_percentages_are_of_the_text_room_and_100_percent_fills_it_without_l107():
     res = build("| A {width=50%} | B {width=50%} |\n|---|---|\n| x | y |\n")
     assert "L107" not in codes(res)
-    assert notes(res) == ["column widths: A 15 · B 15 (+1 gap = 31 of 32)"]  # 31 of text room: 15 + 15
+    assert notes(res) == ["column widths: A 16 · B 15 (+1 gap = 32 of 32)"]  # the text room, 31, filled
     res = build("| A {width=25%} | B {width=75%} |\n|---|---|\n| x | y |\n{font=Terminus size=16px}\n")
-    assert "L107" not in codes(res) and notes(res)[0].endswith("A 11 · B 35 (+1 gap = 47 of 48)")
+    assert "L107" not in codes(res) and notes(res)[0].endswith("A 12 · B 35 (+1 gap = 48 of 48)")
 
 
 def test_half_and_third_are_shares_of_the_text_room_too():
@@ -322,21 +322,30 @@ def test_a_table_in_a_quote_with_widths_that_cannot_stand_is_narrowed_not_overfl
 
 @pytest.mark.parametrize("profile", ["mtp-ii-58", "epson-tm-t20iii"])
 def test_no_combination_of_widths_runs_past_the_paper(profile):
+    """Random tables, some with wide characters (2 columns each, never split): no line passes the paper, a wide
+    character is never in a column narrower than itself, and a table that does not fit says it was cut."""
     import random
+    import unicodedata
+
+    def cols_of(text: str) -> int:
+        return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
     rng = random.Random(7)
-    for _ in range(60):
-        n = rng.randint(1, 9)
+    paper = 32 if profile == "mtp-ii-58" else 48
+    for _ in range(120):
+        n = rng.randint(1, 16)
         cols = [rng.choice([None, 1, 2, 3, 7, 12, 20, 40]) for _ in range(n)]
-        head = " | ".join(f"H{i}" + (f" {{width={w}ch}}" if w else "") for i, w in enumerate(cols))
-        body = " | ".join("x" * rng.randint(1, 9) for _ in cols)
+        head = " | ".join(f"H{i} {{width={f'{w}ch' if w else 'auto'}}}" for i, w in enumerate(cols))  # check says
+        body = " | ".join(rng.choice(["x" * rng.randint(1, 9), "字" * rng.randint(1, 3), "a字b"]) for _ in cols)
         doc = f"| {head} |\n|" + "---|" * n + f"\n| {body} |\n{{orientation=horizontal}}\n"
         res = build(doc, profile_name=profile)
-        paper = 32 if profile == "mtp-ii-58" else 48
-        assert all(len(ln) <= paper for ln in lines(res)), (cols, lines(res))
-        note = notes(res)[0]
-        used = int(note.rsplit("= ", 1)[1].split(" of")[0])
-        assert used <= paper or "cut at the paper's edge" in " ".join(said(res, "L107")), (cols, note)
+        assert all(cols_of(ln) <= paper for ln in lines(res)), (cols, body, lines(res))
+        widths = [int(w.rsplit(" ", 1)[1]) for w in notes(res)[0].split(": ", 1)[1].split(" (+")[0].split(" · ")]
+        for w, cell in zip(widths, body.split(" | "), strict=True):
+            assert "字" not in cell or w >= 2, (cols, body, widths)
+        used = sum(widths) + n - 1
+        cut = "cut at the paper's edge" in " ".join(said(res, "L107"))
+        assert used <= paper or cut, (cols, body, notes(res))
 
 
 def test_shrink_never_exceeds_its_room():
@@ -373,3 +382,76 @@ def test_a_real_brace_a_title_cell_does_not_take_is_still_said():
     res = build("| A {.bold} | B \\| C {width=3ch} |\n|---|---|\n| x | y |\n")
     assert said(res, "M101") == [".bold at the end of a title cell does nothing"]
     assert notes(res) == ["column widths: A 28 · B | C 3 (+1 gap = 32 of 32)"]  # an escaped pipe splits nothing
+
+
+# --- second review ---------------------------------------------------------------------------------------------
+
+
+def wide_table(n: int, extra: str = "") -> str:
+    return "| " + " | ".join(["字"] * n) + " |\n|" + "---|" * n + "\n| " + " | ".join(["字"] * n) + " |\n" + extra
+
+
+def test_a_column_with_a_wide_character_never_goes_below_2_and_a_table_that_cannot_keep_it_is_cut_and_says_so():
+    res = build(wide_table(12, "{orientation=horizontal}\n"))  # 12 x 2 + 11 gaps = 35 of 32: it cannot fit
+    assert "cut at the paper's edge" in said(res, "L107")[0] and "narrowed" not in said(res, "L107")[0]
+    assert all(len(ln) + ln.count("字") <= 32 for ln in lines(res))  # 字 takes 2 columns
+    fits = build(wide_table(10, "{orientation=horizontal}\n"))  # 10 x 2 + 9 = 29: every 字 whole
+    assert "L107" not in codes(fits) and [ln.count("字") for ln in lines(fits)] == [10, 10]
+
+
+def test_list_markers_before_a_row_do_not_shift_the_cells():
+    for marker in ("-", "1."):
+        pad = " " * (len(marker) + 1)
+        res = build(f"{marker} | A \\{{width=5ch}} | B {{width=4ch}} |\n{pad}|---|---|\n{pad}| x | y |\n")
+        assert lines(res)[0].lstrip(" •1.").startswith("A {width=5ch}"), (marker, lines(res))
+        assert not codes(res) and " · B 4 (+1 gap = " in notes(res)[0], (marker, notes(res))
+
+
+@pytest.mark.parametrize("profile", ["mtp-ii-58", "epson-tm-t20iii"])
+@pytest.mark.parametrize("shares", [["50%", "50%"], ["third"] * 3, ["25%"] * 4])
+def test_shares_adding_up_to_100_percent_fill_the_text_room(profile, shares):
+    head = " | ".join(f"C{i} {{width={w}}}" for i, w in enumerate(shares))
+    res = build(f"| {head} |\n|" + "---|" * len(shares) + "\n| " + " | ".join("x" for _ in shares) + " |\n",
+                profile_name=profile)  # fmt: skip
+    paper = 32 if profile == "mtp-ii-58" else 48
+    assert notes(res)[0].endswith(f"= {paper} of {paper})") and "L107" not in codes(res)
+
+
+@pytest.mark.parametrize("style", ["plain", "grid", "zebra", "header-invert"])
+def test_a_cut_table_is_cut_on_the_right_even_when_placed_right(style):
+    many = " | ".join(f"C{i}" for i in range(20))
+    res = build(f"| {many} |\n|" + "---|" * 20 + "\n| " + " | ".join(f"{i % 10}" for i in range(20)) + " |\n"
+                f"{{orientation=horizontal .right .compact style={style}}}\n")  # fmt: skip
+    assert lines(res)[-1].startswith("0 1 2 3"), lines(res)  # the first columns kept, the last ones cut
+    assert all(len(ln) <= 32 for ln in lines(res))
+    assert said(res, "L107") == ["a table of 20 columns needs at least 39 columns standing, the paper has 32: cut at "
+                                 "the paper's edge, even at its narrowest"] or style == "grid"  # fmt: skip
+
+
+def test_a_squeezed_table_says_l107_once_not_l101_for_every_word():
+    res = build(crowded("{orientation=horizontal}\n").replace("| ab |", "| abcdefgh |"))
+    assert "L107" in codes(res) and "L101" not in codes(res)
+
+
+def test_the_terminal_view_of_a_drawn_cut_table_stops_where_the_image_does():
+    many = " | ".join(f"C{i}" for i in range(20))
+    res = build(f"| {many} |\n|" + "---|" * 20 + "\n| " + " | ".join("x" for _ in range(20)) + " |\n"
+                "{orientation=horizontal style=grid}\n")  # fmt: skip
+    views = [r for r in res.rows if isinstance(r, BitmapRow) and r.text_rows]
+    assert views and all(len("".join(c.ch for c in v.cells)) <= 32 for r in views for v in r.text_rows)
+
+
+def test_an_empty_auto_column_costs_nothing_when_squeezed():
+    head = [f"F{i} {{width=3ch}}" for i in range(9)] + [" "]
+    table = "| " + " | ".join(head) + " |\n|" + "---|" * 10 + "\n| " + " | ".join(["abc"] * 9 + [" "]) + " |\n"
+    res = build(table + "{orientation=horizontal}\n")
+    used = int(notes(res)[0].rsplit("= ", 1)[1].split(" of")[0])
+    assert used <= 32 and notes(res)[0].split(" · ")[-1].startswith("column 10 0")
+
+
+def test_shrink_never_passes_its_room_even_below_one_each():
+    from bobina.layout import _shrink
+
+    for widths in ([1] * 10, [3, 3, 3], [40, 1, 1, 1, 1]):
+        for cap in range(0, len(widths) + 1):
+            assert sum(_shrink(widths, cap)) <= cap, (widths, cap)

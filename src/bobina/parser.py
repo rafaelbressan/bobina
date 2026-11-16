@@ -492,10 +492,13 @@ COLUMN_KEYS = ("width", "prefix", "suffix")  # a column's settings, at the end o
 COLUMN_HINT = 'a title cell takes width=, prefix= and suffix= for its column: | Price {width=9ch prefix="R$ "} |'
 
 
+ROW_PREFIX = re.compile(r"^(?:\s*(?:>|[-+*](?=\s)|\d{1,9}[.)](?=\s)))*\s*")  # what holds a table row: > - 1.
+
+
 def _raw_cells(line: str) -> list[str]:
     """A table row's source line in its cells as written (backslashes kept), split at the pipes GFM splits at:
-    the unescaped ones."""
-    s = re.sub(r"^[\s>]*", "", line).strip()
+    the unescaped ones. The container prefix before it goes first: quote bars and list markers (- * + 1. 1))."""
+    s = ROW_PREFIX.sub("", line).strip()
     s = s[1:] if s.startswith("|") else s
     s = s[:-1] if s.endswith("|") and not s.endswith("\\|") else s
     cells, cur, esc = [], "", False
