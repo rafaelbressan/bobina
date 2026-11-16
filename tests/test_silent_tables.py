@@ -1,4 +1,4 @@
-"""Things that printed wrong without a word (BRES-642): an attribute at the end of an inner line of a paragraph, inline
+"""Things that printed wrong without a word: an attribute at the end of an inner line of a paragraph, inline
 styles in table cells, cells cut in the middle of a word, table attributes that do nothing, and an attribute line
 right under a table."""
 
