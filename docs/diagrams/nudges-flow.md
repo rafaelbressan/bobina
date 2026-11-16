@@ -168,7 +168,8 @@ from this list.
 | `M120` | note | field rendered as Markdown |  |
 | `M121` | warning | raw block removed from a variable |  |
 | `M122` | warning | image removed from a --data/--set value |  |
-| `M123` | warning | a code block, ::: line or link definition removed from a --data/--set value |  |
+| `M123` | warning | code block, ::: line or link definition removed from data |  |
+| `M124` | warning | reserved characters removed from data |  |
 | `M130` | warning | undefined variable printed as empty |  |
 | `M131` | warning | required template field is empty |  |
 | `M140` | warning | counter passed its stop value |  |
@@ -218,7 +219,7 @@ from this list.
 | `L106` | note | table turned vertical to fit the paper (header on the right) |  |
 | `L107` | warning | table columns narrowed to fit the paper (widths scaled down, or too many columns) |  |
 | `L108` | note | the width each table column got (said by bobina check only) |  |
-| `L109` | warning | a box title on its border was cut (…) |  |
+| `L109` | warning | box border title cut (…) |  |
 
 ### Codes (QR, barcodes, Pix)
 

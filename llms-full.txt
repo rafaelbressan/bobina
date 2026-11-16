@@ -743,7 +743,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](docs/guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](docs/guides/table-cells.md); [receipts](docs/guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
-| `::: {.box}` … `:::` | a frame around blocks: [guides/layout.md](docs/guides/layout.md) ⚠ not tested on paper |
+| `::: {.box}` … `:::` | [guides/layout.md](docs/guides/layout.md) ⚠ not tested on paper |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](docs/guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
@@ -1165,7 +1165,7 @@ Nudges:
 | `L106` | note | table turned vertical |
 | `L107` | warning | table columns narrowed to fit the paper |
 | `L108` | note | the width each table column got (`check` only) |
-| `L109` | warning | a box title on its border was cut (…) |
+| `L109` | warning | box border title cut (…) |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
@@ -1198,7 +1198,8 @@ Nudges:
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed from a --data/--set value |
-| `M123` | warning | a code block, `:::` line or link definition removed from a --data/--set value |
+| `M123` | warning | code block, `:::` or link definition removed from data |
+| `M124` | warning | reserved characters removed from data |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |

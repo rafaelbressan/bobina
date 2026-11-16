@@ -157,6 +157,38 @@ class TaintedMd(MdSafe):
 
 
 TAINT_OPEN, TAINT_CLOSE = "\ue002", "\ue003"  # private use, next to the placeholders' (PH_OPEN, PH_CLOSE)
+RESERVED_CHARS = re.compile("[\ue000-\ue003]")  # bobina's own marks (PH_OPEN, PH_CLOSE, TAINT_OPEN, TAINT_CLOSE); icons
+# use another area (icons.PUA, Supplementary Private Use Area-B), untouched
+
+
+def clean_data(fields: dict | None, nudges: Nudges) -> dict | None:
+    """The data of a job (--data rows, --set, --ask answers, MCP and chat fields, joined sources) without the
+    characters bobina reserves for its own marks: a value can then never point at another value's text (a
+    placeholder) nor fake or cut the mark of data rendered as Markdown. Said once (M124) when some were there."""
+    found = False
+
+    def clean(v):
+        nonlocal found
+        if isinstance(v, str):
+            if not RESERVED_CHARS.search(v):
+                return v
+            found = True
+            out = RESERVED_CHARS.sub("", str.__str__(v))
+            return Tainted(out) if isinstance(v, Tainted) else out
+        if isinstance(v, dict):
+            return {k: clean(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return type(v)(clean(x) for x in v)
+        return v
+
+    out = clean(fields) if fields else fields
+    if found:
+        nudges.add(
+            "M124",
+            "characters bobina reserves for its own marks were removed from a --data/--set value",
+            suggestion="nothing to fix: they are private-use characters (U+E000 to U+E003) no text needs",
+        )
+    return out
 
 
 @dataclass

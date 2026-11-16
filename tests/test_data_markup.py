@@ -215,3 +215,31 @@ def test_plain_values_are_unchanged_and_the_authors_markdown_keeps_everything():
     assert [type(b) for b in res.doc.blocks] == [Paragraph] and not raws(res) and not codes(res)
     res = build("{{ v | markdown }}\n", fields={"v": "::: {.box}\n```qr\nhi\n```\n:::"})  # the author's own
     assert divs(res) and fences(res) and "M123" not in codes(res)
+
+
+# --- data never carries bobina's reserved characters -------------------------------------------------------------
+
+
+def printed(res) -> str:
+    from bobina import view
+
+    return "\n".join(view.lines(res.rows, res.profile))
+
+
+def test_a_value_with_a_placeholder_character_cannot_show_another_values_text():
+    res = md("A={{ a }}\n\nB={{ b }}\n", a="SECRET", b="0")
+    assert printed(res).count("SECRET") == 1 and "M124" in codes(res)
+    res = build("A={{ a }}\n\nB={{ b[0] }}\n", fields={"a": "SECRET", "b": ["0"]})  # in a list too
+    assert printed(res).count("SECRET") == 1 and "M124" in codes(res)
+
+
+def test_a_value_with_the_marks_of_data_cannot_fake_or_cut_one():
+    res = md("{{ d | markdown }}\n", d="x\n```raw\n1b 40\n```\ny")
+    assert not raws(res) and "M124" in codes(res) and "M121" in codes(res)
+    res = md("{{ d }}\n", d="abc")
+    assert "abc" in printed(res) and "M124" in codes(res)
+
+
+def test_ordinary_data_is_untouched():
+    res = md("{{ d }}\n", d="Café 10:30 · R$ 4,50")
+    assert "Café 10:30 · R$ 4,50" in printed(res) and "M124" not in codes(res)

@@ -155,6 +155,7 @@ FIX = {
         "blocks, boxes and link definitions belong in the document: put the fences or ::: lines there, around "
         "{{ value | markdown }}."
     ),
+    "M124": "Nothing to fix: they are private-use characters bobina keeps for its own marks; no text needs them.",
     "M130": "Give the variable a value: front matter, --set NAME=VALUE or a data column (the message lists them).",
     "M131": "Give the required field: --set NAME=VALUE, or fill that column in the row.",
     "M140": "The counter passed its stop: bobina seq set NAME N, a higher stop, or wrap: true.",

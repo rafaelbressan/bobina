@@ -246,6 +246,7 @@ def build(
     infers and saves it on first use); None: such a document is English. image_dirs: the only folders the
     document's images are read from (--sandbox, the MCP server); None: anywhere."""
     nudges = Nudges()
+    fields = templating.clean_data(fields, nudges)  # no data value fakes bobina's own marks
     meta, body, fm_lines = templating.split_front_matter(source)
     defaults, labels, schema = {}, None, {}
     if not meta.get("template") and not plain:  # a document that declares its own fields (no template)
