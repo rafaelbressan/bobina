@@ -69,10 +69,12 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 ## 3. Attributes `{…}` ✓
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
-- at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, on the lines down to the previous `{…}`
+- at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, its line and those above back to the previous `{…}`
 - on a span: `Total: [R$ 42,00]{.bold size=large}`
 - on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
+
+`Table 4 {.center}` / `Waiter: Ana {.right}` / `Thanks` on 3 lines: centred, right, left.
 
 | Class | Effect |
 |---|---|
@@ -93,10 +95,10 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 | `render=raster\|native` | force how a block is printed (text blocks and QR codes) | ✓ |
 | `thickness=` | divider stroke in dots (minimum 2, nudge `B101`) | ✓ |
 | `leading=` | space between lines: `leading=18` dots, `18px` or `2mm`. Printer font: line height + N (`ESC 3`) | ✓ |
-| `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, doubled at 2× width on printers that follow the spec (not at 2× on the MTP-II: profile `native.tracking_unscaled_at`); line breaks use the real width | ✓ |
+| `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, ×2 at 2× width per the spec (not on the MTP-II: `native.tracking_unscaled_at`); line breaks use the real width | ✓ |
 | `indent=` | left indent: `indent=4` columns, or `indent=3mm` / `24px`; wrapped lines stay aligned | ✓ |
 
-Unknown classes or keys, and those a table does not take (`font=`, `size=`…: printer font for now), give `M101` and are ignored.
+Unknown classes or keys and those a table does not take (`font=`, `size=`…) give `M101` and are ignored.
 
 ## 4. Fonts ✓
 
