@@ -155,17 +155,29 @@ def _help_code(code: str, as_json: bool) -> int:
 
 TOPICS = ("commands", "format", "table", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
 NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pix, bobina help contact x
-ALSO_NAMED = frozenset({"commands", "problems"})  # bobina help itself; nudges: not listed again
-SHOWN = [t for t in TOPICS if t not in ALSO_NAMED]  # what bobina help lists: its footer, the help command's
-LISTED = [*SHOWN, "a problem code (E302)", "a command"]  # description, an unknown topic, the MCP help tool
+# Topics that are other names, so bobina help does not list them again: "commands" is what bobina help prints
+# without a topic, and "problems" is the docs' name for nudges.
+ALSO_NAMED = frozenset({"commands", "problems"})
+# The topics bobina help lists, in the footer of its own help.
+SHOWN = [t for t in TOPICS if t not in ALSO_NAMED]
+# The same list with the other things it takes, for the help command's description, an unknown topic's error and
+# the MCP server's help tool.
+LISTED = [*SHOWN, "a problem code (E302)", "a command"]
+EPILOG = "Every command that prints shows a confirmation first (--yes skips it)."
 
 
-def _footer(width: int = 80) -> str:
-    """The last lines of bobina help: every topic, wrapped between topics at `width` columns."""
+def _footer(width: int | None = None) -> str:
+    """The last lines of bobina help: every topic, wrapped between two topics at the terminal's width (as argparse
+    finds it, at most 80 columns). A wrapped line ends with " |", so a word that is not the last one needs room
+    for it; the last word does not."""
+    import shutil
+
+    width = width or min(80, shutil.get_terminal_size().columns)
+    words = [*SHOWN, "E302", "COMMAND"]
     lines, line = [], "Help: bobina help"
-    for i, word in enumerate([*SHOWN, "E302", "COMMAND"]):
+    for i, word in enumerate(words):
         piece = (" " if i == 0 else " | ") + word
-        if len(line) + len(piece) + 2 > width:  # room left for the " |" that ends a wrapped line
+        if line.strip() and len(line) + len(piece) + (0 if i == len(words) - 1 else 2) > width:
             lines.append(line + " |")
             line, piece = "     ", " " + word
         line += piece
@@ -563,6 +575,11 @@ class Parser(argparse.ArgumentParser):
         k.setdefault("allow_abbrev", False)
         super().__init__(*a, **k)
 
+    def format_help(self):
+        if self.prog == "bobina":  # the topics wrap to the terminal as it is now, not as it was at import
+            self.epilog = EPILOG + "\n" + _footer()
+        return super().format_help()
+
     def error(self, message):
         from ..nudges import Nudge
         from .common import _FMT, render_problems, stopped
@@ -598,7 +615,7 @@ def make_parser():
         prog="bobina",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="bobina — print Markdown on thermal roll printers",
-        epilog="Every command that prints shows a confirmation first (--yes skips it).\n" + _footer(),
+        epilog=EPILOG,  # and the topics, at the terminal's width when printed (format_help)
     )
     ap.add_argument("--version", action="version", version=f"bobina {__version__}")
     sub = ap.add_subparsers(dest="command", metavar="COMMAND")

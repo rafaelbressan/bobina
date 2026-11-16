@@ -381,13 +381,38 @@ def test_only_the_header_invert_band_reads_reversed_in_the_terminal():
     assert [re.sub(r"\x1b\[[0-9;]*m", "", ln).split() for ln in shown if "\x1b[7m" in ln] == [["Item", "Qty", "Price"]]
 
 
-def test_the_view_of_a_table_in_a_font_shows_every_column_lined_up():
-    res = styled(BILL, "font=Terminus size=small")
-    shown = [ln for r in drawn(res) for ln in ("".join(c.ch for c in t.cells) for t in r.text_rows)]
-    assert [ln.split() for ln in shown] == [["Item", "Qty", "Price"], ["Espresso", "2", "9,00"],
-                                            ["Cheese", "bread", "1", "39,00"], ["Pie", "1", "28,00"],
-                                            ["Water", "3", "12,00"]]  # fmt: skip
-    assert len({len(ln.rstrip()) for ln in shown}) == 1  # the price column, right-aligned, ends in one place
+def mapped(res) -> list[str]:
+    return [ln for r in drawn(res) for ln in ("".join(c.ch for c in t.cells) for t in r.text_rows)]
+
+
+def test_the_view_of_a_table_in_a_font_is_a_map_of_the_paper():
+    """Printer-font columns, as wide as the paper: each column's text where it prints (a right-aligned one ends
+    where it ends), cut with "…" when the room is shorter; every column shows."""
+    shown = mapped(styled(MARKET, "font=Terminus size=16px", profile_name="mtp-ii-58"))
+    assert shown == ["IT C… DESCRIÇÃO    QTD … UN… TO…",
+                     "0… 7… ARROZ BRANC…   1 … 24… 24…",
+                     "0… 7… BANANA PRAT… 1.… … 9,… 16…"]  # fmt: skip
+    assert all(len(ln) <= 32 for ln in shown)
+
+
+def test_totals_in_a_large_font_end_at_the_right_margin():
+    res = styled('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n',
+                 "font=Terminus size=32px", profile_name="mtp-ii-58")  # fmt: skip
+    assert mapped(res) == ["SUBTOTAL".ljust(23) + "R$ 105,70", "TROCO".ljust(25) + "R$ 7,57"]
+
+
+def test_totals_in_a_small_font_keep_the_label_left_and_the_value_at_the_margin():
+    res = styled('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n',
+                 "font=Terminus size=16px", profile_name="mtp-ii-58")  # fmt: skip
+    assert mapped(res) == ["SUBTOTAL".ljust(26) + "R$ 10…", "TROCO".ljust(26) + "R$ 7,…"]
+
+
+def test_a_proportional_font_loses_no_column_in_the_view():
+    shown = mapped(styled(BILL, 'font="Atkinson Hyperlegible" size=20px', profile_name="mtp-ii-58"))
+    assert len(shown) >= 5 and all(len(ln) <= 32 for ln in shown)
+    rows = [ln.split() for ln in shown if any(ch.isdigit() for ch in ln)]
+    assert all(len(r) >= 3 for r in rows)  # a description, a quantity and a price on every item's line
+    assert len({len(ln) for ln in shown if any(ch.isdigit() for ch in ln)}) == 1  # prices end in one place
 
 
 def test_a_turned_lines_table_has_no_dotted_rule_under_the_titles_of_any_block():
@@ -443,7 +468,7 @@ def boxed_lines(text: str) -> list[str]:
 
 
 @pytest.mark.parametrize("command", [["view"], ["print", "--dry-run", "--yes"]])
-def test_the_frame_grows_to_hold_every_column_of_a_table_in_a_font(isolated, capsys, command):
+def test_the_frame_stays_the_papers_width_with_a_table_in_a_font(isolated, capsys, command):
     from bobina import cli
 
     doc = isolated / "zebra.bob.md"
@@ -451,11 +476,9 @@ def test_the_frame_grows_to_hold_every_column_of_a_table_in_a_font(isolated, cap
                    "{style=zebra font=Terminus size=16px}\n\nThanks {.center}\n")  # fmt: skip
     cli.main([*command, str(doc), "--profile", "mtp-ii-58"])
     box = boxed_lines(capsys.readouterr().out)
-    widths = {len(ln) for ln in box}
-    assert len(widths) == 1 and widths.pop() > 34  # wider than the paper's 32 columns and 2 sides, all alike
-    assert all(ln[0] in "┌│└" and ln[-1] in "┐│┘" for ln in box)
-    assert any("long name" in ln and "39,00" in ln for ln in box)  # no column dropped
-    assert any(ln.strip("│").rstrip().startswith(" ") and "Thanks" in ln for ln in box)  # centred on the paper
+    assert {len(ln) for ln in box} == {34}  # the paper's 32 columns and 2 sides
+    assert any("Cheese bread" in ln and " 1 39…" in ln for ln in box)  # no column dropped, cut where the paper is
+    assert any(ln[1:-1].rstrip().startswith(" ") and "Thanks" in ln for ln in box)  # centred on the paper
 
 
 def test_a_bad_front_matter_size_is_said_once_at_its_line():

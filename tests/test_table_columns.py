@@ -482,9 +482,15 @@ def test_a_short_code_column_on_58mm_leaves_the_room_to_the_description():
     assert lines(res)[1] == "001 1431 " + "CEBOLA KG".ljust(17) + " 14,25"
 
 
-def test_the_view_of_a_font_table_without_titles_is_as_wide_as_it_prints():
-    """The terminal view lines a raster-font table's columns up where the paper has them: a total's value at the
-    right margin, not next to its label."""
+def test_a_column_of_codes_is_not_text_even_left_aligned():
+    """A left-aligned column with no letter in its body (a 13-digit code) is not text: the name gets the room."""
+    res = build("| Código | Nome |\n|---|---|\n| 7896016500213 | Lentilha |\n| 2000000010014 | Arroz |\n")
+    assert lines(res) == ["Código        Nome", "7896016500213 Lentilha", "2000000010014 Arroz"]
+
+
+def test_the_view_of_a_font_table_without_titles_maps_the_paper():
+    """The terminal view of a raster-font table is the paper in printer-font columns: the label on the left, the
+    value where it prints, at the right margin (cut with "…" where the paper has more letters than columns)."""
     res = build('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n{font=Terminus size=16px}\n')
     assert notes(res)[0].endswith("(+1 gap = 48 of 48)")
-    assert lines(res) == ["SUBTOTAL" + " " * 31 + "R$ 105,70", "TROCO" + " " * 36 + "R$ 7,57"]
+    assert lines(res) == ["SUBTOTAL".ljust(26) + "R$ 10…", "TROCO".ljust(26) + "R$ 7,…"]

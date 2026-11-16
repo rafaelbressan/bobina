@@ -19,7 +19,7 @@ def test_help_table_prints_on_an_80_column_terminal(capsys):
     assert max(len(line) for line in out.splitlines()) <= 80
     out = " ".join(out.split())  # wrapped lines read as one
     for must in ("style=plain|receipt|lines|grid|header-invert|zebra", "width=", 'prefix="R$ "', "span=all",
-                 "one empty cell for each column before it", "lowercase", "widest left-aligned one", "| | |",
+                 "one empty cell for each column before it", "lowercase", "widest text column, left-aligned with letters", "| | |",
                  "docs/guides/tables.md"):  # fmt: skip
         assert must in out, must
 
@@ -77,8 +77,25 @@ def test_bobina_help_lists_every_topic(capsys, monkeypatch):
     assert words == [*args.SHOWN, "E302", "COMMAND"]
     for t in ("format", "table", "data", "pay", "contact", "icons", "nudges", "aliases"):
         assert t in args.SHOWN, t
-    assert args._footer(40).count("\n") >= 3 and max(len(x) for x in args._footer(40).splitlines()) <= 40
     assert cli.main(["help", "tabel"]) == cli.USAGE
     err = capsys.readouterr().err
     assert "did you mean table?" in err and all(t in err for t in args.LISTED)
     assert all(t in args.COMMANDS["help"].description for t in args.LISTED)
+
+
+@pytest.mark.parametrize("columns", [40, 60, 80, 120])
+def test_the_help_footer_wraps_to_the_terminal_between_topics(capsys, monkeypatch, columns):
+    monkeypatch.setenv("COLUMNS", str(columns))
+    cli.main(["help"])
+    out = capsys.readouterr().out
+    footer = out[out.index("Help: bobina help") :].rstrip("\n").splitlines()
+    assert max(len(line) for line in footer) <= min(80, columns)
+    assert all(line.endswith(" |") for line in footer[:-1]) and not footer[-1].endswith("|")
+    one_line = "Help: bobina help " + " | ".join([*args.SHOWN, "E302", "COMMAND"])
+    assert args._footer(len(one_line)) == one_line  # the last word needs no room for a " |"
+
+
+def test_the_mcp_server_uses_the_clis_lists():
+    from bobina import mcp_server
+
+    assert mcp_server.LISTED is args.LISTED and mcp_server.EXIT_CODES is args.EXIT_CODES

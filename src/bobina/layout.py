@@ -1871,9 +1871,12 @@ class Layout:
         keep = [max(h, min(n, w)) for h, n, w in zip(lay.hard, natural, longest[0], strict=True)]
         self.widen_for_spans(widths, body, lay, ink, max(0, cap - sum(widths)), keep)
         if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch to the paper's edge: the spare
-            text = [i for i in auto if _at(t.aligns, i, "left") == "left"] or auto  # room goes to the widest auto
-            widths[max(text, key=lambda i: natural[i])] += cap - sum(widths)  # column of text (left-aligned; the
-            # numbers are right-aligned), ties to the first: an item's description, a total's label
+            # room goes to the widest auto column of text (ties: the first; none: the widest auto column): an
+            # item's description, a total's label. Text: left-aligned, with a letter in a body cell (a column of
+            # codes or numbers is not text, even left-aligned)
+            text = [i for i in auto if _at(t.aligns, i, "left") == "left"
+                    and any(c.ch.isalpha() for r in body if i < len(r) for c in r[i])] or auto  # fmt: skip
+            widths[max(text, key=lambda i: natural[i])] += cap - sum(widths)
         free = max(0, cap - sum(widths))  # a .compact table is narrower than the paper: .center and .right place
         place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))  # a cut one: none
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") or not auto else 0
@@ -1991,10 +1994,9 @@ class Layout:
 
     def table_rows(self, t: Table, head, body, widths: list[int], ink, lay=None):
         """The title's lines and each body row's lines (table_wrap), each also on a grid of character columns: the
-        printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as they
-        print, or as the widest text in them when a proportional font's text takes more character columns (a span's
-        text widening the last column it covers), so the terminal views show every column of it, lined up, where
-        the paper has it."""
+        printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as the
+        widest text in them (a span's text widening the last column it covers), so the terminal view of a turned
+        one shows every column of it, lined up. A standing one is shown as a map of the paper (paper_map)."""
         heads = self.table_wrap(t, head, widths, ink, lay, lay and lay.head_slots, t.head_row) if head else []
         groups = [self.table_wrap(t, r, widths, ink, lay, lay and _at(lay.slots, k), _row(t, k))
                   for k, r in enumerate(body)]  # fmt: skip
@@ -2002,7 +2004,7 @@ class Layout:
         grid = list(widths)
         if not ink.native:
             alone = [(s.first, seg) for ln in every for s, seg in zip(ln.slots, ln.segs, strict=True) if s.alone]
-            grid = [max([w, *(columns(seg) for i, seg in alone if i == c)]) for c, w in enumerate(widths)]
+            grid = [max([0, *(columns(seg) for i, seg in alone if i == c)]) for c in range(len(widths))]
             for ln in every:
                 for s, seg in zip(ln.slots, ln.segs, strict=True):
                     grid[s.last] += max(0, columns(seg) - _span(grid, s))
@@ -2135,12 +2137,38 @@ class Layout:
             return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
-        pad = [Cell(" ")] * shift if geo.ink.native else []
-        edge = self.cols if geo.ink.native else self.W * 64 // geo.ink.scale  # where the image is cut, in columns
-        view = [TextRow(_cut([*self.lead(indent), *pad, *ln.view], edge), (1, 1), "left", t.line) for ln in lines]
+        if geo.ink.native:
+            view = [TextRow(_cut([*self.lead(indent), *[Cell(" ")] * shift, *ln.view], self.cols), (1, 1), "left",
+                            t.line) for ln in lines]  # fmt: skip
+        else:
+            view = [TextRow(self.paper_map(ln, geo, indent), (1, 1), "left", t.line) for ln in lines]
         band = kind == "image" and "band" in piece[3].split()
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]))  # fmt: skip
+
+    def paper_map(self, ln: _TLine, geo: _Geo, indent: int) -> list[Cell]:
+        """A line of a standing table drawn in a raster font as the terminal views show it: a map of the paper in
+        printer-font columns, as wide as the paper. Each cell's text starts at the printer column nearest to where
+        its column prints; a right-aligned one ends where it ends on paper, a centred one is centred there. Text
+        longer than that room is cut with "…", and every cell keeps at least one column, so no column is lost."""
+        cw, ink = self.p.cell[0], geo.ink
+        out, col = list(self.lead(indent)), indent
+        band = ln.row.has("invert")
+        for s, seg in zip(ln.slots, ln.segs, strict=True):
+            left = geo.x0 + geo.pad + (sum(geo.widths[: s.first]) + s.first) * ink.scale / 64
+            right = left + _span(geo.widths, s) * ink.scale / 64
+            lo = max(col, round(left / cw))
+            hi = max(lo + 1, round(right / cw))
+            text = _fit(seg, hi - lo)
+            at = _offset(s.align, hi - lo - columns(text))
+            part = [Cell(" ")] * at + text + [Cell(" ")] * (hi - lo - at - columns(text))
+            gap = [Cell(" ", invert=band and col > indent)] * (lo - col)  # a band runs on between its cells
+            out += gap + ([replace(c, invert=True) for c in part] if s.invert or band else part)
+            col = hi
+        out = _cut(out, self.cols)
+        while out and out[-1] == Cell(" "):
+            out.pop()
+        return out
 
     def table_turned(self, t: Table, head, body, natural: list[int], style: str, ink, lay) -> list:
         """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
@@ -2200,6 +2228,14 @@ class Layout:
         if piece[0] == "line":
             return _bw(self.table_canvas([piece[1]], geo))
         return piece[1]
+
+
+def _fit(cells: list[Cell], cols: int) -> list[Cell]:
+    """Cells in at most `cols` columns: as they are, or cut with "…" in the style of the last one kept."""
+    if columns(cells) <= cols:
+        return cells
+    kept = _cut(cells, max(0, cols - 1))
+    return [*kept, replace(kept[-1] if kept else Cell(" "), ch="…", wide=False)]
 
 
 def _cut(cells: list[Cell], cols: int) -> list[Cell]:

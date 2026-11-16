@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Checks of the table tasks in evals/agent-eval.yaml, graded from what the real bobina says and shows: `bobina check
---json` (problems, and the width each column got: L108) and `bobina view` (the strip as text, on the printer's
-grid; a drawn rule is a line of braille dots). The document is read only for what never prints (a value typed in a
-cell versus a column's prefix). Standard library only: it runs with the sandbox's python3 and its `bobina`.
+--json` (problems, and the width each column got: L108) and `bobina view` (the strip as text, as wide as the paper
+has printer-font columns; a drawn rule is a line of braille dots; a table drawn in a smaller font is a map of the
+paper, each column's text where it prints, cut with "…" when it has more letters than that room has printer
+columns, so text is matched whole or cut). The document is read only for what never prints (a value typed in a cell
+versus a column's prefix). Standard library only: it runs with the sandbox's python3 and its `bobina`.
 
     table_checks.py CHECK FILE      exit 0 when the check passes; otherwise it says why
     (the setup moves this file out of the agent's folder, next to state/: $BOBINA_STATE_DIR/../table_checks.py)
@@ -11,6 +13,7 @@ cell versus a column's prefix). Standard library only: it runs with the sandbox'
 from __future__ import annotations
 
 import ast
+import contextlib
 import functools
 import json
 import re
@@ -22,6 +25,16 @@ from pathlib import Path
 
 BRAILLE = re.compile(r"^[⠀-⣿]+$")
 SHIM_REAL = re.compile(r"^REAL, TRACE = (.+)$", re.M)  # cli-agent-eval's shim: REAL, TRACE = '/…/bobina', '/…'
+FRONT_MATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
+SEPARATOR = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+
+
+class CheckFailed(Exception):
+    """One check did not pass; its message says why. Only that check fails, never the grader."""
+
+
+def fail(why: str):
+    raise CheckFailed(why)
 
 
 @functools.cache
@@ -30,7 +43,7 @@ def executable() -> str:
     and a check is not the agent's call. The shim names the real program in its REAL line (sandbox.py SHIM)."""
     found = shutil.which("bobina")
     if not found:
-        sys.exit("no bobina on PATH")
+        fail("no bobina on PATH")
     m = SHIM_REAL.search(Path(found).read_bytes()[:8192].decode("utf-8", "replace"))
     return ast.literal_eval(m.group(1))[0] if m else found
 
@@ -45,11 +58,12 @@ def problems(path: str) -> list[dict]:
     try:
         return json.loads(r.stdout)["problems"]
     except (ValueError, KeyError):
-        sys.exit(f"bobina check {path} --json gave no JSON (exit {r.returncode}): {r.stderr.strip()[-300:]}")
+        fail(f"bobina check {path} --json gave no JSON (exit {r.returncode}): {r.stderr.strip()[-300:]}")
 
 
 def view(path: str) -> list[str]:
-    """The lines inside the first view box, each as wide as the box (the paper)."""
+    """The lines inside the first view box, each as wide as the paper has printer-font columns: the paper's text as
+    it prints, and a table in a raster font as a map of the paper (a cut word ends in "…")."""
     out, inside = [], False
     for ln in bobina("view", path).stdout.splitlines():
         if ln.startswith("┌"):
@@ -59,7 +73,7 @@ def view(path: str) -> list[str]:
         elif inside and ln.startswith("│") and "⟶" not in ln:  # the tear line ends the strip
             out.append(ln[1 : ln.rindex("│")])
     if not out:
-        sys.exit(f"bobina view {path} showed nothing")
+        fail(f"bobina view {path} showed nothing")
     return out
 
 
@@ -67,22 +81,31 @@ def is_rule(line: str) -> bool:
     return bool(BRAILLE.match(line.strip()))
 
 
+def receipt_rule(path: str) -> set[str]:
+    """How bobina view shows the dashed rule of style=receipt (its braille letters) for this document's printer
+    (its front matter: profile, locale…), asked of bobina itself: a solid rule, a divider (--- {.dashed}) or another
+    style's line shows other letters. The reference goes in a temporary folder, or next to the document when the
+    system's cannot be written."""
+    head = FRONT_MATTER.match(Path(path).read_text(encoding="utf-8"))
+    return _receipt_rule(head.group(0) if head else "", str(Path(path).resolve().parent))
+
+
 @functools.cache
-def receipt_rule() -> set[str]:
-    """How bobina view shows the dashed rule of style=receipt (its braille letters), asked of bobina itself: a
-    solid rule, a divider (--- {.dashed}) or another style's line shows other letters."""
-    with tempfile.TemporaryDirectory() as tmp:
-        ref = Path(tmp) / "ref.bob.md"
-        ref.write_text("| A |\n|---|\n| b |\n{style=receipt}\n", encoding="utf-8")
-        lines = view(str(ref))
-    i = find(lines, "A")
-    if i < 1 or not is_rule(lines[i - 1]):
-        sys.exit(f"bobina view shows no receipt rule to compare with: {lines}")
-    return set(lines[i - 1].strip())
+def _receipt_rule(front: str, folder: str) -> frozenset[str]:
+    for where in (None, folder):
+        with contextlib.suppress(OSError), tempfile.TemporaryDirectory(dir=where) as tmp:
+            doc = Path(tmp) / "reference.bob.md"
+            doc.write_text(front + "| A |\n|---|\n| b |\n{style=receipt}\n", encoding="utf-8")
+            lines = view(str(doc))
+            i = find(lines, "A")
+            if i < 1 or not is_rule(lines[i - 1]):
+                fail(f"bobina view shows no receipt rule to compare with: {lines}")
+            return frozenset(lines[i - 1].strip())
+    fail("no folder for the reference receipt table (neither the system's temporary one nor the document's)")
 
 
-def is_receipt_rule(line: str) -> bool:
-    return is_rule(line) and set(line.strip()) <= receipt_rule()
+def is_receipt_rule(line: str, path: str) -> bool:
+    return is_rule(line) and set(line.strip()) <= receipt_rule(path)
 
 
 def widths(path: str, ncol: int) -> list[tuple[str, int]] | None:
@@ -96,24 +119,30 @@ def widths(path: str, ncol: int) -> list[tuple[str, int]] | None:
 
 
 def body_rows(path: str) -> list[str]:
-    """The body rows of every table in the document as written (no title row, no separator row)."""
-    lines, rows = Path(path).read_text(encoding="utf-8").splitlines(), []
-    for i, ln in enumerate(lines):
-        if re.match(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", ln) and i > 0 and "|" in lines[i - 1]:
-            j = i + 1
-            while j < len(lines) and lines[j].strip().startswith("|"):
-                rows.append(lines[j])
-                j += 1
+    """The body rows of every table in the document as written (no title row, no separator row). A separator is
+    only the line right after a table's title row: a body row of dashes (| - | - |) stays a body row."""
+    lines, rows, i = Path(path).read_text(encoding="utf-8").splitlines(), [], 0
+    while i < len(lines):
+        if "|" in lines[i] and i + 1 < len(lines) and SEPARATOR.match(lines[i + 1]):
+            i += 2
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                rows.append(lines[i])
+                i += 1
+        else:
+            i += 1
     return rows
 
 
+def shown(text: str, least: int = 1) -> str:
+    """A regex for `text` as the view shows it: whole, or cut with "…" after at least its first `least` letters."""
+    cut = (re.escape(text[:k]) + "…" for k in range(len(text) - 1, least - 1, -1))
+    return "(?:" + "|".join([re.escape(text), *cut]) + ")"
+
+
 def find(lines: list[str], *words: str) -> int:
-    """The index of the first line with every word in it, else -1."""
-    return next((i for i, ln in enumerate(lines) if all(w in ln for w in words)), -1)
-
-
-def fail(why: str) -> None:
-    sys.exit(why)
+    """The index of the first line with every word in it (whole or cut with "…"), else -1."""
+    pats = [re.compile(shown(w)) for w in words]
+    return next((i for i, ln in enumerate(lines) if all(p.search(ln) for p in pats)), -1)
 
 
 # --- the checks -------------------------------------------------------------------------------------------------
@@ -132,10 +161,11 @@ def totals_without_title(path):
 
 
 def totals_name_left_value_right(path):
+    lines = view(path)
     for name, value in (("Subtotal", "157,50"), ("Gorjeta sugerida", "18,90"), ("Total", "176,40")):
-        i = find(view(path), name, value)
-        line = view(path)[i] if i >= 0 else ""
-        if not (line.startswith(name) and line.endswith(value)):
+        i = find(lines, name, value)
+        line = lines[i] if i >= 0 else ""
+        if not (re.match(shown(name), line) and re.search(shown(value) + "$", line)):
             fail(f"{name} on the left and {value} against the right margin: got {line!r}")
 
 
@@ -144,7 +174,8 @@ def rules_around_titles(path, *titles):
     i = find(lines, *titles)
     if i < 0:
         fail(f"no title line with {titles}")
-    if not (i > 0 and is_receipt_rule(lines[i - 1]) and i + 1 < len(lines) and is_receipt_rule(lines[i + 1])):
+    above = i > 0 and is_receipt_rule(lines[i - 1], path)
+    if not (above and i + 1 < len(lines) and is_receipt_rule(lines[i + 1], path)):
         fail(f"no receipt's dashed line both above and below the titles: {lines[max(0, i - 1) : i + 2]}")
 
 
@@ -159,15 +190,23 @@ def bar_items(path):
             fail(f"no line with {item} and {value}")
 
 
-MARKET = (("001", "14,25"), ("003", "16,33"), ("008", "11,98"))
+MARKET = (  # item, code, description, quantity, unit, unit price, total
+    ("001", "1431", "CEBOLA KG", "1.105", "kg", "12,90", "14,25"),
+    ("003", "7369", "BANANA PRATA ORG", "1.635", "kg", "9,99", "16,33"),
+    ("008", "7896016500213", "LENTILHA GRANFINO", "1", "un", "11,98", "11,98"),
+)
 
 
 def market_one_line_per_item(path):
-    lines = view(path)
-    for it, total in MARKET:
-        i = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith(it)), -1)
-        if i < 0 or total not in lines[i]:
-            fail(f"item {it} and its total {total} are not on one line: {lines[i] if i >= 0 else 'no such line'!r}")
+    """Each item's figures fit their columns (the widths bobina check says), so they print on the item's first
+    line: item, quantity, unit, unit price and total; the code and the description may wrap."""
+    w = widths(path, 7)
+    if not w:
+        fail("bobina check gave no widths for a 7-column table (turned, or not 7 columns?)")
+    for col in (0, 3, 4, 5, 6):
+        need = max(len(item[col]) for item in MARKET)
+        if w[col][1] < need:
+            fail(f"column {w[col][0]!r} is {w[col][1]} wide: its values ({need}) wrap onto a second line")
 
 
 def market_smaller_letters(path):
@@ -187,19 +226,21 @@ def market_code_narrow(path):
 
 
 def market_discount_under_description(path):
+    """The discount comes right after item 003, starts where the description does and runs on past the
+    description's column: at least 'Desconto no item 3' on one line (the rest may be cut in the view)."""
     lines = view(path)
-    d = find(lines, "Desconto no item 3 - 3,27")
-    if d < 0:
-        fail("no line with the whole 'Desconto no item 3 - 3,27' (squeezed into one column?)")
-    item = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("003")), -1)
+    item = find(lines, "BANANA")
     if item < 0:
-        fail("no item 003 (no line starting with 003)")
-    nxt = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("008")), len(lines))
-    if not item < d < nxt:
+        fail("no item 003 (no line with BANANA)")
+    d = next((i for i, ln in enumerate(lines) if "Desconto" in ln), -1)
+    if d < 0 or not re.search(shown("Desconto no item 3 - 3,27", len("Desconto no item 3")), lines[d]):
+        fail(f"'Desconto no item 3 - 3,27' is not on one line (squeezed into one column?): {lines[d : d + 2]}")
+    nxt = find(lines, "LENTILHA")
+    if not item < d < (nxt if nxt >= 0 else len(lines)):
         fail("the discount line is not right after item 003")
-    starts = lines[item].index("BANANA") if "BANANA" in lines[item] else -1
-    if lines[d].index("Desconto") != starts:
-        fail(f"the discount starts at column {lines[d].index('Desconto')}, the description at {starts}")
+    at, desc = lines[d].index("Desconto"), lines[item].index("BANANA")
+    if at != desc:
+        fail(f"the discount starts at column {at}, the description at {desc}")
 
 
 PRICES = (("Arroz", "24,90", "21,90"), ("Feij", "8,49", "7,99"), ("Caf", "18,90", "16,50"))
@@ -209,7 +250,7 @@ def prices_prefixed(path, rows=PRICES):
     lines = view(path)
     for name, *values in rows:
         i = find(lines, name)
-        if i < 0 or not all(f"R$ {v}" in lines[i] for v in values):
+        if i < 0 or not all(re.search(shown(f"R$ {v}"), lines[i]) for v in values):
             fail(f"{name}: expected {', '.join('R$ ' + v for v in values)} on its line: {lines[i] if i >= 0 else ''!r}")
 
 
@@ -243,7 +284,7 @@ def fix_discount_wider(path):
     for words in (("BANANA PRATA", "16,33"), ("CASTANHA CAJU", "34,97")):
         if find(lines, *words) < 0:
             fail(f"{words[0]} is gone")
-    total_at = lines[find(lines, "BANANA PRATA", "16,33")].index("16,33")
+    total_at = re.search(shown("16,33"), lines[find(lines, "BANANA PRATA", "16,33")]).start()
     d = find(lines, "Desconto")
     if d < 0 or len(lines[d].rstrip()) <= total_at:
         fail(f"the discount line stays in its column (it ends before column {total_at}): {lines[d : d + 2]}")
@@ -259,4 +300,7 @@ CHECKS = {f.__name__.replace("_", "-"): f for f in (
 if __name__ == "__main__":
     if len(sys.argv) != 3 or sys.argv[1] not in CHECKS:
         sys.exit(f"usage: table_checks.py CHECK FILE; checks: {', '.join(CHECKS)}")
-    CHECKS[sys.argv[1]](sys.argv[2])
+    try:
+        CHECKS[sys.argv[1]](sys.argv[2])
+    except CheckFailed as e:
+        sys.exit(str(e))

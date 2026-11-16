@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Annotated
 
 from . import paper
-from .cli.args import LISTED
+from .cli.args import EXIT_CODES, LISTED
 from .cli.common import LEFT_OUT, OK, USAGE, Fail
 from .datasource import NAME_OK
 from .library import NAME_RE, LibraryError, check_name
@@ -140,8 +140,6 @@ async def run(argv: list[str], stdin: str | None = None, timeout: float = TIMEOU
 
 
 def _meaning(code: int) -> str:
-    from .cli.args import EXIT_CODES
-
     return EXIT_CODES.get(code, "")
 
 

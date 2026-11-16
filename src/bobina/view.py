@@ -102,55 +102,61 @@ def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
     return [line] + [" " * cols] * (sh - 1)
 
 
-def width(rows, profile) -> int:
-    """The view's columns: the paper's, or more when a table drawn in a raster font has longer lines than the paper
-    has printer-font columns (its view keeps every column; the frame grows to hold them)."""
-    drawn = [tr.columns() * tr.scale[0] for r in rows if isinstance(r, BitmapRow) and r.kind != "table"
-             for tr in r.text_rows or []]  # fmt: skip
-    return max([profile.columns, *drawn])
+def fit(row: TextRow, cols: int) -> TextRow:
+    """A line of drawn text in the paper's `cols` columns: as it is, or cut with "…" (a raster paragraph in a small
+    font can have more letters per line than the paper has printer-font columns; the frame never grows)."""
+    if row.columns() * row.scale[0] <= cols:
+        return row
+    kept, used = [], 0
+    for c in row.cells:
+        w = (2 if c.wide else 1) * row.scale[0]
+        if used + w > cols - row.scale[0]:
+            break
+        kept.append(c)
+        used += w
+    last = kept[-1] if kept else row.cells[0]
+    return TextRow([*kept, type(last)(**{**last.__dict__, "ch": "…", "wide": False})], row.scale, row.align)
 
 
-def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: int | None = None) -> list[str]:
-    """The rows as terminal lines, each `frame` columns wide (width()); the paper's text keeps the paper's columns.
-    Text drawn as an image reads as text, reversed only where the paper is white on black (a band; inverted words
-    are reversed by their own cells)."""
+def lines(rows, profile, color: bool = False, max_feed_lines: int = 1) -> list[str]:
+    """The rows as terminal lines, each as wide as the paper has printer-font columns. Text drawn as an image reads
+    as text (a table in a raster font as a map of the paper: Layout.paper_map), reversed only where the paper is
+    white on black (a band; inverted words are reversed by their own cells)."""
     cols = profile.columns
-    frame = frame or width(rows, profile)
-    more = " " * (frame - cols)  # past the paper's columns, in a frame widened for a drawn table
     em = None
     out: list[str] = []
     for r in rows:
         if isinstance(r, FeedRow) and r.mark == "tear":
-            out.append(TEAR_MARK.center(frame, "┄"))  # the paper goes to the tear bar here (decided 08/11:
+            out.append(TEAR_MARK.center(cols, "┄"))  # the paper goes to the tear bar here (decided 08/11:
         elif isinstance(r, FeedRow) and r.mark == "cut":  # symbols only, no words); a --compact cut, printed or not
-            out.append(("✂ " + "┄" * frame)[:frame])
+            out.append(("✂ " + "┄" * cols)[:cols])
         elif isinstance(r, FeedRow):
             n = min(max_feed_lines, r.dots // profile.cell[1])
-            out += [" " * frame] * n
+            out += [" " * cols] * n
         elif isinstance(r, BitmapRow) and r.kind == "cut":  # the printed cut line between --compact labels
-            out.append(("✂ " + "┄" * frame)[:frame])  # (not --- rules or table rules: those are "divider")
+            out.append(("✂ " + "┄" * cols)[:cols])  # (not --- rules or table rules: those are "divider")
         elif isinstance(r, TextRow):
-            out += [ln + more for ln in text_lines(r, cols, color)]
+            out += text_lines(r, cols, color)
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
-            out.append(TURNED_TABLE.center(frame, "┄")[:frame])
+            out.append(TURNED_TABLE.center(cols, "┄")[:cols])
             for tr in r.text_rows:
-                out += [ln[:cols] + more for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
+                out += [ln[:cols] for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
         elif isinstance(r, BitmapRow) and r.text_rows:
             for tr in r.text_rows:
-                wide = tr.columns() * tr.scale[0] > cols
+                tr = fit(tr, cols)
                 if r.kind == "band":  # white on black on paper, from edge to edge
                     tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
-                ls = text_lines(tr, frame, color) if wide else [ln + more for ln in text_lines(tr, cols, color)]
+                ls = text_lines(tr, cols, color)
                 out += [f"\x1b[7m{ln}\x1b[0m" if color and r.kind == "band" else ln for ln in ls]
         elif isinstance(r, RawRow):
-            out.append(f"[raw: {len(r.data)} bytes, not previewed]".center(cols) + more)
+            out.append(f"[raw: {len(r.data)} bytes, not previewed]".center(cols))
         else:
             from .emulator import Emulator
 
             em = em or Emulator(profile)
             im = preview.row_image(r, profile, em)
             if im is not None:
-                out += [ln.ljust(frame) for ln in braille(im, profile.cell)]
+                out += [ln.ljust(cols) for ln in braille(im, profile.cell)]
     return out
 
 
@@ -163,8 +169,7 @@ def boxed(body: list[str], cols: int, title: str, color: bool = False) -> str:
 
 
 def render(rows, profile, title: str, color: bool = False) -> str:
-    frame = width(rows, profile)
-    return boxed(lines(rows, profile, color, frame=frame), frame, title, color)
+    return boxed(lines(rows, profile, color), profile.columns, title, color)
 
 
 def image_box(im: Image.Image, profile, title: str, color: bool = False) -> str:

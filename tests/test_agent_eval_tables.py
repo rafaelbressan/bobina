@@ -53,8 +53,8 @@ def failures(checks, pairs) -> list[str]:
     for name, path in pairs:
         try:
             checks.CHECKS[name](path)
-        except SystemExit as e:
-            out.append(f"{name}: {e.code}")
+        except checks.CheckFailed as e:
+            out.append(f"{name}: {e}")
     return out
 
 
@@ -85,11 +85,37 @@ def test_r_dollar_typed_in_cells_is_caught_with_short_separators(box):
     assert said("prices-not-typed", doc.replace("|---|--:|--:|", "|:-|-:|:-:|"))
 
 
-def test_totals_in_a_smaller_font_pass(box):
+def test_a_body_row_of_dashes_is_a_body_row(tmp_path):
+    f = tmp_path / "doc.bob.md"
+    f.write_text("| a | b |\n|---|---|\n| 1 | 2 |\n| - | - |\n| R$ 3 | 4 |\n\nText\n", encoding="utf-8")
+    assert load_checks().body_rows(str(f)) == ["| 1 | 2 |", "| - | - |", "| R$ 3 | 4 |"]
+
+
+@pytest.mark.parametrize("attrs", ["{font=Terminus size=16px}", "{font=Terminus size=32px}"])
+def test_totals_in_another_font_pass(box, attrs):
     doc = "| | |\n|---|--:|\n| Subtotal | 157,50 |\n| Gorjeta sugerida | 18,90 |\n| Total | 176,40 |\n"
-    doc += "{font=Terminus size=16px}\n"
     for check in ("clean", "totals-without-title", "totals-name-left-value-right"):
-        assert not said(check, doc), check
+        assert not said(check, doc + attrs + "\n"), check
+
+
+def test_the_receipt_rule_is_asked_with_the_documents_printer(box, monkeypatch):
+    """The reference table takes the document's front matter (an 80 mm printer here), goes next to the document
+    when the system's temporary folder cannot be written, and a failure there fails only that check."""
+    doc = (
+        "---\nprofile: epson-tm-t20iii\n---\n| QTDE | DESCRIÇÃO | VALOR |\n|--:|---|--:|\n| 1 | Bagel ovos | 39,00 |\n"
+    )
+    assert not said("bar-titles-ruled", doc + "{style=receipt}\n")
+    checks = load_checks()
+    real = checks.tempfile.TemporaryDirectory
+    monkeypatch.setattr(checks.tempfile, "TemporaryDirectory",
+                        lambda dir=None: real(dir=dir) if dir else (_ for _ in ()).throw(OSError("read-only")))  # fmt: skip
+    Path("doc.bob.md").write_text(doc + "{style=receipt}\n", encoding="utf-8")
+    assert not failures(checks, [("bar-titles-ruled", "doc.bob.md")])
+    monkeypatch.setattr(checks.tempfile, "TemporaryDirectory", lambda dir=None: (_ for _ in ()).throw(OSError("no")))
+    checks._receipt_rule.cache_clear()
+    said_now = failures(checks, [("bar-titles-ruled", "doc.bob.md"), ("clean", "doc.bob.md")])
+    assert said_now == ["bar-titles-ruled: no folder for the reference receipt table (neither the system's temporary"
+                        " one nor the document's)"]  # fmt: skip
 
 
 def test_a_dashed_divider_over_a_plain_table_is_not_the_receipt_look(box):
@@ -101,7 +127,7 @@ def test_a_dashed_divider_over_a_plain_table_is_not_the_receipt_look(box):
 def test_no_item_003_is_said_plainly(box):
     doc = "| IT | DESCRIÇÃO |\n|---|---|\n| 001 | CEBOLA |\n| | Desconto no item 3 - 3,27 {span=all} |\n"
     assert said("market-discount-under-description", doc) == [
-        "market-discount-under-description: no item 003 (no line starting with 003)"
+        "market-discount-under-description: no item 003 (no line with BANANA)"
     ]
 
 
