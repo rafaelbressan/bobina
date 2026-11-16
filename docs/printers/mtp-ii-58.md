@@ -83,6 +83,8 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | Inverted text (white on black) | bold ≥ 20 px with ≥ 4 dots of margin |
 | QR in raster | **module ≥ 4** (2 and 3 did not read); native reads at 3 |
 | Raster band height (`GS v 0`) | **16 rows** (13/11: with 64 rows a light line appears at a random height, a different one on the same image, where the Bluetooth link starves the printer; with 16 none) |
+| Light grey behind text (table zebra, `.shade`) | **2-dot squares every 4 dots**, staggered (16/11: every 3 is heavy, every 6 a texture, 3-dot squares look like accents) |
+| Grid and box strokes | **2 dots** (16/11: with 3-dot strokes the text in the same rows printed faded: the head shares its heat across the line) |
 | Rich typography, lists, drawn checkboxes, grids, bars, fills | ✅ |
 
 Recommended raster fonts: Atkinson Hyperlegible 16–20 (bold ok), Terminus / Spleen 12–16 for small

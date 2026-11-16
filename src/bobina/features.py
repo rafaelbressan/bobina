@@ -29,8 +29,10 @@ FEATURES = {
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",
         "where": "tables with style=zebra or .shade (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",
-        "tested_on_paper": False,
-        "evidence": "",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 16/11: four patterns printed (2-dot squares every 3, 4, 6; 3-dot every 6); 2 every 4 "
+        "reads as an even grey with clean text, 3-dot squares read as accents; grid strokes of 2 and 3 dots: 2 kept "
+        "the text black, 3 faded the text in its rows",
     },
 }
 

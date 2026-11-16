@@ -65,7 +65,7 @@ One word on the line under the table: `{style=receipt}`.
 | `lines` | as `plain`, and a dotted line between rows | text and rules |
 | `grid` | a full grid, its lines in the spaces between columns; the border takes 1 column | image |
 | `header-invert` | white titles on a black band, no rule | the titles as an image |
-| `zebra` | every other row on light grey dots | the grey rows as images; ⚠ not tested on paper (`P301`) |
+| `zebra` | every other row on light grey dots | the grey rows as images |
 
 Without titles: no title band or rule, in any style.
 

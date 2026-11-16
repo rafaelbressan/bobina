@@ -16,7 +16,7 @@ reach goes in one `{…}`.
 ## A cell
 
 At the end of a cell's text: `.bold` `.italic` `.underline` `.strike`, `.invert` (white on one black box, the
-whole cell), `.shade` (light grey dots behind the text; ⚠ not tested on paper, `P301`), and `.left` `.center`
+whole cell), `.shade` (light grey dots behind the text), and `.left` `.center`
 `.right`, which align that cell only. A title cell keeps its column settings and takes these too.
 
 ```markdown

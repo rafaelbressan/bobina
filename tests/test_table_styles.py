@@ -139,15 +139,23 @@ def test_header_invert_prints_the_titles_on_a_black_band_and_the_body_plain():
 # --- zebra --------------------------------------------------------------------------------------------------------
 
 
-def test_zebra_shades_every_other_body_row_and_says_it_is_not_tested_on_paper():
+def test_zebra_shades_every_other_body_row():
     res = styled(BILL, "style=zebra")
     shaded = drawn(res)
     assert [("".join(c.ch for c in r.text_rows[0].cells)).split()[0] for r in shaded] == ["Cheese", "Water"]
     assert [t.split() for t in texts(res)[1:]] == [["Espresso", "2", "9,00"], ["Pie", "1", "28,00"]]  # native
-    note = next(n for n in res.nudges if n.code == "P301")
+    assert "P301" not in codes(res)  # tested on paper (MTP-II, 16/11)
+    assert not any(isinstance(r, BitmapRow) and r.untested for r in styled("| a |\n|---|\n| 1 |\n", "style=zebra").rows)
+
+
+def test_an_untested_drawing_still_says_p301(monkeypatch):
+    """The P301 path for what a row draws stays: a feature marked untested again gets the note."""
+    from bobina import features
+
+    monkeypatch.setitem(features.FEATURES["zebra"], "tested_on_paper", False)
+    note = next(n for n in styled(BILL, "style=zebra").nudges if n.code == "P301")
     assert "zebra" in note.message
     assert "P301" not in codes(build(BILL))
-    assert "P301" not in codes(styled("| a |\n|---|\n| 1 |\n", "style=zebra"))  # one row: nothing shaded
 
 
 def test_the_shade_is_sparse_square_dots_away_from_the_letters():
@@ -213,7 +221,7 @@ def test_a_turned_table_without_titles_keeps_its_style_and_no_titles():
     res = styled("| | |\n|---|---|\n| a | 1 |\n| b | 2 |\n", "style=zebra orientation=vertical")
     turned = next(r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "table")
     assert [("".join(c.ch for c in r.cells)).split()[0] for r in turned.text_rows] == ["a", "b"]
-    assert "P301" in codes(res)
+    assert turned.untested == ("zebra",)
 
 
 # --- wrong values ------------------------------------------------------------------------------------------------
@@ -307,7 +315,7 @@ def test_a_table_without_titles_in_a_font_and_turned_in_a_font():
 def test_every_style_works_in_a_font(style):
     res = styled(BILL, f"style={style} font=Terminus size=20px")
     assert not [r for r in res.rows if isinstance(r, TextRow)]
-    assert {c for c in codes(res)} <= {"P301"}
+    assert not codes(res)
 
 
 def test_size_alone_draws_terminus_or_the_printer_font_look_at_its_multiples():
@@ -445,8 +453,8 @@ def test_zebra_is_marked_on_the_rows_that_draw_it_even_turned_or_rotated():
     res = styled(BILL, "style=zebra")
     assert [r.untested for r in res.rows if isinstance(r, BitmapRow) and r.untested] == [("zebra",)] * 2
     for attrs in ("style=zebra orientation=vertical", "style=zebra rotate=90"):
-        assert "P301" in codes(styled(BILL, attrs)), attrs
-    assert "P301" not in codes(styled(BILL, "style=grid rotate=90"))
+        assert any(isinstance(r, BitmapRow) and r.untested == ("zebra",) for r in styled(BILL, attrs).rows), attrs
+    assert not any(isinstance(r, BitmapRow) and r.untested for r in styled(BILL, "style=grid rotate=90").rows)
 
 
 def test_the_format_cheat_sheet_shows_what_a_table_takes(capsys):

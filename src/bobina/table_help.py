@@ -21,7 +21,7 @@ STYLES = {  # every style of layout.TABLE_STYLES (a test checks): how it looks
     "lines": "as plain, and a dotted line between rows",
     "grid": "a full grid, drawn as an image (its border takes 1 column)",
     "header-invert": "white titles on a black band",
-    "zebra": "every other row on light grey dots (not tested on paper: P301)",
+    "zebra": "every other row on light grey dots",
 }
 
 TABLE_ALSO = (
@@ -80,7 +80,6 @@ PROBLEMS = {  # the codes a table can give, and when (each one is in nudges.CATA
     "L108": "the width each column got (bobina check only)",
     "M104": "a {…} after the title row: GitHub and Obsidian show the table as text",
     "F204": "white-on-black titles or cells in a font under 20px",
-    "P301": "light grey (zebra, .shade) is not tested on paper yet",
 }
 
 

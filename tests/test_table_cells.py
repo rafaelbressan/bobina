@@ -103,13 +103,13 @@ def test_invert_turns_its_cell_white_on_black_continuously(where):
 
 
 @pytest.mark.parametrize("where", ["title", "body"])
-def test_shade_puts_grey_dots_behind_its_cell_and_says_p301(where):
+def test_shade_puts_grey_dots_behind_its_cell(where):
     doc = (BILL.replace("Item |", "Item {.shade} |") + "| Rice | 1 | 9,00 |\n" if where == "title"
            else BILL + "| Rice {.shade} | 1 | 9,00 |\n")  # fmt: skip
     res = build(doc)
     word = "Item" if where == "title" else "Rice"
     row = drawn_with(res, word)
-    assert row.untested == ("zebra",) and "P301" in codes(res)
+    assert row.untested == ("zebra",) and "P301" not in codes(res)  # tested on paper 16/11
     im = row.image
     assert 0 < black(im, (70, 0, 250, im.height)) < 0.2  # light dots after the word, in its cell
     plain = build(doc.replace(" {.shade}", "")).image
@@ -261,7 +261,7 @@ def test_a_brace_after_the_closing_pipe_styles_the_row():
 def test_a_cell_that_is_only_a_brace_before_a_closing_pipe_stays_a_cell(row):
     res = build("| A | B |\n|---|---|\n" + row + "\n")
     if ".shade" in row:  # the second cell, empty and shaded
-        assert "P301" in codes(res)
+        assert any(isinstance(r, BitmapRow) and r.untested == ("zebra",) for r in res.rows)
     assert "{" not in "".join(lines(res))
     assert not any(c.bold for r in text_rows(res)[1:] for c in r.cells)  # a cell, not the row
 
@@ -406,7 +406,7 @@ def test_a_covered_empty_cells_own_braces_are_said():
 
 def test_a_last_cell_that_is_only_braces_is_a_cell_unless_it_is_extra_or_after_the_closing_pipe():
     cell = build("A | B\n---|---\nCoffee | {.shade}\n")  # no outer pipes, as many cells as titles: a cell
-    assert "P301" in codes(cell) and drawn_with(cell, "Coffee").kind != "band"
+    assert drawn_with(cell, "Coffee").untested == ("zebra",) and drawn_with(cell, "Coffee").kind != "band"
     extra = build("A | B\n---|---\nCoffee | 9 | {.invert}\n")  # one cell more than the titles: the row's
     assert drawn_with(extra, "Coffee").kind == "band" and lines(extra)[1].endswith("9")
     short = build(BILL + "| | Discount {span=all} | {.invert}\n")  # a short row, after its closing pipe

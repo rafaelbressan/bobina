@@ -187,8 +187,9 @@ def photo(
 
 
 # The light grey of a table's style=zebra rows: square dots of SHADE_DOT dots, every SHADE_STEP dots, every other
-# one left out like a chessboard of cells (12.5% ink). Not tested on paper yet (features.py "zebra"): the paper test
-# picks the pattern here. Never a 1-dot checkerboard: it smears into black on the MTP-II.
+# one left out like a chessboard of cells (12.5% ink). Chosen on paper (MTP-II, 16/11) among 2-dot squares every 3, 4
+# and 6 dots and 3-dot squares every 6: every 3 is heavy, every 6 reads as a texture, 3-dot squares read as accents
+# above the letters. Never a 1-dot checkerboard: it smears into black on the MTP-II.
 SHADE_DOT, SHADE_STEP = 2, 4
 SHADE_HALO = (8, 2)  # dots of paper kept white beside and above/below every letter: no dot between two letters
 # or in the column of space between two cells (a dot there reads as a colon or a comma), none touching the text
