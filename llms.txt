@@ -32,6 +32,7 @@ Facts an agent needs first:
 - [Document format](docs/FORMAT.md): the `.bob.md` format and the catalog of problem codes
 - [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
 - [Payment codes](docs/pay.md): every `pay` scheme (Pix, UPI, SEPA…), what each field means in it and its limits
+- [Tables guide](docs/guides/tables.md): table styles (`style=receipt`, `grid`, `zebra`…), smaller fonts and how many columns fit, tables without titles
 - [Templates guide](docs/guides/templates.md): label, card and to-do recipes, and a gallery of shop tags
 - [Security](docs/SECURITY.md): data is printed literally, templates run in a sandbox
 - [Install](docs/INSTALL.md): the installer script, the .deb, pipx from apt, Homebrew; Bluetooth needs the system Python

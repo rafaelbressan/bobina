@@ -26,6 +26,12 @@ FEATURES = {
         "tested_on_paper": False,
         "evidence": "",
     },
+    "zebra": {
+        "title": "the light grey rows of a style=zebra table (dots behind the text)",
+        "where": "any table with style=zebra (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
 }
 
 

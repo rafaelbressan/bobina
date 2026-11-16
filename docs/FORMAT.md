@@ -58,7 +58,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | monospace grid, header bold with a rule under it (empty header cells: no header, as in Pandoc), column alignment from `:--`/`--:`, cells wrapped at spaces, **stretched to the paper width**; `{.compact}` keeps it narrow (`.center`/`.right` place it); `orientation=vertical`/`auto`: turned like a book's spine (`L106`) |
+| `\| a \| b \|` tables | a grid in the printer font, bold titles, a rule under them; `{style=receipt font=Terminus size=16px}` under it: styles (`zebra` ⚠ not tested on paper), fonts, turned tables: [guides/tables.md](guides/tables.md) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -98,7 +98,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 | `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, ×2 at 2× width per the spec (not on the MTP-II: `native.tracking_unscaled_at`); line breaks use the real width | ✓ |
 | `indent=` | left indent: `indent=4` columns, or `indent=3mm` / `24px`; wrapped lines stay aligned | ✓ |
 
-Unknown classes or keys and those a table does not take (`font=`, `size=`…) give `M101` and are ignored.
+Unknown classes or keys and those a block does not take (`leading=` on a table…) give `M101` and are ignored.
 
 ## 4. Fonts ✓
 
@@ -288,7 +288,7 @@ Networks and values: `bobina help contact` and [contact.md](contact.md).
 
 ### 6.9 Planned objects ◇
 
-` ```table {columns="auto,4ch,8ch" header=invert} ` (tables with explicit widths and styles) and shapes.
+Shapes.
 
 ## 7. Variables (Jinja) ✓
 

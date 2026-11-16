@@ -68,6 +68,7 @@ TASK_RE = re.compile(r"^\[([ xX])\]\s+")
 TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)""")
 
 
+TABLE_ONLY = frozenset({"style"})  # keys only a table's {…} line takes (style=receipt); elsewhere: unknown
 CAPTION_KEYS = frozenset({"caption", "caption-align"})  # images and codes: a line under them, placed on its own
 IMAGE_KEYS = CAPTION_KEYS | {"mirror"}  # mirror=x|y|xy: images only
 CODES = ("qr", "barcode", "datamatrix", "pdf417")
@@ -389,7 +390,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 )
             am = re.fullmatch(r"\s*\{([^{}]*)\}\s*", raw)
             if am and out and (a0 := parse_attrs(am.group(1))) is not None:  # attribute line: applies above
-                check_attrs(a0, ln, nudges)
+                check_attrs(a0, ln, nudges, extra=TABLE_ONLY if isinstance(out[-1], Table) else frozenset())
                 out[-1].attrs = out[-1].attrs.merged(a0)
                 if isinstance(out[-1], Table):
                     _attr_lines(out[-1], a0, ln)
@@ -492,7 +493,7 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
     if body and body.children and (a := _row_attrs(body.children[-1], src)) is not None:
         at = _line(body.children[-1], ln - _line(n, 0))
-        check_attrs(a, at, nudges)
+        check_attrs(a, at, nudges, extra=TABLE_ONLY)
         tb.attrs = a
         _attr_lines(tb, a, at)
         body.children.pop()

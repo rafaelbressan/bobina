@@ -195,11 +195,13 @@ def test_a_wide_icon_is_never_cut_from_its_column():
 # --- 4. attributes a table does not take say so -------------------------------------------------------------------
 
 
-def test_a_font_on_a_table_is_said_to_do_nothing():
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{font=Terminus size=16px}\n")
+def test_keys_a_table_does_not_take_are_said_with_the_ones_it_takes():
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{leading=4 tracking=2}\n")
     notes = [n for n in res.nudges if n.code == "M101"]
-    assert {"font=", "size="} <= {w for n in notes for w in ("font=", "size=") if w in n.message}
-    assert any("printer font" in n.suggestion for n in notes)
+    assert {"leading=", "tracking="} <= {w for n in notes for w in ("leading=", "tracking=") if w in n.message}
+    assert any("font=" in n.suggestion and "style=" in n.suggestion for n in notes)
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{font=Terminus size=16px}\n")  # a table takes them now
+    assert "M101" not in codes(res)
 
 
 def test_classes_a_table_does_not_take_are_said():
@@ -329,9 +331,9 @@ def test_attribute_problems_are_reported_on_their_own_line():
     res = build("A {.center}\nB {.foo}\n{.bar}\nC\n")
     at = {n.message: n.line for n in res.nudges if n.code == "M101"}
     assert at == {"unknown class '.foo'": 2, "unknown class '.bar'": 3}
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{font=Terminus}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{leading=4}\n")
     assert [n.line for n in res.nudges if n.code == "M101"] == [4]
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{size=2x}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{style=fancy}\n")
     assert [n.line for n in res.nudges if n.code == "M101"] == [5]
 
 
@@ -342,10 +344,10 @@ def test_a_header_of_any_kind_of_blank_is_no_header():
 
 
 def test_the_table_hint_lists_everything_a_table_takes():
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{font=Terminus}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{leading=4}\n")
     hint = next(n.suggestion for n in res.nudges if n.code == "M101")
     for word in (".compact", ".left", ".center", ".right", ".flip", "align=", "orientation=", "width=", "rotate=",
-                 "#id"):  # fmt: skip
+                 "font=", "size=", "style=", "#id"):  # fmt: skip
         assert word in hint
 
 
@@ -378,16 +380,16 @@ def test_a_loose_paragraph_in_a_list_is_still_a_block_of_its_own():
 
 
 def test_each_idle_table_attribute_is_said_on_the_line_it_was_written_on():
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{.bold}\n\n{font=Terminus}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{.bold}\n\n{leading=4}\n")
     at = {n.line: n.message for n in res.nudges if n.code == "M101"}
-    assert set(at) == {4, 6} and ".bold" in at[4] and "font=" in at[6]
+    assert set(at) == {4, 6} and ".bold" in at[4] and "leading=" in at[6]
 
 
 def test_a_span_size_in_a_body_cell_is_said_on_its_row():
     res = build("| a | b |\n|---|---|\n| 1 | 2 |\n| [big]{size=large} | 3 |\n")
     note = next(n for n in res.nudges if n.code == "M101")
     assert note.line == 4
-    assert "printer font" in note.suggestion and "orientation=" not in note.suggestion  # its own hint, not a table's
+    assert "table's font" in note.suggestion and "orientation=" not in note.suggestion  # its own hint, not a table's
 
 
 def test_a_code_span_across_a_newline_keeps_the_line_numbers():

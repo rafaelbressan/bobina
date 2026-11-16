@@ -18,13 +18,14 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/batch-printing.md": 3500,
     "docs/guides/templates.md": 2500,
     "docs/guides/icons.md": 3800,  # set on 13/11, with icons (generated: one row per icon, not in llms-full.txt)
+    "docs/guides/tables.md": 1450,  # set on 15/11, with table styles and fonts (the tables part of FORMAT moved here)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,
     "docs/INSTALL.md": 1100,  # set on 10/11, as above
     "docs/printers/mtp-ii-58.md": 3000,
     "docs/problems/README.md": 2500,
-    "llms-full.txt": 25000,
+    "llms-full.txt": 27000,  # raised on 15/11 from 25000: tables moved from FORMAT into their own guide, with styles
 }
 
 

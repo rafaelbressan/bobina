@@ -144,7 +144,7 @@ Q112) · 10 newer release.
 | Path | What |
 |---|---|
 | `src/bobina/` | the package (engine, layout, ESC/POS, preview, CLI) and built-in profiles, templates, fonts |
-| `docs/` | [`FORMAT.md`](docs/FORMAT.md) (the `.bob.md` spec), [`CLI.md`](docs/CLI.md) (commands, options, problems, exit codes), [`SECURITY.md`](docs/SECURITY.md) (threat model), [`guides/batch-printing.md`](docs/guides/batch-printing.md), [`TESTED.md`](docs/TESTED.md) (what was and was not tested on paper) |
+| `docs/` | [`FORMAT.md`](docs/FORMAT.md) (the `.bob.md` spec), [`CLI.md`](docs/CLI.md) (commands, options, problems, exit codes), [`SECURITY.md`](docs/SECURITY.md) (threat model), [`guides/batch-printing.md`](docs/guides/batch-printing.md), [`guides/tables.md`](docs/guides/tables.md), [`TESTED.md`](docs/TESTED.md) (what was and was not tested on paper) |
 | `examples/` | documents and data used by the guides (`examples/batch/`) |
 | `spec/conformance/` | test tickets with expected bitmaps — a `bob/1` implementation renders them identically |
 | `tests/` | unit, security and golden tests (no printer needed) |

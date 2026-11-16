@@ -6,7 +6,7 @@ import functools
 import io
 import math
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
 Image.MAX_IMAGE_PIXELS = 40_000_000  # far above any photo a 58/80 mm roll needs; refuses bombs early
 
@@ -184,6 +184,39 @@ def photo(
         im = im.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
         return dither(im, kind)
     return dither(im, kind, threshold_level(im) if level is None else level)
+
+
+# The light grey of a table's style=zebra rows: square dots of SHADE_DOT dots, every SHADE_STEP dots, every other
+# one left out like a chessboard of cells (12.5% ink). Not tested on paper yet (features.py "zebra"): the paper test
+# picks the pattern here. Never a 1-dot checkerboard: it smears into black on the MTP-II.
+SHADE_DOT, SHADE_STEP = 2, 4
+SHADE_HALO = (8, 2)  # dots of paper kept white beside and above/below every letter: no dot between two letters
+# or in the column of space between two cells (a dot there reads as a colon or a comma), none touching the text
+
+
+def shade(im: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
+    """The grey dots behind the text in box (x0, y0, x1, y1) of a mode 'L' or '1' image, away from its ink. The
+    pattern is anchored to the image, so rows shaded one after the other line up."""
+    g = im.convert("L")
+    x0, y0, x1, y1 = box
+    across, down = SHADE_HALO
+    near = g.crop(box).filter(ImageFilter.MinFilter(2 * down + 1))  # the ink, grown by the halo
+    wide = near.copy()
+    for dx in range(down + 1, across + 1):  # then sideways, to the halo's width
+        for sx in (dx, -dx):
+            shifted = Image.new("L", near.size, 255)
+            shifted.paste(near, (sx, 0))
+            wide = ImageChops.darker(wide, shifted)
+    px, out = wide.load(), g.copy()
+    d = ImageDraw.Draw(out)
+    for y in range(y0 - y0 % SHADE_STEP, y1, SHADE_STEP):
+        for x in range(x0 - x0 % SHADE_STEP, x1, SHADE_STEP):
+            if (x // SHADE_STEP + y // SHADE_STEP) % 2:
+                continue
+            cells = [(a, b) for a in range(x, x + SHADE_DOT) for b in range(y, y + SHADE_DOT)]
+            if all(x0 <= a < x1 and y0 <= b < y1 and px[a - x0, b - y0] > 127 for a, b in cells):
+                d.rectangle((x, y, x + SHADE_DOT - 1, y + SHADE_DOT - 1), fill=0)
+    return out.convert("1", dither=Image.NONE) if im.mode == "1" else out
 
 
 def vstack(parts: list, width: int, mode: str = "1", margin: int = 0) -> Image.Image:

@@ -16,6 +16,7 @@ PARTS = [
     "docs/CLI.md",
     "docs/FORMAT.md",
     "docs/guides/batch-printing.md",
+    "docs/guides/tables.md",
     "docs/guides/templates.md",
     "docs/SECURITY.md",
     "docs/INSTALL.md",
