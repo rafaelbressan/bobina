@@ -12,7 +12,9 @@ from bobina.engine import build
 GOLDEN = Path(__file__).parent / "golden"
 CONFORMANCE = Path(__file__).parent.parent / "spec" / "conformance"
 GALLERY = Path(__file__).parent.parent / "examples" / "templates"  # the images of docs/guides/templates.md
-DOCS = sorted(GOLDEN.glob("*.bob.md")) + sorted(CONFORMANCE.glob("*.bob.md")) + sorted(GALLERY.glob("*.bob.md"))
+TABLES = Path(__file__).parent.parent / "examples" / "tables"  # whole receipts, linked from docs/guides/receipts.md
+DOCS = [*sorted(GOLDEN.glob("*.bob.md")), *sorted(CONFORMANCE.glob("*.bob.md")), *sorted(GALLERY.glob("*.bob.md")),
+        *sorted(TABLES.glob("*.bob.md"))]  # fmt: skip
 
 
 @pytest.mark.parametrize("doc", DOCS, ids=[f"{d.parent.name}/{d.stem}" for d in DOCS])

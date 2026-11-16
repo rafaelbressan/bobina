@@ -17,8 +17,6 @@ labels:
 
 {{ date }} {.center}
 
---- {.dashed}
-
 {% set ns = namespace(total=0) %}
 | {{ label.item }} | {{ label.qty }} | {{ label.price }} |
 |---|--:|--:|
@@ -26,8 +24,11 @@ labels:
 {% set ns.total = ns.total + (it[1] | float) * (it[2] | float) %}
 | {{ it[0] }} | {{ it[1] }} | {{ ((it[1] | float) * (it[2] | float)) | currency(currency) }} |
 {% endfor %}
+{style=receipt}
 
-## {{ label.total }} {{ ns.total | currency(currency) }} {.right}
+| | |
+|---|--:|
+| {{ label.total }} | {{ ns.total | currency(currency) }} | {.bold}
 {% if pay_to %}
 
 ```pay {scheme="{{ pay_scheme }}" to="{{ pay_to }}" amount="{{ '%.2f' | format(ns.total) }}" name="{{ pay_name or shop }}"{% if pay_scheme == "pix" %} city="{{ pay_city }}"{% endif %}}
