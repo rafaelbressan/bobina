@@ -13,6 +13,7 @@ env:
   NO_COLOR: "1"
 setup:
   - "mkdir -p {sandbox}/config {sandbox}/state"
+  - "mv table_checks.py {sandbox}/"  # the table tasks' checks: $BOBINA_STATE_DIR/../table_checks.py CHECK FILE
   - "printf 'default_printer = \"loja\"\\n[printers.loja]\\ntransport = \"file\"\\npath = \"{sandbox}/printer.bin\"\\nprofile = \"mtp-ii-58\"\\n' > {sandbox}/config/config.toml"
 fixtures:
   - ../examples/batch/jar-label.bob.md
@@ -23,6 +24,8 @@ fixtures:
   - fixtures/broken.bob.md
   - fixtures/warn.bob.md
   - fixtures/estoque.xlsx
+  - fixtures/etiqueta.bob.md
+  - checks/table_checks.py  # moved out of the agent's folder by the setup
 patterns:
   error_code: "\\[([EMFILPQB]\\d{3})\\]"
   unknown_option: "unrecognized arguments"
@@ -142,3 +145,98 @@ tasks:
     checks:
       - {shell: "grep -qa 'Teste' test.bin"}
       - {shell: "python3 -c \"import os,sys,tomllib; c=tomllib.load(open(os.environ['BOBINA_CONFIG_DIR']+'/config.toml','rb')); p=c['printers'][c['default_printer']]; sys.exit(not str(p.get('path','')).endswith('test.bin'))\""}
+
+  # --- tables: the five tasks of the usability study of the table syntax, with the real bobina. Graded by
+  # checks/table_checks.py from bobina check --json and bobina view (tests/test_agent_eval_tables.py runs these
+  # solutions and the broken file through it).
+
+  - id: table-totals
+    prompt: "Write totais.bob.md with only the totals block of a bill: Subtotal 157,50, Gorjeta sugerida 18,90 and Total 176,40, each name on the left and its value against the right margin, with no title line above them."
+    ideal: 1
+    solution:
+      - |
+        cat > totais.bob.md <<'EOF'
+        | | |
+        |---|--:|
+        | Subtotal | 157,50 |
+        | Gorjeta sugerida | 18,90 |
+        | Total | 176,40 |
+        EOF
+      - "bobina check totais.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean totais.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" totals-without-title totais.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" totals-name-left-value-right totais.bob.md"}
+
+  - id: table-bar-check
+    prompt: "Write conferencia.bob.md: a bar's check with the columns QTDE, DESCRIÇÃO and VALOR and the items 1 Bagel ovos 39,00; 1 Chá gelado 18,00; 1 Brownie 22,00. It should look like a bar receipt, with a dashed line above and another below the column titles."
+    ideal: 1
+    solution:
+      - |
+        cat > conferencia.bob.md <<'EOF'
+        | QTDE | DESCRIÇÃO | VALOR |
+        |--:|---|--:|
+        | 1 | Bagel ovos | 39,00 |
+        | 1 | Chá gelado | 18,00 |
+        | 1 | Brownie | 22,00 |
+        {style=receipt}
+        EOF
+      - "bobina check conferencia.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean conferencia.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" bar-titles-ruled conferencia.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" bar-items conferencia.bob.md"}
+
+  - id: table-market-58mm
+    prompt: "Write cupom.bob.md: a supermarket receipt for the 58 mm printer, with the columns item, code, description, quantity, unit, unit price and total, and these items: 001 · 1431 · CEBOLA KG · 1.105 · kg · 12,90 · 14,25; 003 · 7369 · BANANA PRATA ORG · 1.635 · kg · 9,99 · 16,33; 008 · 7896016500213 · LENTILHA GRANFINO · 1 · un · 11,98 · 11,98. Each item must fit on one line, so smaller letters are fine. The code does not matter much: it may take two lines and little room; the description needs more room. Right after item 003, a line 'Desconto no item 3 - 3,27' that starts under the description and runs to the end of the line."
+    ideal: 1
+    solution:
+      - |
+        cat > cupom.bob.md <<'EOF'
+        | IT {width=3ch} | CÓD {width=7ch} | DESCRIÇÃO | QTD {width=5ch} | UN {width=2ch} | UNIT {width=5ch} | TOTAL {width=5ch} |
+        |---|---|---|--:|---|--:|--:|
+        | 001 | 1431 | CEBOLA KG | 1.105 | kg | 12,90 | 14,25 |
+        | 003 | 7369 | BANANA PRATA ORG | 1.635 | kg | 9,99 | 16,33 |
+        | | | Desconto no item 3 - 3,27 {span=all} |
+        | 008 | 7896016500213 | LENTILHA GRANFINO | 1 | un | 11,98 | 11,98 |
+        {style=receipt font=Terminus size=16px}
+        EOF
+      - "bobina check cupom.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean cupom.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" market-smaller-letters cupom.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" market-one-line-per-item cupom.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" market-code-narrow cupom.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" market-discount-under-description cupom.bob.md"}
+
+  - id: table-price-prefix
+    prompt: "Write precos.bob.md, a price list with the columns Produto, Preço and Promo: Arroz 5 kg 24,90 21,90; Feijão 1 kg 8,49 7,99; Café 500 g 18,90 16,50. 'R$ ' must print before every Preço and Promo value, but not in the titles nor before the product names. Type the values in the file without the R$: later they will come from a spreadsheet, so the R$ must come from how the table is set up."
+    ideal: 1
+    solution:
+      - |
+        cat > precos.bob.md <<'EOF'
+        | Produto | Preço {prefix="R$ "} | Promo {prefix="R$ "} |
+        |---|--:|--:|
+        | Arroz 5 kg | 24,90 | 21,90 |
+        | Feijão 1 kg | 8,49 | 7,99 |
+        | Café 500 g | 18,90 | 16,50 |
+        EOF
+      - "bobina check precos.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean precos.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" prices-prefixed precos.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" prices-not-before-names precos.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" prices-not-typed precos.bob.md"}
+
+  - id: table-fix
+    prompt: "A colleague wrote etiqueta.bob.md and complains: the R$ came out in front of the product names and the prices have none; the first table does not look like a receipt; and the discount line is squeezed into its column. Fix the file, keeping its name."
+    ideal: 2  # one check that lists the problems, one that confirms the fix
+    solution:
+      - "bobina check etiqueta.bob.md"
+      - "sed -i -e 's/Produto {prefix=\"R\\$ \"} | Preço | Promo/Produto | Preço {prefix=\"R$ \"} | Promo {prefix=\"R$ \"}/' -e 's/style=recibo/style=receipt/' -e 's/span=ALL/span=all/' etiqueta.bob.md"
+      - "bobina check etiqueta.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean etiqueta.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-prices etiqueta.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-receipt-look etiqueta.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-discount-wider etiqueta.bob.md"}
