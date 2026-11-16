@@ -1118,7 +1118,9 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         return default if n is None else int(n)
 
     def f_markdown(v):
-        text = str(v)
+        # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
+        # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
+        text = LINE_BREAK.sub("\n", str(v))
         cleaned = RAW_FENCE.sub("", text)
         if cleaned != text:
             nudges.add("M121", "a raw block inside a variable was removed")
@@ -1132,8 +1134,8 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 
             # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
             cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(cleaned))
-            # nor a ::: block: its line of colons stays text, so it can never close the document's own box
-            cleaned = DIV_FENCE.sub(lambda m: m.group(1) + "\\" + m.group(2), cleaned)
+            # nor a ::: block: its line of colons stays text, so it can never open or close the document's boxes
+            cleaned = _no_divs(cleaned)
             nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
         return MdSafe(cleaned)
 
@@ -1158,7 +1160,33 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 IMAGE_MD = re.compile(r"!\[([^\]]*)\]\([^)]*\)(\{[^}]*\})?")
 IMAGE_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*image\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
 RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
-DIV_FENCE = re.compile(r"^([ \t]*)(:{3,})", re.M)  # a ::: line in a value rendered as Markdown: escaped
+LINE_BREAK = re.compile(r"\r\n?")
+LINE_MARKS = re.compile(r"(?:[ \t]*(?:>|[-+*](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*")  # a quote's, a list item's
+CODE_OPEN = re.compile(r"(`{3,})[^`]*|(~{3,}).*")  # a fence that opens at the start of a line (CommonMark)
+
+
+def _no_divs(text: str) -> str:
+    """A value rendered as Markdown with no ::: line: a run of colons at the start of a line, after the marks of a
+    quote or a list item (> ::: and - ::: open blocks there too), gets a backslash, so it prints as colons. Lines
+    of a code block in the value are left as written (colons there are text already), but only when the value
+    surely makes one wherever it is put: a fence that opens at the very start of a line after its first (the first
+    joins the template's text). Any doubt escapes: a backslash in code is shown, a ::: from data never acts.
+    `text` has \\n line breaks only."""
+    out, fence = [], ""
+    for k, line in enumerate(text.split("\n")):
+        if fence:
+            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", line):
+                fence = ""
+            out.append(line)
+            continue
+        opens = CODE_OPEN.fullmatch(line) if k else None
+        if opens:
+            fence = opens.group(1) or opens.group(2)
+        marks = LINE_MARKS.match(line).end()
+        if line[marks:].startswith(":::"):
+            line = line[:marks] + "\\" + line[marks:]
+        out.append(line)
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------- render

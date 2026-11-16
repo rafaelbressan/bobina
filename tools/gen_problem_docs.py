@@ -72,7 +72,8 @@ def write_pages() -> None:
 
 
 def index() -> str:
-    rows = [f"| [`{k}`]({k}.md) | {sev} | {t} |" for k, (sev, t, _) in CATALOG.items()]
+    # the codes as plain link text (no backticks): one row per code, the page stays within its token budget
+    rows = [f"| [{k}]({k}.md) | {sev} | {t} |" for k, (sev, t, _) in CATALOG.items()]
     head = [
         "# Problem codes",
         "",

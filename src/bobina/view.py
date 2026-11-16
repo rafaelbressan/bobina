@@ -106,6 +106,7 @@ def width(rows, profile) -> int:
     """The view's columns: the paper's, or more when a table drawn in a smaller font needs more character columns
     than the paper has (BitmapRow.wide_view): the frame grows to its widest line, so every cell shows whole."""
     wide = [tr.columns() for r in rows if isinstance(r, BitmapRow) and r.wide_view for tr in r.text_rows or []]
+    wide += [r.box.left + 2 + _box_view(r.box, profile)[2] for r in rows if isinstance(r, BitmapRow) and r.box]
     return max([profile.columns, *wide])
 
 
@@ -148,7 +149,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
         elif isinstance(r, TextRow):
             out += [ln + more for ln in text_lines(r, cols, color)]
         elif isinstance(r, BitmapRow) and r.box is not None:
-            out += [ln + " " * max(0, frame - r.box.left - r.box.cols) for ln in box_lines(r.box, profile, color)]
+            used = r.box.left + 2 + _box_view(r.box, profile)[2]
+            out += [ln + " " * max(0, frame - used) for ln in box_lines(r.box, profile, color)]
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
             out.append(TURNED_TABLE.center(frame, "┄")[:frame])
             for tr in r.text_rows:
@@ -176,26 +178,32 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
 FRAMES = {"solid": "─│┌┐└┘", "dashed": "╌╎┌┐└┘", "dotted": "┈┊┌┐└┘", "double": "═║╔╗╚╝"}  # a ::: box's line
 
 
-def _cols(s: str) -> int:
-    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+def _box_view(b, profile):
+    """A box's content as the views draw it: (the profile at its inner width, the columns its lines take, the
+    columns between its │ and │). A table in a smaller font inside it widens both, as it widens the paper's frame."""
+    from dataclasses import replace
+
+    sub = replace(profile, width_dots=b.inner)
+    inner = width(b.rows, sub)
+    return sub, inner, b.cols - 2 + inner - sub.columns
 
 
 def box_lines(b, profile, color: bool = False) -> list[str]:
     """A ::: box where it is on the paper: ┌─ TITLE ─┐, what it holds between │ and │ (its own rows, drawn by
-    lines() at the box's inner width: a box in a box too), └──┘. Each line is b.left + b.cols columns wide."""
-    from dataclasses import replace
+    lines() at the box's inner width: a box in a box too), └──┘; a turned one standing, under a ↻ mark. Each line
+    is b.left + 2 + the room _box_view gives columns wide."""
+    from .layout import is_wide
 
     h, v, tl, tr, bl, br = FRAMES.get(b.style, FRAMES["solid"])
-    sub = replace(profile, width_dots=b.inner)
-    room = b.cols - 2
-    left = (room - sub.columns) // 2  # a thick frame takes two letters each side: the content stays in the middle
+    sub, inner, room = _box_view(b, profile)
+    left = (b.cols - 2 - sub.columns) // 2  # a thick frame takes two letters each side: the content in the middle
     lead = b.lead + " " * (b.left - len(b.lead))
     title = f" {b.title} " if b.title else ""
-    run = room - _cols(title)
-    top = tl + h * (run // 2) + title + h * (run - run // 2) + tr
-    out = [lead + top]
-    for ln in lines(b.rows, sub, color, max_feed_lines=0):
-        out.append(lead + v + " " * left + ln + " " * max(0, room - left - sub.columns) + v)
+    run = room - sum(2 if is_wide(c) else 1 for c in title)
+    out = [lead + f" ↻ box printed turned {b.turned:g}° ".center(room + 2, "┄")] if b.turned else []
+    out.append(lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
+    for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
+        out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
     return [*out, lead + bl + h * room + br]
 
 

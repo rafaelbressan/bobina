@@ -53,6 +53,7 @@ class Boxed:
     title: str = ""  # a title on the border, as printed (cut with … when it did not fit)
     style: str = "solid"  # solid, dashed, dotted, double: the frame's line
     lead: str = ""  # what the view shows before the box: the bars of the quotes it is in
+    turned: float = 0  # degrees it was turned (rotate=, .flip): the view shows it standing, under a mark
 
 
 @dataclass

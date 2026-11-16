@@ -77,7 +77,8 @@ PAID
 
 ## On paper
 
-- A box is never wider than the paper. Its frame and room take one letter on each side, so a full box holds 30
+- A box is never wider than its room (the paper, or what a quote or a list item leaves; `width=half` is half of
+  it) and always keeps 4 letters inside: a frame too thick for it is drawn thinner (`M101`). Its frame and room take one letter on each side, so a full box holds 30
   letters on 58 mm paper (32 without it) and 46 on 80 mm (48), on the same grid as the text around it.
 - The whole box prints as one image: the frame shares its lines with the text, so the text inside is drawn in the
   printer font's look (the same dots). A QR code inside is sized as an image, to fit the room.

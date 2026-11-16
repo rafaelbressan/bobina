@@ -57,6 +57,7 @@ BOX_HINT = (
 BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
 BOX_ROOM = 10  # dots of paper between a box's frame and what it holds, above and below (at least: ink is measured)
 BOX_MIN_SIDE = 6  # … and beside it: the frame and this room take whole letters, so the text keeps the paper's grid
+BOX_LEAST = 6  # letters: the narrowest box, its thinnest frame and room (a letter each side) and 4 letters inside
 COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
 COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% (of the text room) or dots (96); the column shares what is left (auto)"
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
@@ -803,12 +804,18 @@ class Layout:
         for name in IMAGE_ONLY:  # mirror= is not a key of other blocks: the parser already said "unknown key"
             if a.has(name) or (name in a.kv and name != "mirror"):
                 self.n.add("M101", f"'{name}' works on images only: it does nothing here", b.line, "remove it")
+        if isinstance(b, Div) and getattr(rows[0], "kind", "") == "box":
+            return rows  # a box turns itself (Layout.box): placed as written, the quote bars upright
+        raws = [r for r in rows if isinstance(r, RawRow)]  # bytes cannot be turned: sent after the turned block
+        rows = [r for r in rows if not isinstance(r, RawRow)]
+        if not rows:
+            return raws
         if a.has("flip") and not a.kv.get("rotate") and all(isinstance(r, TextRow) and r.native for r in rows):
             for r in rows:
                 r.upside_down = True
-            return list(reversed(rows))
+            return [*reversed(rows), *raws]
         ang = self.angle(a, b.line)
-        return [self.rotate(rows, ang, a, b.line)] if ang % 360 else rows
+        return [self.rotate(rows, ang, a, b.line), *raws] if ang % 360 else [*rows, *raws]
 
     def angle(self, attrs, line: int, image: bool = False) -> float:
         """rotate= (clockwise, like CSS; any angle, B102 when not a right angle) or .flip (180), in degrees. An
@@ -966,11 +973,27 @@ class Layout:
         """A frame around blocks (::: {.box}). What it holds is laid out at the width inside the frame by the usual
         engine, then drawn with the frame, its title and its grey as one image: the frame's sides share the rows
         with the text, so the text inside is drawn too (in the printer font's look, the same dots). Never wider
-        than the paper; the frame and the room beside it take whole letters, so the text stays on the paper's
-        grid (a full box holds 30 of the 32 letters of 58 mm)."""
+        than the room it has, and always 4 letters inside: a frame too thick for its box is made thinner, and where
+        there is no room for even the thinnest one (boxes deep in boxes) the blocks print without it. The frame and
+        the room beside it take whole letters, so the text stays on the paper's grid (a full box holds 30 of the
+        32 letters of 58 mm). rotate= and .flip turn the box here, before it is placed and the quote bars drawn."""
         a, line = d.attrs, d.line
         self.idle(a, line, BOX_TAKES, "on a box", BOX_HINT)
         cw, ch = self.p.cell
+        raw = str(a.kv.get("title", ""))
+        title = " ".join(self.text(raw).split())
+        how = a.kv.get("title-style", "border")
+        if how not in TITLE_STYLES:
+            self.n.add("M101", f"title-style={how}", line, "border, inside or band")
+            how = "border"
+        if "title-style" in a.kv and not title:
+            self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
+        room = self.W - indent * cw
+        if room < BOX_LEAST * cw:
+            self.n.add("M101", f"no room for a box here ({room // cw} letters, a box needs {BOX_LEAST}): what it "
+                       "holds prints without its frame", line, "fewer boxes inside each other here")  # fmt: skip
+            head = [Paragraph(line=line, runs=[Run(raw, bold=True)])] if title else []
+            return self.blocks([*head, *d.children], indent)
         drawn = [s for s in BOX_LINES if a.has(s)]
         style = drawn[0] if drawn else "solid"
         if len(drawn) > 1:
@@ -981,19 +1004,16 @@ class Layout:
         if t < int(self.p.get("raster.min_stroke_dots", 2)):
             self.n.add("B101", f"box thickness {t} prints broken", line, "use thickness=2")
         t = max(1, t)
+        width = self.box_width(a, line, room)
+        asked = t
+        while t > 2 and 2 * _box_side(t, style, cw) + 4 * cw > width:  # 4 letters inside, whatever the line
+            t -= 1
+        if t < asked:
+            self.n.add("M101", f"thickness={a.kv['thickness']}: no room for that line in a {width // cw}-letter "
+                       f"box, {t} dots used", line, "a wider box, or a thinner line")  # fmt: skip
         stroke = 3 * t if style == "double" else t
-        side = cw * -(-(stroke + BOX_MIN_SIDE) // cw)  # the frame and the room beside it, in whole letters
-        room = self.W - indent * cw
-        width = self.box_width(a, line, room, side)
+        side = _box_side(t, style, cw)
         inner = width - 2 * side
-        raw = str(a.kv.get("title", ""))
-        title = " ".join(self.text(raw).split())
-        how = a.kv.get("title-style", "border")
-        if how not in TITLE_STYLES:
-            self.n.add("M101", f"title-style={how}", line, "border, inside or band")
-            how = "border"
-        if "title-style" in a.kv and not title:
-            self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
         kids = d.children
         if title and how == "inside":  # the first line inside, bold: a paragraph like any other, it wraps
             kids = [Paragraph(line=line, runs=[Run(raw, bold=True)]), *kids]
@@ -1008,7 +1028,9 @@ class Layout:
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
                        "put the raw block after the ::: line that closes the box")  # fmt: skip
-        top = (ch - stroke) // 2 if title and how == "border" else 0  # the title sits across the top line
+        on_border = bool(title) and how == "border"
+        top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
+        title_y = max(0, top + stroke // 2 - ch // 2)
         y = top + stroke
         parts = []
         if band_im is not None:  # black from side to side of the frame, the title centred in it
@@ -1019,7 +1041,7 @@ class Layout:
         shade_top = y
         if body is not None:  # BOX_ROOM of white between the ink and the frame, above and below
             lead, trail = _blank_edges(body)
-            under = ch + 2 - y - lead if top else 0  # and clear of a border title's letters
+            under = title_y + ch + 2 - y - lead if on_border else 0  # and clear of a border title's letters
             y += max(2, BOX_ROOM - lead, under)
             parts.append((body, side, y))
             y += body.height + max(2, BOX_ROOM - trail)
@@ -1031,43 +1053,60 @@ class Layout:
             im.paste(part, (x, py))
         if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
-        shown = self.border_title(im, title, line, top, stroke) if title and how == "border" else ""
-        align = next((x for x in ("left", "center", "right") if a.has(x)), a.kv.get("align", "left"))
-        if align not in ("left", "center", "right"):
-            self.n.add("M101", f"align={align}", line, "left, center or right")
-            align = "left"
-        free = room - width
-        x = indent * cw + {"left": 0, "center": free // cw // 2 * cw, "right": free}[align]
-        full = Image.new("L", (self.W, height), 255)
-        full.paste(im, (x, 0))
-        full = self.draw_bars(full, indent, 0)
+        shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
+        ang = self.angle(a, line) % 360
+        if ang:
+            exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
+            im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
+            if im.width > room:
+                self.n.add("L104", f"turned box is {im.width} dots wide: cropped to {room}", line,
+                           "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
+                im = im.crop(((im.width - room) // 2, 0, (im.width - room) // 2 + room, im.height))
+        align = self.object_align(a, "left")
+
+        def place(w: int) -> int:  # where a box w dots wide starts on the paper: on a letter when it can
+            free = room - w
+            return indent * cw + {"left": 0, "center": free // cw // 2 * cw, "right": free}[align]
+
+        full = Image.new("L", (self.W, im.height), 255)
+        full.paste(im, (place(im.width), 0))
+        full = self.draw_bars(full, indent, 0)  # after the turn: the bars stay upright, beside the box
         marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
-        view = Boxed(
-            [*band, *rows], inner, x // cw, width // cw, shown, style, "".join(c.ch for c in self.lead(indent))
-        )
+        lead = "".join(c.ch for c in self.lead(indent))
+        view = Boxed([*band, *rows], inner, place(width) // cw, width // cw, shown, style, lead, ang)
         return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view), *raws]
 
-    def box_width(self, a: Attrs, line: int, room: int, side: int) -> int:
-        """width= of a box (full, half, third, 50%, 30mm, 16ch: letters, or dots), in whole letters: the paper's
-        room when absent, never more (M101 when asked), never less than 4 letters inside."""
+    def box_width(self, a: Attrs, line: int, room: int) -> int:
+        """width= of a box, of the room it has (a quote's or a list's is narrower than the paper): full, half,
+        third, 50%, 16ch (letters), or 30mm and dots. In whole letters, the room when absent, never more (M101
+        when asked), never less than BOX_LEAST letters (4 inside)."""
         cw = self.p.cell[0]
         given = a.kv.get("width")
         w = room
         if given is not None:
-            m = COLUMN_CH_RE.fullmatch(str(given).strip().lower())
-            w = round(float(m.group(1)) * cw) if m else self.object_width(given, line, BOX_WIDTH_HINT) or room
+            text = str(given).strip().lower().replace(",", ".")
+            letters = COLUMN_CH_RE.fullmatch(text)
+            pct = re.fullmatch(r"(\d+(?:\.\d+)?)%", text)
+            if letters:
+                w = round(float(letters.group(1)) * cw)
+            elif text in FRACTIONS:
+                w = int(room * FRACTIONS[text])
+            elif pct:
+                w = int(room * float(pct.group(1)) / 100)
+            else:
+                w = self.object_width(given, line, BOX_WIDTH_HINT) or room
             if w > room:
                 self.n.add("M101", f"width={given}: wider than the {room // cw} letters there are, the box takes them",
                            line, "width=full, or less")  # fmt: skip
                 w = room
-        least = min(room, 2 * side + 4 * cw) // cw * cw
-        if w // cw * cw < least:
-            self.n.add("M101", f"width={given}: a box needs {least // cw} letters (4 inside)", line, BOX_WIDTH_HINT)
-        return max(least, w // cw * cw)
+        if w // cw < BOX_LEAST:
+            self.n.add("M101", f"width={given}: a box needs {BOX_LEAST} letters (4 inside)", line, BOX_WIDTH_HINT)
+        return max(BOX_LEAST * cw, w // cw * cw)
 
-    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int) -> str:
-        """The title across a box's top line, centred, bold in the printer font's look, the line cut around it
-        (half a letter each side); longer than the line holds: cut with … (L109). Returns it as printed."""
+    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int) -> str:
+        """The title across a box's top line (its letters from `y` down), centred, bold in the printer font's look,
+        the line cut around it (half a letter each side); longer than the line holds: cut with … (L109). Returns
+        it as printed."""
         cw = self.p.cell[0]
         most = max(1, im.width // cw - 6)  # three letters of line each side, as the views draw ┌─ TITLE ─┐
         if columns([Cell(c, wide=is_wide(c)) for c in title]) > most:
@@ -1078,7 +1117,7 @@ class Layout:
         drawn = self.em.line_image(cells)
         x, gap = (im.width - drawn.width) // 2, cw // 2
         im.paste(255, (x - gap, top, x + drawn.width + gap, top + stroke))
-        im.paste(0, (x, 0), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
+        im.paste(0, (x, y), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
         return title
 
     def fence(self, f: Fence, indent: int) -> list:
@@ -1164,10 +1203,11 @@ class Layout:
             return None
         return w
 
-    def object_align(self, attrs) -> str:
-        """left, center (the default for objects) or right: the classes .left .center .right, or align=."""
+    def object_align(self, attrs, default: str = "center") -> str:
+        """left, center (the default for objects; a box's is left) or right: the classes .left .center .right, or
+        align=."""
         given = next((a for a in ("left", "right", "center") if attrs.has(a)), attrs.kv.get("align"))
-        return given if given in ("left", "right", "center") else "center"
+        return given if given in ("left", "right", "center") else default
 
     def caption_align(self, attrs, line: int) -> str:
         """caption-align=left|center|right; by default the caption follows its object."""
@@ -2492,6 +2532,13 @@ def _marks(pieces: list) -> tuple[str, ...]:
 
 def _bw(im: Image.Image) -> Image.Image:
     return im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
+
+
+def _box_side(t: int, style: str, cw: int) -> int:
+    """Dots a box's frame (t dots; double: two lines, one line apart) and the room beside it take on each side: whole
+    letters, at least BOX_MIN_SIDE dots of room."""
+    stroke = 3 * t if style == "double" else t
+    return cw * -(-(stroke + BOX_MIN_SIDE) // cw)
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:

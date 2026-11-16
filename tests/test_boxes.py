@@ -315,3 +315,108 @@ def test_the_documents_examples_print_clean():
     for src in examples:
         res = build(src)
         assert boxes(res) and codes(res) == ["P301"], src
+
+
+# --- review fixes ------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("src", ["::: {.box .flip}\nhi\n\n```raw\n1b 40\n```\n:::\n",
+                                 "::: {.box rotate=90}\nhi\n\n```raw\n1b 40\n```\n:::\n",
+                                 "::: {.note rotate=90}\nhi\n\n```raw\n1b 40\n```\n:::\n"])  # fmt: skip
+def test_raw_bytes_are_kept_after_a_turned_block(src):
+    res = build(src)
+    assert [r.data for r in res.rows if isinstance(r, RawRow)] == [b"\x1b@"]
+
+
+def test_boxes_deep_in_boxes_keep_four_letters_inside_and_never_crash():
+    opens = "".join(f"{':' * (10 - i)} {{.box .double thickness=12}}\n" for i in range(5))
+    closes = "".join(f"{':' * (6 + i)}\n" for i in range(5))
+    res = build(opens + "hi\n" + closes)
+    assert "no room for that line" in " ".join(said(res, "M101"))
+    assert "prints without its frame" in " ".join(said(res, "M101"))
+
+    def walk(row):
+        b = row.box
+        assert b.inner >= 4 * 12 and b.left + b.cols <= row.image.width // 12
+        for r in b.rows:
+            if isinstance(r, BitmapRow) and r.box:
+                assert r.image.width == b.inner
+                walk(r)
+
+    (top,) = boxes(res)
+    walk(top)
+    assert any(" hi " in ln for ln in seen(res))
+
+
+def test_a_thick_double_frame_under_a_border_title_is_never_clipped():
+    (b,) = boxes(build("::: {.box .double thickness=12 title=HELLO}\nx\n:::\n"))
+    im = b.image.convert("L")
+    assert [im.getpixel((20, y)) < 128 for y in (0, 11, 12)] == [True, True, False]  # the whole outer line
+    assert ink(im, (100, 0, 284, 40))  # the title over it
+
+
+@pytest.mark.parametrize(
+    "src, left, width",
+    [
+        ("> ::: {.box width=full}\n> x\n> :::\n", 24, 360),
+        ("- item\n\n  ::: {.box width=half}\n  x\n  :::\n", 24, 180),
+        ("> ::: {.box width=50% .right}\n> x\n> :::\n", 204, 180),
+        ("::: {.box width=16,5ch}\nx\n:::\n", 0, 192),
+        ("::: {.box width=half align=center}\nx\n:::\n", 96, 192),
+    ],
+)
+def test_width_is_of_the_room_the_box_has(src, left, width):
+    res = build(src)
+    (b,) = boxes(res)
+    gutter = 12 if src[0] in ">-" else 0  # the quote's bar is not the box
+    x0, _, x1, _ = ink(b.image, (gutter, 0, W, b.image.height))
+    assert (gutter + x0, x1 - x0) == (left, width) and "M101" not in codes(res)
+
+
+def test_a_wide_table_inside_a_box_widens_the_box_in_the_view():
+    table = '| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n{font=Terminus size=16px}\n'
+    lines = seen(build("::: {.box}\n" + table + "\n:::\nafter\n"))
+    assert len({len(ln) for ln in lines}) == 1 and len(lines[0]) > 32
+    framed = [ln for ln in lines if ln.startswith("│")]
+    assert framed and all(ln.rstrip().endswith("│") for ln in framed)
+
+
+def test_a_turned_box_is_placed_as_written_and_its_quote_bars_stay_upright():
+    (b,) = boxes(build("::: {.box rotate=90 .right}\nhi\n:::\n"))
+    assert ink(b.image)[2] == W
+    (b,) = boxes(build("> ::: {.box rotate=90}\n> hi\n> :::\n"))
+    im = b.image.convert("L")
+    assert all(im.getpixel((5, y)) < 128 for y in range(im.height))  # the bar, from top to bottom
+    assert ink(im, (12, 0, W, im.height))[0] == 12  # the box after the gutter, on the left as written
+    lines = [ln for ln in seen(build("::: {.box .flip}\nhi\n:::\n")) if ln.strip()]
+    assert "↻ box printed turned 180°" in lines[0] and lines[1].startswith("┌")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["one\r:::\rtwo", "one\r\n:::\r\ntwo", "one\n> :::\ntwo", "one\n- :::\ntwo", "one\n1. :::\ntwo", "  :::\nx"],
+)
+def test_colons_from_data_never_close_the_documents_box_whatever_the_line_breaks(value):
+    res = build("::: {.box}\n{{ d | markdown }}\n\nmine\n:::\nend\n", fields={"d": Tainted(value)})
+    d = res.doc.blocks[0]
+    assert d.closed and isinstance(d.children[-1], Paragraph) and len(res.doc.blocks) == 2
+    assert "M101" not in codes(res) and "M105" not in codes(res)
+
+
+@pytest.mark.parametrize("value", ["x\r::: {.box title=HACK}\ry", "x\n> ::: {.box}\ny", "x\n- ::: box\ny"])
+def test_colons_from_data_never_open_a_box(value):
+    res = build("{{ d | markdown }}\n", fields={"d": Tainted(value)})
+    assert not boxes(res)
+
+
+def test_a_raw_block_from_data_never_hides_behind_a_carriage_return():
+    res = build("{{ d | markdown }}\n", fields={"d": Tainted("x\r```raw\r1b 40\r```")})
+    assert not [r for r in res.rows if isinstance(r, RawRow)] and "M121" in codes(res)
+
+
+def test_colons_in_a_code_block_of_data_stay_as_written():
+    res = build("{{ d | markdown }}\n", fields={"d": Tainted("intro\n```\n::: {.box}\n```")})
+    (fence,) = [b for b in res.doc.blocks if isinstance(b, Fence)]
+    assert fence.content == "::: {.box}\n"
+    res = build("{{ d | markdown }}\n", fields={"d": Tainted("```\n:::\n```")})  # the first line joins the
+    assert not any(isinstance(b, Div) for b in res.doc.blocks)  # template's: in doubt, escaped
