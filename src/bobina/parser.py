@@ -63,6 +63,7 @@ KNOWN_KEYS = {
 }
 
 ATTR_TAIL = re.compile(r"\s*\{([^{}]*)\}\s*$")
+ATTRS_ONLY = re.compile(r"\s*\{([^{}]*)\}\s*")  # a line, or a cell, that is only {…}
 DIVIDER_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*\{([^{}]*)\}\s*$")
 TASK_RE = re.compile(r"^\[([ xX])\]\s+")
 TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)""")
@@ -401,7 +402,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                     ln,
                     f"write it as ![{m.group(1)}](<{m.group(2).strip()}>)",
                 )
-            am = re.fullmatch(r"\s*\{([^{}]*)\}\s*", raw)
+            am = ATTRS_ONLY.fullmatch(raw)
             if am and out and (a0 := parse_attrs(am.group(1))) is not None:  # attribute line: applies above
                 check_attrs(a0, ln, nudges, extra=TABLE_ONLY if isinstance(out[-1], Table) else frozenset())
                 out[-1].attrs = out[-1].attrs.merged(a0)
@@ -497,7 +498,7 @@ def _row_attrs(tr, src: list[str]) -> Attrs | None:
     line right under it; with a blank line between it is an attribute line already). None: a real row."""
     if not tr.map or tr.map[0] >= len(src):
         return None
-    m = re.fullmatch(r"\s*\{([^{}]*)\}\s*", re.sub(r"^[\s>]*", "", src[tr.map[0]]))
+    m = ATTRS_ONLY.fullmatch(re.sub(r"^[\s>]*", "", src[tr.map[0]]))
     return parse_attrs(m.group(1)) if m else None
 
 
@@ -507,7 +508,6 @@ COLUMN_HINT = 'a title cell takes width=, prefix= and suffix= for its column: | 
 
 ROW_PREFIX = re.compile(r"^(?:\s*(?:>|[-+*](?=\s)|\d{1,9}[.)](?=\s)))*\s*")  # what holds a table row: > - 1.
 DELIMITER_ROW = re.compile(r"\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?")  # |---|--:| under a table's titles
-ATTRS_ONLY = re.compile(r"\s*\{([^{}]*)\}\s*")
 
 
 class _Source(list):
@@ -522,13 +522,15 @@ class _Source(list):
 
 def _row_tail(raws: list[str], line: str) -> Attrs | None:
     """The {…} written after the pipe that closes a table row, with nothing after it: `| TOTAL | 61,00 | {.bold}`.
-    A cell that is only {…} followed by a closing pipe (`| a | {.shade} |`) is a cell. None: no row attributes."""
+    Only on a row written with its leading pipe: without the outer pipes (`Coffee | {.shade}`), and before a
+    closing pipe (`| a | {.shade} |`), a cell that is only {…} is a cell, as GFM reads it. An empty {} or an id
+    alone stays text, as in a cell. None: no row attributes."""
     s = ROW_PREFIX.sub("", line).strip()
-    if len(raws) < 2 or s.endswith("|"):
+    if len(raws) < 2 or not s.startswith("|") or s.endswith("|"):
         return None
     m = ATTRS_ONLY.fullmatch(raws[-1])
     a = parse_attrs(m.group(1)) if m else None
-    return a if a is not None and (a.classes or a.kv) else None
+    return a if a is not None and _meant(a) else None
 
 
 def _title_tails(lines: list[str]) -> dict[int, tuple[str, Attrs]]:

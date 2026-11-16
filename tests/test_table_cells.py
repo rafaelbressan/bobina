@@ -367,3 +367,72 @@ def test_no_cell_row_or_span_attribute_makes_a_line_wider_than_the_paper(profile
                 if r.kind != "table" and native:  # a standing table's views stop where the paper does
                     assert all(cols_of("".join(c.ch for c in v.cells)) <= paper for v in r.text_rows or []), (
                         table, attrs)  # fmt: skip
+
+
+# --- review ---------------------------------------------------------------------------------------------------------
+
+
+def test_a_standing_span_widens_its_columns_when_a_word_would_not_fit_and_not_otherwise():
+    res = build("| A | B | C |\n|---|---|---|\n| Note | Complimentary {span=2} | |\n")
+    assert lines(res)[1] == "Note               Complimentary" and "L101" not in codes(res)
+    compact = build("| | |\n|---|---|\n| Grand total due {span=all} | |\n{.compact}\n")
+    assert lines(compact) == ["Grand", "total", "due"] and "L101" not in codes(compact)  # words whole, no cut
+    plain = build(BILL + "| Rice | 1 | 9,00 |\n")
+    fits = build(BILL + "| Rice | 1 | 9,00 |\n| | ok {span=all} |\n")
+    assert lines(fits)[:2] == lines(plain)  # a span that fits changes nothing
+
+
+def test_a_span_is_cut_only_when_the_paper_has_no_room():
+    word = "x" * 40
+    res = build(f"| A | B |\n|---|---|\n| a | b |\n| {word} {{span=all}} |\n")
+    assert "L101" in codes(res) and all(len(ln) <= 32 for ln in lines(res))
+
+
+@pytest.mark.parametrize("doc", [
+    BILL + "| Rice | 1 | 9,00 {.invert} |\n",
+    BILL + "| Rice | 1 | 9,00 | {.invert}\n",
+    "| Item | Qty | Price | {.invert}\n|---|--:|--:|\n| Rice | 1 | 9,00 |\n",
+])  # fmt: skip
+def test_inverted_cells_and_rows_in_a_small_font_say_f204(doc):
+    small = build(doc + "{font=Terminus size=16px}\n")
+    assert [n.message for n in small.nudges if n.code == "F204"] == ["inverted cells at 16px close up"]
+    assert "F204" not in codes(build(doc + "{font=Terminus size=20px}\n"))
+
+
+def test_a_covered_empty_cells_own_braces_are_said():
+    res = build("| A | B | C |\n|---|---|---|\n| Discount {span=all} | {.invert} | |\n")
+    assert said(res, "M101") == [".invert on a cell covered by span=all does nothing"]
+
+
+def test_a_row_without_its_leading_pipe_has_no_row_braces_its_last_brace_is_a_cell():
+    res = build("A | B\n---|---\nCoffee | {.shade}\n")
+    assert "P301" in codes(res)  # the B cell is shaded
+    assert not any(isinstance(r, BitmapRow) and r.kind == "band" for r in res.rows)
+    title = build("Item | Price | {.invert}\n---|---\nRice | 9,00\n")
+    assert "M104" not in codes(title)
+
+
+def test_header_invert_title_classes_apply_and_what_cannot_show_is_said():
+    res = build("| Item {.shade .right} | Price |\n|---|--:|\n| Rice | 9,00 |\n{style=header-invert}\n")
+    assert said(res, "M101") == [".shade on the titles does nothing with style=header-invert: they are white on "
+                                 "black already"]  # fmt: skip
+    assert lines(res)[0].endswith("Item Price")  # .right applies on the band
+
+
+def test_a_title_row_brace_on_an_empty_title_row_is_said():
+    res = build("| | | {.invert}\n|---|--:|\n| Rice | 9,00 |\n")
+    assert said(res, "M101") == [".invert on the title row: its titles are empty, no title row prints"]
+    assert "M104" in codes(res)
+
+
+@pytest.mark.parametrize("brace", ["{#x}", "{}"])
+def test_an_id_alone_or_empty_braces_after_a_row_stay_text(brace):
+    res = build(f"| A | B | C |\n|---|---|---|\n| a | b | {brace}\n")
+    assert lines(res)[1].endswith(brace) and not codes(res)
+
+
+def test_a_turned_tables_view_shows_an_inverted_row():
+    res = build("| Item | Price |\n|---|--:|\n| Rice | 9,00 | {.invert}\n{orientation=vertical}\n")
+    turned = next(r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "table")
+    title, rice = turned.text_rows
+    assert all(c.invert for c in rice.cells) and not any(c.invert for c in title.cells)

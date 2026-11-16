@@ -1519,12 +1519,12 @@ class Layout:
         ncol = len(t.header)
         given = self.table_columns(t, ncol)
         head = [
-            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i), t.head_row)
+            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i, Attrs()), t.head_row)
             for i, c in enumerate(t.header)
         ]
         rows_at = [*t.row_lines, *[t.line] * (len(t.rows) - len(t.row_lines))]
         body = [
-            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _at(_at(t.cells, k, []), i), _row(t, k))
+            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _cell(t, k, i), _row(t, k))
              for i, c in enumerate([*r[:ncol], *[[]] * (ncol - len(r))])]
             for k, (r, at) in enumerate(zip(t.rows, rows_at, strict=True))
         ]  # fmt: skip
@@ -1541,6 +1541,13 @@ class Layout:
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted titles at {ink.px}px close up", self.said_at(t, "style="),
                        "use size=20px or more, or style=receipt", "R2-12")  # fmt: skip
+        self.table_title_marks(t, head, style)
+        titles = head and style != "header-invert" and _any_class([t.head_row, *t.heads], "invert")
+        inverted = [t.line] if titles else []
+        inverted += [at for k, at in enumerate(rows_at) if _any_class([_row(t, k), *_at(t.cells, k, [])], "invert")]
+        if face and inverted and ink.px < int(self.p.get("raster.invert_min_px", 20)):
+            self.n.add("F204", f"inverted cells at {ink.px}px close up", inverted[0],
+                       "use size=20px or more, or leave out .invert", "R2-12")  # fmt: skip
         # a cell spanning columns counts in none of them: its text wraps in their widths and the spaces between them
         cols = [[*([head[i]] if head else []), *(r[i] for r, s in zip(body, spans, strict=True) if s[i] == 1)]
                 for i in range(ncol)]  # fmt: skip
@@ -1766,6 +1773,19 @@ class Layout:
             cells.pop()
         return cells
 
+    def table_title_marks(self, t: Table, head, style: str) -> None:
+        """What the title row's {…} or its cells' .invert and .shade cannot do, said (M101): a table whose titles
+        are empty prints no title row to style; style=header-invert titles are white on black already."""
+        names = sorted({f".{c}" for a in [t.head_row, *t.heads] for c in a.classes})
+        if not head and names:
+            self.n.add("M101", f"{' '.join(names)} on the title row: its titles are empty, no title row prints",
+                       t.line, "style the rows instead: | TOTAL | 9,00 | {.bold}")  # fmt: skip
+            return
+        dark = [n for n in names if n in (".invert", ".shade")]
+        if head and style == "header-invert" and dark:
+            self.n.add("M101", f"{' '.join(dark)} on the titles does nothing with style=header-invert: they are "
+                       "white on black already", t.line, "leave it out, or use another style=")  # fmt: skip
+
     def table_spans(self, t: Table, k: int, row: list[list[Cell]], at: int) -> list[int]:
         """How many columns each cell of body row k takes (span= at the end of a cell; 0: covered by the one
         before). It starts where it is written and goes to the end (all) or over N columns; past the end of the
@@ -1791,6 +1811,12 @@ class Layout:
                     )  # fmt: skip
                     n = j - i
                     break
+            for j in range(i + 1, i + n):  # an empty covered cell's own {…} has no cell left to style: said
+                own = _at(styles, j, Attrs())
+                names = [f".{c}" for c in sorted(own.classes)] + [f"{k}=" for k in sorted(own.kv)]
+                if names:
+                    self.n.add("M101", f"{' '.join(names)} on a cell covered by span={given} does nothing", at,
+                               f"put it at the end of the spanning cell, in its {{span={given} …}}")  # fmt: skip
             out[i : i + n] = [n] + [0] * (n - 1)
             i += n
         return out
@@ -1841,6 +1867,8 @@ class Layout:
                          [lay.hard[i] for i in auto])  # fmt: skip
         for i, w in zip(auto, sub, strict=True):
             widths[i] = w
+        keep = [max(h, min(n, w)) for h, n, w in zip(lay.hard, natural, longest[0], strict=True)]
+        self.widen_for_spans(widths, body, lay, ink, max(0, cap - sum(widths)), keep)
         if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
             widths[auto[0]] += cap - sum(widths)
         free = max(0, cap - sum(widths))  # a .compact table is narrower than the paper: .center and .right place
@@ -1852,6 +1880,38 @@ class Layout:
         top, groups, between, bottom = self.table_pieces(*self.table_rows(t, head, body, widths, ink, hush), geo)
         pieces = [*top, *(p for k, g in enumerate(groups) for p in [*(between if k else []), *g]), *bottom]
         return [self.table_row(p, geo, indent, shift) for p in pieces]
+
+    @staticmethod
+    def widen_for_spans(widths: list[int], body, lay: _Lay, ink, free: int | None, keep=None) -> None:
+        """After the columns are sized: a spanning cell that does not fit the columns it covers widens the last of
+        them not given a width (all given one: it wraps in them, as asked). Standing, it needs its longest word and
+        takes the free room first, then what the other auto columns have beyond `keep` (their longest word), never
+        past the paper: only then is a word cut (L101). Turned (free None) it needs its whole text: the length is
+        free. A span that fits changes nothing."""
+        for row, slots in zip(body, lay.slots, strict=True):
+            for s in slots:
+                autos = [i for i in s.cols if lay.fixed[i] is None]
+                if s.alone or not autos or not row[s.first]:
+                    continue
+                cells = row[s.first]
+                need = (ink.units(cells) if free is None else _longest([cells], ink.units)) - _span(widths, s)
+                if need <= 0:
+                    continue
+                if free is None:
+                    widths[autos[-1]] += need
+                    continue
+                take = min(need, free)
+                widths[autos[-1]] += take
+                free, need = free - take, need - take
+                while need > 0 and keep:
+                    others = [i for i in range(len(widths)) if i not in s.cols and lay.fixed[i] is None
+                              and widths[i] > keep[i]]  # fmt: skip
+                    if not others:
+                        break
+                    j = max(others, key=lambda i: widths[i] - keep[i])
+                    widths[j] -= 1
+                    widths[autos[-1]] += 1
+                    need -= 1
 
     def table_squeezed(self, t: Table, why: str, lay: _Lay, style: str, ink) -> None:
         """L107: the columns did not fit across the paper as given. scaled: the widths given shrank in proportion
@@ -1942,7 +2002,7 @@ class Layout:
                 for s, seg in zip(ln.slots, ln.segs, strict=True):
                     grid[s.last] += max(0, columns(seg) - _span(grid, s))
         for ln in every:
-            ln.cells, ln.view = _padded(ln.slots, ln.segs, grid)
+            ln.cells, ln.view = _padded(ln.slots, ln.segs, grid, ln.row.has("invert"))
         return heads, groups
 
     def table_pieces(self, head: list[_TLine], body: list[list[_TLine]], geo: _Geo) -> tuple[list, list, list, list]:
@@ -1997,13 +2057,14 @@ class Layout:
     def table_marked(self, lines: list[_TLine], geo: _Geo, zebra: bool = False) -> Image.Image:
         """A row drawn with its marks: an inverted row or cell white on one continuous black box (a little paper
         above and below the row, as a title band has), then the grey dots of zebra and .shade behind the text."""
-        m = int(self.p.get("raster.invert_margin_dots", 4)) if any(b for b, _ in self.mark_boxes(lines, geo)) else 0
+        boxes = self.mark_boxes(lines, geo)
+        m = int(self.p.get("raster.invert_margin_dots", 4)) if any(inverted for inverted, _ in boxes) else 0
         im = self.table_canvas(lines, geo, m, m)
-        self.invert_boxes(im, lines, geo, im.height)
+        _invert_boxes(im, boxes, im.height)
         im = _bw(im)
         if zebra:  # the style's row: as wide as the table's text
             im = imaging.shade(im, (geo.x0, 0, geo.x0 + geo.inner, im.height))
-        return self.shade_boxes(im, lines, geo, im.height)
+        return _shade_boxes(im, boxes, im.height)
 
     def mark_boxes(self, lines: list[_TLine], geo: _Geo) -> list[tuple[bool, tuple[int, int]]]:
         """(inverted, (left, right)) for each box a row marks: the whole row for a {.invert} or {.shade} after it,
@@ -2011,7 +2072,7 @@ class Layout:
         table's sides, a little past them; in a grid, to its border). An inverted row inverts every cell once."""
         if not lines:
             return []
-        ln, ink = lines[0], geo.ink
+        ink = geo.ink
         x, edge = geo.x0 + geo.pad, geo.pad if geo.style == "grid" else int(self.p.get("raster.invert_margin_dots", 4))
         last = len(geo.widths) - 1
 
@@ -2028,28 +2089,9 @@ class Layout:
             return max(0, lo), min(geo.width, hi)
 
         whole = (max(0, x - edge), min(geo.width, x + geo.inner + edge))
-        out = []
-        if ln.row.has("invert"):
-            out.append((True, whole))
-        if ln.row.has("shade"):
-            out.append((False, whole))
-        out += [(True, box(s)) for s in ln.slots if s.invert and not ln.row.has("invert")]
-        out += [(False, box(s)) for s in ln.slots if s.shade and not ln.row.has("shade")]
-        return out
-
-    def invert_boxes(self, im: Image.Image, lines: list[_TLine], geo: _Geo, bottom: int) -> None:
-        """The inverted boxes of a row turned white on black, down to `bottom` (mode L, in place)."""
-        for inverted, (lo, hi) in self.mark_boxes(lines, geo):
-            if inverted and hi > lo:
-                box = (lo, 0, hi, bottom)
-                im.paste(ImageOps.invert(im.crop(box)), box[:2])
-
-    def shade_boxes(self, im: Image.Image, lines: list[_TLine], geo: _Geo, bottom: int) -> Image.Image:
-        """The grey dots of a row's shaded boxes (imaging.shade: kept off the letters and off black)."""
-        for inverted, (lo, hi) in self.mark_boxes(lines, geo):
-            if not inverted and hi > lo:
-                im = imaging.shade(im, (lo, 0, hi, bottom))
-        return im
+        mk = _marks_of(lines[0])
+        return [*([(True, whole)] if mk.row_invert else []), *([(False, whole)] if mk.row_shade else []),
+                *((True, box(s)) for s in mk.inverted), *((False, box(s)) for s in mk.shaded)]  # fmt: skip
 
     def grid_piece(self, lines: list[_TLine], geo: _Geo) -> Image.Image:
         """style=grid: one row of the table in its cells, the rule under it, the borders and the lines between the
@@ -2058,7 +2100,8 @@ class Layout:
         s = max(2, int(self.p.get("raster.min_stroke_dots", 2)))  # B101: thinner prints broken
         lift = max(2, (geo.ink.line_h - geo.ink.text_h) // 2) if lines else 0  # air above the text
         im = self.table_canvas(lines, geo, lift, s)
-        self.invert_boxes(im, lines, geo, im.height - s)
+        boxes = self.mark_boxes(lines, geo)
+        _invert_boxes(im, boxes, im.height - s)
         d = ImageDraw.Draw(im)
         left, right = geo.x0, geo.x0 + geo.inner + 2 * geo.pad - 1
         d.rectangle((left, im.height - s, right, im.height - 1), fill=0)
@@ -2073,7 +2116,7 @@ class Layout:
             at += 1
         for x in xs:
             d.rectangle((x, 0, x + s - 1, im.height - 1), fill=0)
-        return self.shade_boxes(_bw(im), lines, geo, im.height - s)
+        return _shade_boxes(_bw(im), boxes, im.height - s)
 
     def table_row(self, piece, geo: _Geo, indent: int, shift: int):
         """A piece of a standing table as the row that prints it: a native line, a divider across the paper, or a
@@ -2102,12 +2145,7 @@ class Layout:
         each in the table's style. The rows are kept as text for the terminal views."""
         align = self.object_align(t.attrs)
         widths = [f or max(1, w) for w, f in zip(natural, lay.fixed, strict=True)]
-        for row, slots in zip(body, lay.slots, strict=True):  # a span keeps its text on one line too: the last auto
-            for s in slots:  # column it covers widens (all of them given a width: it wraps in them)
-                free = [i for i in s.cols if lay.fixed[i] is None]
-                need = ink.units(row[s.first]) - _span(widths, s)
-                if free and need > 0:
-                    widths[free[-1]] += need
+        self.widen_for_spans(widths, body, lay, ink, None)  # the length is free: a span keeps its text on one line
         self.table_note(t, head, widths, ink, lay, style, turned=True)
         geo = _Geo.of(t, style, ink, widths, None, 0)
         heads, rows = self.table_rows(t, head, body, widths, ink, lay)
@@ -2189,6 +2227,11 @@ def _at(items: list, i: int, default=None):
     return items[i] if i is not None and 0 <= i < len(items) else default
 
 
+def _cell(t: Table, k: int, i: int) -> Attrs:
+    """The classes and span= of cell i of body row k, from the {…} at its end."""
+    return _at(_at(t.cells, k, []), i, Attrs())
+
+
 def _row(t: Table, k: int) -> Attrs:
     """The classes of body row k, from the {…} after its closing pipe."""
     return _at(t.row_attrs, k, Attrs())
@@ -2207,19 +2250,61 @@ def _span(widths: list[int], s: _Slot) -> int:
     return sum(widths[s.first : s.last + 1]) + s.last - s.first
 
 
+@dataclass
+class _RowMarks:
+    """What a row marks: the whole row inverted or shaded ({.invert} {.shade} after it), and the cells inverted or
+    shaded on their own (not again inside an inverted or shaded row)."""
+
+    row_invert: bool = False
+    row_shade: bool = False
+    inverted: tuple = ()
+    shaded: tuple = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.row_invert or self.row_shade or self.inverted or self.shaded)
+
+
+def _marks_of(ln: _TLine | None) -> _RowMarks:
+    """The one place that reads a row's marks (drawn or not, its kind, its boxes)."""
+    if ln is None:
+        return _RowMarks()
+    inv, shade = ln.row.has("invert"), ln.row.has("shade")
+    return _RowMarks(inv, shade, tuple(s for s in ln.slots if s.invert and not inv),
+                     tuple(s for s in ln.slots if s.shade and not shade))  # fmt: skip
+
+
 def _marked(lines: list[_TLine]) -> bool:
     """Whether a row has an inverted or shaded cell, or an {.invert} or {.shade} after it: then it is drawn."""
-    ln = lines[0] if lines else None
-    return bool(ln) and (ln.row.has("invert") or ln.row.has("shade") or any(s.invert or s.shade for s in ln.slots))
+    return bool(_marks_of(lines[0] if lines else None))
 
 
 def _kind(lines: list[_TLine], zebra: bool = False) -> str:
     """A drawn row's kind (table_pieces): band when the whole row is white on black, zebra when it has grey dots."""
-    ln = lines[0] if lines else None
-    words = ["band"] if ln and ln.row.has("invert") else []
-    if zebra or (ln and (ln.row.has("shade") or any(s.shade for s in ln.slots))):
+    mk = _marks_of(lines[0] if lines else None)
+    words = ["band"] if mk.row_invert else []
+    if zebra or mk.row_shade or mk.shaded:
         words.append("zebra")
     return " ".join(words) or "drawn"
+
+
+def _invert_boxes(im: Image.Image, boxes: list, bottom: int) -> None:
+    """A row's inverted boxes (mark_boxes) turned white on black, down to `bottom` (mode L, in place)."""
+    for inverted, (lo, hi) in boxes:
+        if inverted and hi > lo:
+            box = (lo, 0, hi, bottom)
+            im.paste(ImageOps.invert(im.crop(box)), box[:2])
+
+
+def _shade_boxes(im: Image.Image, boxes: list, bottom: int) -> Image.Image:
+    """The grey dots of a row's shaded boxes (imaging.shade: kept off the letters and off black)."""
+    for inverted, (lo, hi) in boxes:
+        if not inverted and hi > lo:
+            im = imaging.shade(im, (lo, 0, hi, bottom))
+    return im
+
+
+def _any_class(attrs: list[Attrs], cls: str) -> bool:
+    return any(a.has(cls) for a in attrs)
 
 
 def _offset(align: str, free: int) -> int:
@@ -2227,10 +2312,12 @@ def _offset(align: str, free: int) -> int:
     return {"right": free, "center": free // 2}.get(align, 0)
 
 
-def _padded(slots: list[_Slot], segs: list[list[Cell]], grid: list[int]) -> tuple[list[Cell], list[Cell]]:
+def _padded(
+    slots: list[_Slot], segs: list[list[Cell]], grid: list[int], band: bool = False
+) -> tuple[list[Cell], list[Cell]]:
     """A table line on the column grid: each cell's text aligned in its width (a span's: the widths it covers and
     the spaces between them), one column of space between cells. And the same for the terminal views, an inverted
-    cell's columns inverted."""
+    cell's columns inverted, and every column of an inverted row (band)."""
     line: list[Cell] = []
     view: list[Cell] = []
     last = len(grid) - 1
@@ -2240,7 +2327,8 @@ def _padded(slots: list[_Slot], segs: list[list[Cell]], grid: list[int]) -> tupl
         part = [Cell(" ")] * left + seg + [Cell(" ")] * max(0, free - left)
         gap = [Cell(" ")] if s.last < last else []
         line += part + gap
-        view += ([replace(c, invert=True) for c in part] if s.invert else part) + gap
+        view += [replace(c, invert=True) for c in part + gap] if band else (
+            ([replace(c, invert=True) for c in part] if s.invert else part) + gap)  # fmt: skip
     while line and line[-1] == Cell(" "):
         line.pop()
     while view and view[-1] == Cell(" "):
