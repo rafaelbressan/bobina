@@ -19,7 +19,8 @@ def test_help_table_prints_on_an_80_column_terminal(capsys):
     assert max(len(line) for line in out.splitlines()) <= 80
     out = " ".join(out.split())  # wrapped lines read as one
     for must in ("style=plain|receipt|lines|grid|header-invert|zebra", "width=", 'prefix="R$ "', "span=all",
-                 "one empty cell for each column before it", "lowercase", "| | |", "docs/guides/tables.md"):  # fmt: skip
+                 "one empty cell for each column before it", "lowercase", "widest left-aligned one", "| | |",
+                 "docs/guides/tables.md"):  # fmt: skip
         assert must in out, must
 
 
@@ -64,13 +65,19 @@ def test_the_example_is_clean():
     assert not [n.code for n in res.visible_nudges() if n.severity in ("warning", "error")]
 
 
-def test_bobina_help_lists_every_topic(capsys):
+def test_bobina_help_lists_every_topic(capsys, monkeypatch):
     """The footer of bobina help, the help command's description and an unknown topic say the same list, made from
-    TOPICS: a new topic cannot be left out of them."""
+    TOPICS: a new topic cannot be left out of them. On an 80-column terminal the footer wraps between topics."""
+    monkeypatch.setenv("COLUMNS", "80")
     cli.main(["help"])
-    footer = capsys.readouterr().out.strip().splitlines()[-1]
-    for t in ("format", "table", "data", "pay", "contact", "icons", "nudges", "aliases", "E302", "COMMAND"):
-        assert f" {t}" in footer, t
+    out = capsys.readouterr().out
+    assert max(len(line) for line in out.splitlines()) <= 80
+    footer = out[out.index("Help: bobina help") :]
+    words = [w.strip() for w in footer.removeprefix("Help: bobina help").split("|")]
+    assert words == [*args.SHOWN, "E302", "COMMAND"]
+    for t in ("format", "table", "data", "pay", "contact", "icons", "nudges", "aliases"):
+        assert t in args.SHOWN, t
+    assert args._footer(40).count("\n") >= 3 and max(len(x) for x in args._footer(40).splitlines()) <= 40
     assert cli.main(["help", "tabel"]) == cli.USAGE
     err = capsys.readouterr().err
     assert "did you mean table?" in err and all(t in err for t in args.LISTED)

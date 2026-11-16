@@ -10,19 +10,34 @@ cell versus a column's prefix). Standard library only: it runs with the sandbox'
 
 from __future__ import annotations
 
+import ast
 import functools
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 BRAILLE = re.compile(r"^[⠀-⣿]+$")
+SHIM_REAL = re.compile(r"^REAL, TRACE = (.+)$", re.M)  # cli-agent-eval's shim: REAL, TRACE = '/…/bobina', '/…'
+
+
+@functools.cache
+def executable() -> str:
+    """The real bobina, not cli-agent-eval's shim in front of it: the shim logs every call into the agent's trace,
+    and a check is not the agent's call. The shim names the real program in its REAL line (sandbox.py SHIM)."""
+    found = shutil.which("bobina")
+    if not found:
+        sys.exit("no bobina on PATH")
+    m = SHIM_REAL.search(Path(found).read_bytes()[:8192].decode("utf-8", "replace"))
+    return ast.literal_eval(m.group(1))[0] if m else found
 
 
 @functools.cache
 def bobina(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bobina", *args], capture_output=True, text=True)
+    return subprocess.run([executable(), *args], capture_output=True, text=True)
 
 
 def problems(path: str) -> list[dict]:
@@ -52,6 +67,24 @@ def is_rule(line: str) -> bool:
     return bool(BRAILLE.match(line.strip()))
 
 
+@functools.cache
+def receipt_rule() -> set[str]:
+    """How bobina view shows the dashed rule of style=receipt (its braille letters), asked of bobina itself: a
+    solid rule, a divider (--- {.dashed}) or another style's line shows other letters."""
+    with tempfile.TemporaryDirectory() as tmp:
+        ref = Path(tmp) / "ref.bob.md"
+        ref.write_text("| A |\n|---|\n| b |\n{style=receipt}\n", encoding="utf-8")
+        lines = view(str(ref))
+    i = find(lines, "A")
+    if i < 1 or not is_rule(lines[i - 1]):
+        sys.exit(f"bobina view shows no receipt rule to compare with: {lines}")
+    return set(lines[i - 1].strip())
+
+
+def is_receipt_rule(line: str) -> bool:
+    return is_rule(line) and set(line.strip()) <= receipt_rule()
+
+
 def widths(path: str, ncol: int) -> list[tuple[str, int]] | None:
     """(title, width) of each column of the first table with `ncol` columns, from bobina check's L108 note."""
     for p in problems(path):
@@ -66,7 +99,7 @@ def body_rows(path: str) -> list[str]:
     """The body rows of every table in the document as written (no title row, no separator row)."""
     lines, rows = Path(path).read_text(encoding="utf-8").splitlines(), []
     for i, ln in enumerate(lines):
-        if re.match(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$", ln) and i > 0 and "|" in lines[i - 1]:
+        if re.match(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", ln) and i > 0 and "|" in lines[i - 1]:
             j = i + 1
             while j < len(lines) and lines[j].strip().startswith("|"):
                 rows.append(lines[j])
@@ -111,8 +144,8 @@ def rules_around_titles(path, *titles):
     i = find(lines, *titles)
     if i < 0:
         fail(f"no title line with {titles}")
-    if not (i > 0 and is_rule(lines[i - 1]) and i + 1 < len(lines) and is_rule(lines[i + 1])):
-        fail(f"no dashed line both above and below the titles: {lines[max(0, i - 1) : i + 2]}")
+    if not (i > 0 and is_receipt_rule(lines[i - 1]) and i + 1 < len(lines) and is_receipt_rule(lines[i + 1])):
+        fail(f"no receipt's dashed line both above and below the titles: {lines[max(0, i - 1) : i + 2]}")
 
 
 def bar_titles_ruled(path):
@@ -159,6 +192,8 @@ def market_discount_under_description(path):
     if d < 0:
         fail("no line with the whole 'Desconto no item 3 - 3,27' (squeezed into one column?)")
     item = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("003")), -1)
+    if item < 0:
+        fail("no item 003 (no line starting with 003)")
     nxt = next((i for i, ln in enumerate(lines) if ln.lstrip().startswith("008")), len(lines))
     if not item < d < nxt:
         fail("the discount line is not right after item 003")

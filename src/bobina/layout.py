@@ -1870,8 +1870,10 @@ class Layout:
             widths[i] = w
         keep = [max(h, min(n, w)) for h, n, w in zip(lay.hard, natural, longest[0], strict=True)]
         self.widen_for_spans(widths, body, lay, ink, max(0, cap - sum(widths)), keep)
-        if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
-            widths[auto[0]] += cap - sum(widths)
+        if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch to the paper's edge: the spare
+            text = [i for i in auto if _at(t.aligns, i, "left") == "left"] or auto  # room goes to the widest auto
+            widths[max(text, key=lambda i: natural[i])] += cap - sum(widths)  # column of text (left-aligned; the
+            # numbers are right-aligned), ties to the first: an item's description, a total's label
         free = max(0, cap - sum(widths))  # a .compact table is narrower than the paper: .center and .right place
         place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))  # a cut one: none
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") or not auto else 0
@@ -1989,9 +1991,10 @@ class Layout:
 
     def table_rows(self, t: Table, head, body, widths: list[int], ink, lay=None):
         """The title's lines and each body row's lines (table_wrap), each also on a grid of character columns: the
-        printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as the
-        widest text in them (a span's text widening the last column it covers), so the terminal views show every
-        column of it, lined up."""
+        printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as they
+        print, or as the widest text in them when a proportional font's text takes more character columns (a span's
+        text widening the last column it covers), so the terminal views show every column of it, lined up, where
+        the paper has it."""
         heads = self.table_wrap(t, head, widths, ink, lay, lay and lay.head_slots, t.head_row) if head else []
         groups = [self.table_wrap(t, r, widths, ink, lay, lay and _at(lay.slots, k), _row(t, k))
                   for k, r in enumerate(body)]  # fmt: skip
@@ -1999,7 +2002,7 @@ class Layout:
         grid = list(widths)
         if not ink.native:
             alone = [(s.first, seg) for ln in every for s, seg in zip(ln.slots, ln.segs, strict=True) if s.alone]
-            grid = [max([0, *(columns(seg) for i, seg in alone if i == c)]) for c in range(len(widths))]
+            grid = [max([w, *(columns(seg) for i, seg in alone if i == c)]) for c, w in enumerate(widths)]
             for ln in every:
                 for s, seg in zip(ln.slots, ln.segs, strict=True):
                     grid[s.last] += max(0, columns(seg) - _span(grid, s))

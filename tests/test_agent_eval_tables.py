@@ -73,6 +73,53 @@ def test_the_broken_file_fails_the_fix_checks(box):
     assert len(said) == len(task["checks"]), said
 
 
+def said(check: str, text: str) -> list[str]:
+    """What one check says of a document written into the work folder (empty: it passes)."""
+    Path("doc.bob.md").write_text(text, encoding="utf-8")
+    return failures(load_checks(), [(check, "doc.bob.md")])
+
+
+def test_r_dollar_typed_in_cells_is_caught_with_short_separators(box):
+    doc = "| Produto | Preço | Promo |\n|---|--:|--:|\n| Arroz 5 kg | R$ 24,90 | R$ 21,90 |\n"
+    assert said("prices-not-typed", doc)
+    assert said("prices-not-typed", doc.replace("|---|--:|--:|", "|:-|-:|:-:|"))
+
+
+def test_totals_in_a_smaller_font_pass(box):
+    doc = "| | |\n|---|--:|\n| Subtotal | 157,50 |\n| Gorjeta sugerida | 18,90 |\n| Total | 176,40 |\n"
+    doc += "{font=Terminus size=16px}\n"
+    for check in ("clean", "totals-without-title", "totals-name-left-value-right"):
+        assert not said(check, doc), check
+
+
+def test_a_dashed_divider_over_a_plain_table_is_not_the_receipt_look(box):
+    doc = "--- {.dashed}\n\n| QTDE | DESCRIÇÃO | VALOR |\n|--:|---|--:|\n| 1 | Bagel ovos | 39,00 |\n"
+    assert said("bar-titles-ruled", doc)
+    assert not said("bar-titles-ruled", doc.replace("--- {.dashed}\n\n", "") + "{style=receipt}\n")
+
+
+def test_no_item_003_is_said_plainly(box):
+    doc = "| IT | DESCRIÇÃO |\n|---|---|\n| 001 | CEBOLA |\n| | Desconto no item 3 - 3,27 {span=all} |\n"
+    assert said("market-discount-under-description", doc) == [
+        "market-discount-under-description: no item 003 (no line starting with 003)"
+    ]
+
+
+def test_the_checks_call_the_real_bobina_not_the_eval_shim(box, tmp_path, monkeypatch):
+    """cli-agent-eval puts a shim named bobina first on PATH that logs each call as the agent's; the checks read
+    the real program from the shim's REAL line and leave the trace alone."""
+    real = tmp_path / "bin" / "bobina"  # the box's bobina, this checkout's
+    shim, trace = tmp_path / "shim" / "bobina", tmp_path / "trace.jsonl"
+    shim.parent.mkdir()
+    shim.write_text(f"#!/bin/sh\necho called >> {trace}\nexit 1\nREAL, TRACE = {str(real)!r}, {str(trace)!r}\n")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim.parent}{os.pathsep}{os.environ['PATH']}")
+    checks = load_checks()
+    assert checks.executable() == str(real)
+    assert failures(checks, [("clean", "etiqueta.bob.md")])[0].startswith("clean: bobina check: M101")
+    assert not trace.exists()
+
+
 def test_a_check_runs_as_the_eval_runs_it(box):
     script = ROOT / "evals" / "checks" / "table_checks.py"
     r = subprocess.run([sys.executable, str(script), "clean", "etiqueta.bob.md"], capture_output=True, text=True)

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Annotated
 
 from . import paper
+from .cli.args import LISTED
 from .cli.common import LEFT_OUT, OK, USAGE, Fail
 from .datasource import NAME_OK
 from .library import NAME_RE, LibraryError, check_name
@@ -142,13 +143,6 @@ def _meaning(code: int) -> str:
     from .cli.args import EXIT_CODES
 
     return EXIT_CODES.get(code, "")
-
-
-def _help_topics() -> list[str]:
-    """What the help tool takes: the topics bobina help lists (one list, in cli/args.py)."""
-    from .cli.args import LISTED
-
-    return LISTED
 
 
 def result(r: Run, *extra):
@@ -467,7 +461,7 @@ def build(printer=None, profile=None, allow: list[str] | None = None, strict: bo
     async def help_(
         topic: Annotated[
             str | None,
-            Field(description=", ".join(_help_topics()) + "; none: the whole CLI for programs"),
+            Field(description=", ".join(LISTED) + "; none: the whole CLI for programs"),  # bobina help's list
         ] = None,
         name: Annotated[
             str | None, Field(description="with topic pay or contact: one scheme or network, e.g. pix")

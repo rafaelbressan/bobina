@@ -456,3 +456,35 @@ def test_shrink_never_passes_its_room_even_below_one_each():
     for widths in ([1] * 10, [3, 3, 3], [40, 1, 1, 1, 1]):
         for cap in range(0, len(widths) + 1):
             assert sum(_shrink(widths, cap)) <= cap, (widths, cap)
+
+
+# --- the spare room goes to the widest auto column; a font table's view is as wide as its paper ------------------
+
+
+def test_the_spare_room_goes_to_the_widest_column_of_text():
+    """The widest left-aligned auto column takes what is left of the paper (ties: the first); without one, the
+    widest auto column."""
+    res = build("| Qty | Item | Price |\n|--:|---|--:|\n| 2 | Espresso | 18,00 |\n| 1 | Bagel | 39,00 |\n")
+    assert lines(res)[1] == "  2 " + "Espresso".ljust(22) + " 18,00"  # the description takes it, not Qty
+    res = build("| Item | Qty | Price |\n|---|--:|--:|\n| Rice | 1 | 9,00 |\n")
+    assert lines(res)[1] == "Rice".ljust(22) + "   1  9,00"  # Price is wider, but right-aligned: a number
+    res = build("| | |\n|---|--:|\n| SUBTOTAL | 88,00 |\n| TOTAL | 96,80 |\n")
+    assert lines(res)[0] == "SUBTOTAL".ljust(27) + "88,00"  # a total's label still does
+    res = build("| ab | cd |\n|---|---|\n| x | y |\n")
+    assert lines(res)[0] == "ab".ljust(30) + "cd"  # a tie: the first
+    res = build("| a | bbb |\n|--:|--:|\n| 1 | 2 |\n")
+    assert lines(res)[0] == "a" + " bbb".rjust(31)  # nothing left-aligned: the widest auto column
+
+
+def test_a_short_code_column_on_58mm_leaves_the_room_to_the_description():
+    res = build("| IT | CÓD | DESCRIÇÃO | TOTAL |\n|---|---|---|--:|\n| 001 | 1431 | CEBOLA KG | 14,25 |\n"
+                "| 003 | 7369 | BANANA PRATA | 16,33 |\n", profile_name="mtp-ii-58")  # fmt: skip
+    assert lines(res)[1] == "001 1431 " + "CEBOLA KG".ljust(17) + " 14,25"
+
+
+def test_the_view_of_a_font_table_without_titles_is_as_wide_as_it_prints():
+    """The terminal view lines a raster-font table's columns up where the paper has them: a total's value at the
+    right margin, not next to its label."""
+    res = build('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n{font=Terminus size=16px}\n')
+    assert notes(res)[0].endswith("(+1 gap = 48 of 48)")
+    assert lines(res) == ["SUBTOTAL" + " " * 31 + "R$ 105,70", "TROCO" + " " * 36 + "R$ 7,57"]

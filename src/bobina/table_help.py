@@ -39,7 +39,8 @@ COLUMNS_PER_LINE = (  # (font, columns on 58 mm, on 80 mm), the 1-column spaces 
 )
 
 COLUMN = {
-    "width=": "auto (the default: the auto columns share what is left), 7ch (columns of the table's font), "
+    "width=": "auto (the default: the auto columns share what is left, and the widest left-aligned one, text "
+    "rather than numbers, takes the rest of the paper), 7ch (columns of the table's font), "
     "20mm, 30% (of the text room), 96 (dots). A column with a width wraps its text inside it and cuts a longer "
     "word at its edge, without a warning",
     "prefix=": '"R$ " before every body value: never in the title row, never in an empty cell',

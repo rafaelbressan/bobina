@@ -155,9 +155,21 @@ def _help_code(code: str, as_json: bool) -> int:
 
 TOPICS = ("commands", "format", "table", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
 NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pix, bobina help contact x
-SAME_AS = {"commands": "bobina help itself", "problems": "nudges"}  # topics also reached under another name
-# what bobina help says it takes, all from TOPICS: its footer, the help command's description, an unknown topic
-LISTED = [t for t in TOPICS if t not in SAME_AS] + ["a problem code (E302)", "a command"]
+ALSO_NAMED = frozenset({"commands", "problems"})  # bobina help itself; nudges: not listed again
+SHOWN = [t for t in TOPICS if t not in ALSO_NAMED]  # what bobina help lists: its footer, the help command's
+LISTED = [*SHOWN, "a problem code (E302)", "a command"]  # description, an unknown topic, the MCP help tool
+
+
+def _footer(width: int = 80) -> str:
+    """The last lines of bobina help: every topic, wrapped between topics at `width` columns."""
+    lines, line = [], "Help: bobina help"
+    for i, word in enumerate([*SHOWN, "E302", "COMMAND"]):
+        piece = (" " if i == 0 else " | ") + word
+        if len(line) + len(piece) + 2 > width:  # room left for the " |" that ends a wrapped line
+            lines.append(line + " |")
+            line, piece = "     ", " " + word
+        line += piece
+    return "\n".join([*lines, line])
 
 
 def _help_text(topic: str, name: str | None = None) -> str:
@@ -586,8 +598,7 @@ def make_parser():
         prog="bobina",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="bobina — print Markdown on thermal roll printers",
-        epilog="Every command that prints shows a confirmation first (--yes skips it).\n"
-        "Help: bobina help " + " | ".join([t for t in TOPICS if t not in SAME_AS] + ["E302", "COMMAND"]),
+        epilog="Every command that prints shows a confirmation first (--yes skips it).\n" + _footer(),
     )
     ap.add_argument("--version", action="version", version=f"bobina {__version__}")
     sub = ap.add_subparsers(dest="command", metavar="COMMAND")

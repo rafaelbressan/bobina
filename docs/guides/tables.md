@@ -20,8 +20,8 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
 ## Columns
 
 - The second line sets each column's alignment, as in any Markdown: `---` left, `--:` right, `:-:` centre.
-- Each column is as wide as its text, with **one column of space** between two columns. The table fills the paper
-  (the first column takes what is left); `.compact` keeps it narrow, `.center` or `.right` places it.
+- Each column is as wide as its text, **one column of space** between columns. The table fills the paper: the
+  widest left-aligned column (text, not numbers) takes the rest; `.compact` keeps it narrow (`.center`, `.right`).
 - The printer font has 32 columns on 58 mm paper and 48 on 80 mm, the spaces included: 4 columns on 58 mm leave
   29 for text. A cell wraps at its spaces; a word longer than an `auto` column is cut (`L101`).
 - In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`; `font=` and `size=` go to the whole table.
