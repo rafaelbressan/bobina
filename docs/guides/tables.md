@@ -1,8 +1,11 @@
-# Tables: styles, fonts and receipts
+# Tables: styles, fonts, columns and receipts
 
-A table in a `.bob.md` is a plain Markdown table. What bobina adds goes in braces `{…}` on the line right under the
-table (with or without a blank line): everything for the whole table in **one** `{…}`. Names and values are
-lowercase.
+A table in a `.bob.md` is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
+
+- for the whole table, on the line right under it (with or without a blank line): `{style=receipt .compact}`;
+- for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`.
+
+Everything with the same reach goes in the same `{…}`. Names and values are lowercase.
 
 ```markdown
 | Item | Qty | Price |
@@ -18,7 +21,7 @@ lowercase.
 - Each column is as wide as its text, with **one column of space** between two columns. The table fills the paper
   (the first column takes what is left); `.compact` keeps it narrow, `.center` or `.right` places it.
 - The printer font has 32 columns on 58 mm paper and 48 on 80 mm, the spaces included: 4 columns on 58 mm leave
-  29 for text. A cell wraps at its spaces; a word longer than its column is cut (`L101`).
+  29 for text. A cell wraps at its spaces; a word longer than its column is cut (`L101`, but see `width=` below).
 - In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.underline}`, `[word]{.invert}`. `font=` and `size=`
   on a word in a cell do nothing (`M101`): give them to the whole table.
 
@@ -33,6 +36,30 @@ on the right, the way receipts print totals.
 | SUBTOTAL | 157,50 |
 | **TOTAL** | **176,40** |
 ```
+
+## Column widths, prefixes and suffixes
+
+At the end of a column's title cell:
+
+- `width=`: `7ch` (7 columns), `20mm`, `30%` (of the paper), `96` (dots), or `auto`, the default: the columns
+  without a width share what is left. A column you give a width keeps it: its text wraps inside it, and a word
+  longer than it (a 13-digit code in `7ch`) is **cut at its edge without a warning**: you chose that width.
+- `prefix="R$ "`, `suffix=" kg"`: printed before or after every value of the column, never in the title row nor in
+  an empty cell. The column's width counts them. A value from `--data` or `--set` stays as it is.
+
+```markdown
+| Product | Price {width=8ch prefix="R$ "} | Sale {width=8ch prefix="R$ "} |
+|---|--:|--:|
+| Rice 5 kg | 24,90 | 21,90 |
+| Ground coffee 500 g | 18,75 | |
+```
+
+prints `R$ 24,90` and `R$ 21,90`; the coffee has no sale price, so nothing there. In a table without a title row,
+put them in the empty title cells, which still count as empty: `| | {prefix="R$ "} |`.
+
+`bobina check FILE` says the width each column got, in the table's columns (note `L108`):
+`line 3: column widths: Product 14 · Price 8 · Sale 8 (+2 gaps = 32 of 32)`. Widths wider than the paper shrink in
+proportion, the `auto` columns keeping 2 each (`L107`). In a table with `font=`, `7ch` is 7 times that font's `0`.
 
 ## Ready-made styles
 
@@ -73,7 +100,8 @@ give `F204`.
 ## Turned tables
 
 A table whose columns cannot keep 6 characters each prints **turned** along the paper, the titles on the right
-(`orientation=auto`, the default; note `L106`). `orientation=vertical` always turns it (`width=half` places it),
+(`orientation=auto`, the default; note `L106`), unless a column has a `width=`: then it stays standing.
+`orientation=vertical` always turns it (`width=half` places it; a column's width holds along the paper),
 `orientation=horizontal` never does. A turned table keeps its style and font.
 
 ## When something is wrong
@@ -83,28 +111,33 @@ bobina prints anyway and says what to fix (`bobina check FILE` shows the same li
 | Code | When | Example message |
 |---|---|---|
 | `M101` | an unknown style; it prints `plain` | `style=recibo: unknown style; plain, receipt, lines, grid, header-invert, zebra` |
-| `M101` | a value in capitals; it prints `plain` | `style=RECEIPT: values are lowercase` |
+| `M101` | a value in capitals | `style=RECEIPT: values are lowercase`, `width=9CH: values are lowercase` |
+| `M101` | a width it cannot read; the column is `auto` | `width=abc: not a column width` |
+| `M101` | a column setting in a body cell | `prefix= works at the end of a title cell, for its column` |
 | `M101` | something a table does not take | `leading= does nothing on a table` |
-| `L101` | a word longer than its column was cut | `word 'DESCRICAO…' split at 8 columns in a table` |
+| `L101` | a word longer than a column without `width=` was cut | `word 'DESCRICAO…' split at 8 columns in a table` |
 | `L106` | the table was turned | `a table of 9 columns does not fit across the paper: it prints VERTICALLY…` |
+| `L107` | the widths you gave are wider than the paper | `column widths add up to 61 columns, the paper has 48: scaled down` |
 
-## A shop receipt, whole
+## A supermarket receipt, whole
+
+Seven columns on 58 mm: a smaller font, the narrow columns given a width, the description taking the rest.
 
 ```markdown
-## Café Example {.center}
+## MERCADO EXEMPLO {.center}
 
-| Qty | Item | Price |
-|--:|---|--:|
-| 2 | Espresso | 18,00 |
-| 1 | Bagel | 39,00 |
-| 1 | Lemon pie | 28,00 |
-{style=receipt}
+| IT {width=3ch} | CÓD {width=7ch} | DESCRIÇÃO | QTD {width=5ch} | UN {width=2ch} | UNIT {width=5ch} | TOTAL {width=6ch} |
+|---|---|---|--:|---|--:|--:|
+| 001 | 2000000010014 | ARROZ BRANCO TIPO 1 5KG | 1 | un | 24,90 | 24,90 |
+| 003 | 2000000010038 | BANANA PRATA | 1.635 | kg | 9,99 | 16,33 |
+{style=receipt font=Terminus size=16px}
 
-| | |
+| | {prefix="R$ "} |
 |---|--:|
-| SUBTOTAL | 85,00 |
-| SERVICE 10% | 8,50 |
-| **TOTAL** | **93,50** |
+| SUBTOTAL | 41,23 |
+| **VALOR TOTAL** | **41,23** |
+{font=Terminus size=16px}
 ```
 
-Seven columns on 58 mm, the way supermarkets print: give the item table `{style=receipt font=Terminus size=16px}`.
+`bobina check` says `column widths in Terminus 16px columns: IT 3 · CÓD 7 · DESCRIÇÃO 14 · QTD 5 · UN 2 · UNIT 5 ·
+TOTAL 6 (+6 gaps = 48 of 48)`; each code prints on two lines, of 7 and 6 digits.

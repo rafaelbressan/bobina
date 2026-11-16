@@ -883,7 +883,7 @@ def _load_job(args, store):
             failed.append((e.nudge, SECURITY))
             continue
         for r in res.results:
-            for n in r.nudges:
+            for n in [*r.nudges, *r.notes]:
                 if label and not n.source:
                     n.source, n.part, n.file = label, g + 1, _short(a.target)
         store = res.first.rendered.counters if res.first.rendered else store  # counters continue

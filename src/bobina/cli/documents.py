@@ -495,8 +495,23 @@ def _stored_nudge(p: dict):
     return Nudge(**{k: p[k] for k in keys if p.get(k) is not None})
 
 
+class _Checked:
+    """A job as bobina check reports it: its problems and the notes only check says (L108: the width each table
+    column got)."""
+
+    def __init__(self, res):
+        self._res = res
+
+    def __getattr__(self, name):
+        return getattr(self._res, name)
+
+    def visible_nudges(self, doc_only: bool = False):
+        return self._res.visible_nudges(doc_only, check=True)
+
+
 def cmd_check(args):
     res, source, base, _ = load_job(args)
+    res = _Checked(res)
     sources = getattr(res, "data_sources", [])  # what {{ }} can use, per part with --data (agents asked for it)
     if args.json:
         out = job_json(res) | ({"data_columns": sources} if sources else {})

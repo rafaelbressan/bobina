@@ -12,7 +12,7 @@ from . import profile as profiles
 from .emulator import Emulator
 from .layout import Layout
 from .model import Document, Paragraph, Run
-from .nudges import Nudges
+from .nudges import CHECK_ONLY, Nudges
 from .parser import parse
 from .rows import BitmapRow, FeedRow, QRRow, TextRow
 
@@ -28,6 +28,7 @@ class Result:
     rendered: templating.Rendered | None
     allow: set[str] = field(default_factory=set)
     doc_allow: set[str] = field(default_factory=set)  # only what the document says (front matter allow:)
+    notes: Nudges = field(default_factory=Nudges)  # what only bobina check says (CHECK_ONLY: L108 column widths)
 
     @cached_property
     def emulator(self) -> Emulator:
@@ -65,10 +66,11 @@ class Result:
             "counters": self.rendered.counters.reserved() if self.rendered else {},
         }
 
-    def visible_nudges(self, doc_only: bool = False):
+    def visible_nudges(self, doc_only: bool = False, check: bool = False):
         """The problems not allowed. doc_only: only the document's own allow: counts (what print --last keeps:
-        a command line --allow belongs to its run)."""
-        return self.nudges.filtered(self.doc_allow if doc_only else self.allow)
+        a command line --allow belongs to its run). check: with the notes only bobina check says."""
+        allow = self.doc_allow if doc_only else self.allow
+        return self.nudges.filtered(allow) + (self.notes.filtered(allow) if check else [])
 
     def commit(self):
         """Call only after the print was confirmed and sent: consumes counter values."""
@@ -294,11 +296,13 @@ def build(
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")
     _note_untested(prof, rows, nudges)
+    notes = Nudges(n for n in nudges if n.code in CHECK_ONLY)  # said by bobina check, not on every print
+    nudges[:] = [n for n in nudges if n.code not in CHECK_ONLY]
     own = meta.get("allow") or []
     if isinstance(own, str):  # allow: L102 or allow: F301,L101, as on the command line
         own = re.split(r"[,\s]+", own)
     own = {str(a).strip() for a in own if str(a).strip()}
-    res = Result(doc, rows, nudges, prof, rendered, set(allow or set()) | own, own)
+    res = Result(doc, rows, nudges, prof, rendered, set(allow or set()) | own, own, notes)
     res.fields = dict(fields or {})  # the values this label was filled with (export names: {column})
     mm = res.length_mm
     if mm > 300:
@@ -404,11 +408,13 @@ class Batch:
             return preview.heights(self.strip_rows, self.profile, self.first.emulator) / (self.profile.dpi / 25.4)
         return sum(r.length_mm for r in self.labels)
 
-    def visible_nudges(self, doc_only: bool = False):
+    def visible_nudges(self, doc_only: bool = False, check: bool = False):
         seen, out = set(), []
         for r in self.results:
-            for n in r.visible_nudges(doc_only):
+            for n in r.visible_nudges(doc_only, check):
                 key = (n.code, n.line, n.message, n.source)  # the same warning in two parts is two warnings
+                if n.code in CHECK_ONLY:  # a table's widths once, from its first label, not once per data row
+                    key = (n.code, n.line, n.source)
                 if key not in seen:
                     seen.add(key)
                     out.append(n)

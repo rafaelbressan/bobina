@@ -58,6 +58,11 @@ FIX = {
         "Read it with the header on the right. orientation=vertical keeps it so without the note; "
         "orientation=horizontal keeps it standing, with narrow wrapped columns."
     ),
+    "L107": (
+        "Give the columns smaller width= (bobina check lists the width each got), leave one out, or use a smaller "
+        "font on the table's {…} line: {font=Terminus size=16px}."
+    ),
+    "L108": "Nothing to fix: change a column's width= at the end of its title cell, then check again.",
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",

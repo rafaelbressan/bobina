@@ -43,6 +43,8 @@ TABLE_HINT = (
     + ", ".join([*(f".{c}" for c in sorted(TABLE_CLASSES)), *(f"{k}=" for k in sorted(TABLE_KEYS - {"id"}))])
     + " and #id (docs/guides/tables.md)"
 )
+COLUMN_WIDTH_RE = re.compile(r"^(\d+(?:\.\d+)?)(ch|mm|%|px|dots)?$")  # width= at the end of a title cell
+COLUMN_WIDTH_HINT = "auto, 7ch, 20mm, 30% or dots (96); the column shares what is left (auto)"
 ICON_SPLIT = f"([{chr(icons.PUA)}-\U0010fffd])"  # one icon character, kept by re.split
 
 
@@ -1513,9 +1515,15 @@ class Layout:
         self.table_attrs(t)
         style = self.table_style(t)
         face = self.table_font(t)
+        ncol = len(t.header)
+        given = self.table_columns(t, ncol)
         head = [self.table_cell(c, t.line, bold=style != "receipt") for c in t.header]
         rows_at = [*t.row_lines, *[t.line] * (len(t.rows) - len(t.row_lines))]
-        body = [[self.table_cell(c, at) for c in r] for r, at in zip(t.rows, rows_at, strict=True)]
+        body = [
+            [self.affixed(self.table_cell(c, at), *given[i][1:]) if i < ncol else self.table_cell(c, at)
+             for i, c in enumerate(r)]
+            for r, at in zip(t.rows, rows_at, strict=True)
+        ]  # fmt: skip
         if not any(head):
             head = None
             if not body:
@@ -1528,13 +1536,15 @@ class Layout:
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted titles at {ink.px}px close up", self.said_at(t, "style="),
                        "use size=20px or more, or style=receipt", "R2-12")  # fmt: skip
-        ncol = len(t.header)
         cols = [[*([head[i]] if head else []), *(r[i] for r in body if i < len(r))] for i in range(ncol)]
         natural = [max([0, *(ink.units(c) for c in col)]) for col in cols]
         longest = [_longest(col, ink.units) for col in cols]
         in_body = [_longest(col[1:] if head else col, ink.units) for col in cols]  # a header word gives way first
         room = self.cols - indent if ink.native else (self.W - indent * self.p.cell[0]) * 64 // ink.scale
         cap = room - (ncol - 1) - (1 if style == "grid" else 0)  # grid: half a column each side for the border
+        fixed = [self.column_units(w, ink, room) for w, _, _ in given]
+        say = face is not None or any(c.kv for c in t.columns)  # L108, in bobina check: settings or a font
+        lay = _Lay(fixed, room, say)
         orientation = t.attrs.kv.get("orientation", "auto")
         if orientation not in ("auto", "horizontal", "vertical"):
             self.n.add(
@@ -1545,14 +1555,16 @@ class Layout:
             self.n.add("M101", "orientation=vertical: only a table outside quotes and lists turns",
                        self.said_at(t, "orientation="), "move the table out of the quote or list")  # fmt: skip
         if orientation == "vertical" and not indent:
-            return self.table_turned(t, head, body, natural, style, ink)
+            return self.table_turned(t, head, body, natural, style, ink, lay)
         # each way of printing it says its own problems; only the one that prints is heard
         floors = (longest, in_body)
         standing, said = self.trial(
-            lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink)
+            lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink, lay)
         )
-        if orientation == "auto" and not indent and sum(min(w, TABLE_MIN) for w in natural) > cap:
-            turned, said_turned = self.trial(lambda: self.table_turned(t, head, body, natural, style, ink))
+        # a table with a column width was laid out for the paper standing: auto never turns it (L107 scales it)
+        free = all(w is None for w in fixed)
+        if orientation == "auto" and not indent and free and sum(min(w, TABLE_MIN) for w in natural) > cap:
+            turned, said_turned = self.trial(lambda: self.table_turned(t, head, body, natural, style, ink, lay))
             along = self.rows_height(turned)
             # never metres of paper where a few wrapped lines do: up to twice the standing length, or TURN_FREE_MM;
             # but columns of fewer than TABLE_MIN / 2 characters on average cannot be read standing: always turned
@@ -1639,6 +1651,75 @@ class Layout:
             fam = "Spleen" if px % self.p.cell[1] == 0 else "Terminus"
         return fam, px
 
+    def table_columns(self, t: Table, ncol: int) -> list[tuple[tuple[float, str] | None, str, str]]:
+        """Each column's settings from the end of its title cell: (width, prefix, suffix), width None for auto or
+        (number, unit). A width it cannot read is said (M101) and the column is auto."""
+        out = []
+        for i in range(ncol):
+            kv = t.columns[i].kv if i < len(t.columns) else {}
+            raw = kv.get("width")
+            width = None
+            if raw is not None and raw != "auto":
+                m = COLUMN_WIDTH_RE.match(raw.replace(",", "."))
+                n = float(m.group(1)) if m else 0
+                if m and m.group(2) == "ch":
+                    n = math.floor(n)
+                if n >= 1:
+                    width = (n, m.group(2) or "dots")
+                elif raw.lower() != raw and (
+                    raw.lower() == "auto" or COLUMN_WIDTH_RE.match(raw.lower().replace(",", "."))
+                ):
+                    self.n.add("M101", f"width={raw}: values are lowercase", t.line,
+                               f"write width={raw.lower()} (the column shares what is left until then)")  # fmt: skip
+                else:
+                    self.n.add("M101", f"width={raw}: not a column width", t.line, COLUMN_WIDTH_HINT)
+            out.append((width, kv.get("prefix", ""), kv.get("suffix", "")))
+        return out
+
+    def column_units(self, width: tuple[float, str] | None, ink, room: int) -> int | None:
+        """A column's width= in the ink's columns (the printer font's, or the "0" of a table's font): ch as they
+        are, % of the table's room, mm and dots as many whole columns as fit in them, at least 1. None: auto."""
+        if width is None:
+            return None
+        n, unit = width
+        if unit == "ch":
+            return int(n)
+        if unit == "%":
+            return max(1, int(room * n / 100))
+        dots = self.p.mm_to_dots(n) if unit == "mm" else int(n)
+        return max(1, ink.from_dots(dots))
+
+    def affixed(self, cells: list[Cell], prefix: str, suffix: str) -> list[Cell]:
+        """A body cell with its column's prefix= and suffix= (the author's text, in the style of the value's first
+        and last letter); an empty cell gets neither. The value itself is never read again: data stays literal."""
+        if not cells or not (prefix or suffix):
+            return cells
+
+        def made(text: str, like: Cell) -> list[Cell]:
+            return [Cell(ch, bold=like.bold, underline=like.underline, invert=like.invert, italic=like.italic,
+                         strike=like.strike, wide=is_wide(ch)) for ch in self.text(text) if ch != "\n"]  # fmt: skip
+
+        return [*made(prefix, cells[0]), *cells, *made(suffix, cells[-1])]
+
+    def table_note(self, t: Table, head, widths: list[int], ink, lay: _Lay, style: str, turned: bool) -> None:
+        """L108 (said only by bobina check): the width each column got and the spaces between them, in the ink's
+        columns, for a table with column settings or a font."""
+        if not lay.say:
+            return
+        names = []
+        for i, w in enumerate(widths):
+            title = "".join(c.ch for c in head[i]).strip() if head and i < len(head) else ""
+            names.append(f"{title or f'column {i + 1}'} {w}")
+        gaps = len(widths) - 1
+        border = 1 if style == "grid" else 0
+        used = sum(widths) + gaps + border
+        extra = f"+{gaps} gap{'s' if gaps != 1 else ''}" + (" +1 border" if border else "")
+        unit = "" if ink.native else f" in {ink.fam} {ink.px}px columns"
+        total = f"{used} along the paper" if turned else f"{used} of {lay.room}"
+        what = "turned table, column widths" if turned else "column widths"
+        self.n.add("L108", f"{what}{unit}: {' · '.join(names)} ({extra} = {total})", t.line,
+                   'width= at the end of a title cell sets a column: | Price {width=9ch} |')  # fmt: skip
+
     def table_cell(self, runs, line: int, bold: bool = False) -> list[Cell]:
         """A cell's text as styled cells (**bold**, *italic*, ~~strike~~ as in a paragraph), on one line, without
         the spaces around it (any kind: a header of no-break spaces is empty). A span's size= or font= does nothing
@@ -1659,16 +1740,49 @@ class Layout:
 
         return preview.heights(rows, self.p, self.em)
 
-    def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, style: str, ink) -> list:
+    def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, style: str, ink, lay) -> list:
         """Columns as wide as their text; when the paper is narrower, the widest gives way first, down to its longest
         word (`longest`: with the header's, else the body's only, else the body's with its longest words cut), so a
-        header word gives way before any data word: a cut word is said (L101)."""
+        header word gives way before any data word: a cut word is said (L101). A column given a width keeps it and
+        the others share the rest; widths wider than the paper shrink in proportion, the others keeping 2 (L107)."""
+        auto = [i for i, f in enumerate(lay.fixed) if f is None]
+        fixed = [f or 0 for f in lay.fixed]
+        given = sum(fixed)
+        if given and given + 2 * len(auto) > cap:  # 2: a wide character always fits its column
+            gaps = len(fixed) - 1 + (1 if style == "grid" else 0)
+            hint = "give the columns smaller width= (bobina check shows what each got)"
+            hint += ", counting 2 for each auto column" if auto else ""
+            hint += ", or a smaller font: {font=Terminus size=16px}" if ink.native else ", or a smaller size="
+            self.n.add("L107", f"column widths add up to {given + 2 * len(auto) + gaps} columns, the paper has "
+                       f"{lay.room}: scaled down", t.line, hint)  # fmt: skip
+            mine = [i for i, f in enumerate(lay.fixed) if f is not None]
+            for i, w in zip(mine, _shrink([fixed[i] for i in mine], max(len(mine), cap - 2 * len(auto))), strict=True):
+                fixed[i] = w
+        widths = fixed
+        sub = self.share([natural[i] for i in auto], [[ws[i] for i in auto] for ws in longest], cap - sum(fixed))
+        for i, w in zip(auto, sub, strict=True):
+            widths[i] = w
+        if auto and not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
+            widths[auto[0]] += cap - sum(widths)
+        free = cap - sum(widths)  # a .compact table is narrower than the paper: .center and .right place it
+        place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))
+        shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") or not auto else 0
+        self.table_note(t, head, widths, ink, lay, style, turned=False)
+        geo = _Geo.of(t, style, ink, widths, self.W, indent * self.p.cell[0] + ink.dots(shift))
+        top, groups, between, bottom = self.table_pieces(*self.table_rows(t, head, body, widths, ink, lay), geo)
+        pieces = [*top, *(p for k, g in enumerate(groups) for p in [*(between if k else []), *g]), *bottom]
+        return [self.table_row(p, geo, indent, shift) for p in pieces]
+
+    @staticmethod
+    def share(natural: list[int], longest, cap: int) -> list[int]:
+        """The widths of the auto columns in `cap`: as wide as their text, the widest giving way first (see
+        table_standing)."""
         widths = list(natural)
         whole, data = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
         kept = next((f for f in (whole, data) if sum(f) <= cap), None)
         if kept is None:  # not even the data's words fit: only the longest of them give way, the rest stay whole
             kept = list(data)
-            while sum(kept) > cap and max(kept) > 2:
+            while kept and sum(kept) > cap and max(kept) > 2:
                 kept[kept.index(max(kept))] -= 1
         for floor in (kept, [2] * len(widths)):
             while sum(widths) > cap:  # 2: a wide character always fits its column
@@ -1676,24 +1790,20 @@ class Layout:
                 if not wider:
                     break
                 widths[max(wider, key=lambda i: widths[i])] -= 1
-        if not t.attrs.has("compact") and sum(widths) < cap:  # stretch: last column at the paper edge
-            widths[0] += cap - sum(widths)
-        free = cap - sum(widths)  # a .compact table is narrower than the paper: .center and .right place it
-        place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))
-        shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") else 0
-        geo = _Geo.of(t, style, ink, widths, self.W, indent * self.p.cell[0] + ink.dots(shift))
-        top, groups, between, bottom = self.table_pieces(*self.table_rows(t, head, body, widths, ink), geo)
-        pieces = [*top, *(p for k, g in enumerate(groups) for p in [*(between if k else []), *g]), *bottom]
-        return [self.table_row(p, geo, indent, shift) for p in pieces]
+        return widths
 
-    def table_wrap(self, t: Table, cells_row: list[list[Cell]], widths: list[int], ink) -> list[_TLine]:
+    def table_wrap(self, t: Table, cells_row: list[list[Cell]], widths: list[int], ink, lay=None) -> list[_TLine]:
         """One table row as printed lines: each cell wrapped at its spaces to its width (in the ink's measure) and
-        aligned (:-- --: :-:). A word longer than its column is cut and said (L101)."""
+        aligned (:-- --: :-:). A word longer than its column is cut and said (L101), but not in a column given a
+        width: that is what it was asked for."""
 
         def split(word, at):
             shown = "".join(icons.shown(c.ch) for c in word)[:20]
             self.n.add("L101", f"word '{shown}…' split at {at // ink.scale} columns in a table", t.line,
                        "shorten it, leave out a column, or turn the table: orientation=vertical")  # fmt: skip
+
+        def quiet(word, at):
+            pass
 
         ncol = len(widths)
         wrapped = [
@@ -1701,7 +1811,7 @@ class Layout:
                 word_tokens(cells_row[i] if i < len(cells_row) else [], pieces=True),
                 widths[i] * ink.scale,
                 0,
-                split,
+                quiet if lay and lay.fixed[i] is not None else split,
                 ink.measure,
             )  # fmt: skip
             for i in range(ncol)
@@ -1709,12 +1819,12 @@ class Layout:
         return [_TLine([], [wrapped[i][k] if k < len(wrapped[i]) else [] for i in range(ncol)])
                 for k in range(max(len(p) for p in wrapped))]  # fmt: skip
 
-    def table_rows(self, t: Table, head, body, widths: list[int], ink) -> tuple[list[_TLine], list[list[_TLine]]]:
+    def table_rows(self, t: Table, head, body, widths: list[int], ink, lay=None):
         """The title's lines and each body row's lines (table_wrap), each also on a grid of character columns: the
         printer font's columns (what prints natively), or, for a table in a raster font, columns as wide as the
         widest text in them, so the terminal views show every column of it, lined up."""
-        heads = self.table_wrap(t, head, widths, ink) if head else []
-        groups = [self.table_wrap(t, r, widths, ink) for r in body]
+        heads = self.table_wrap(t, head, widths, ink, lay) if head else []
+        groups = [self.table_wrap(t, r, widths, ink, lay) for r in body]
         every = [*heads, *(ln for g in groups for ln in g)]
         grid = widths if ink.native else [max([0, *(columns(ln.segs[i]) for ln in every)]) for i in range(len(widths))]
         for ln in every:
@@ -1810,16 +1920,17 @@ class Layout:
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]))  # fmt: skip
 
-    def table_turned(self, t: Table, head, body, natural: list[int], style: str, ink) -> list:
+    def table_turned(self, t: Table, head, body, natural: list[int], style: str, ink, lay) -> list:
         """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
         right, the text read from top to bottom, the paper's length as the table's width. Cells never wrap (the
-        length is free); when the rows do not fit across the paper they go on in more turned blocks, the header
-        repeated (a table without a header has none), each in the table's style. The rows are kept as text for the
-        terminal views."""
+        length is free) but in a column given a width, which keeps it along the paper; when the rows do not fit
+        across the paper they go on in more turned blocks, the header repeated (a table without a header has none),
+        each in the table's style. The rows are kept as text for the terminal views."""
         align = self.object_align(t.attrs)
-        widths = [max(1, w) for w in natural]
+        widths = [f or max(1, w) for w, f in zip(natural, lay.fixed, strict=True)]
+        self.table_note(t, head, widths, ink, lay, style, turned=True)
         geo = _Geo.of(t, style, ink, widths, None, 0)
-        heads, rows = self.table_rows(t, head, body, widths, ink)
+        heads, rows = self.table_rows(t, head, body, widths, ink, lay)
         top, groups, between, bottom = self.table_pieces(heads, rows, geo)
         top_im, sep_im, end_im = ([self.piece_image(p, geo) for p in ps] for ps in (top, between, bottom))
         sep_h = sum(p.height for p in sep_im)
@@ -1904,6 +2015,28 @@ def _padded(t: Table, segs: list[list[Cell]], widths: list[int]) -> list[Cell]:
 
 
 @dataclass
+class _Lay:
+    """A table's column settings in the ink's columns: each column's width= (None: auto), the room the table has
+    (its columns and the spaces between them) and whether bobina check says the widths it got (L108)."""
+
+    fixed: list[int | None]
+    room: int
+    say: bool
+
+
+def _shrink(widths: list[int], cap: int) -> list[int]:
+    """Widths scaled down in proportion to add up to cap, each at least 1 (the largest remainders get the rest)."""
+    total = sum(widths)
+    exact = [w * cap / total for w in widths]
+    out = [max(1, math.floor(x)) for x in exact]
+    for i in sorted(range(len(widths)), key=lambda i: exact[i] - math.floor(exact[i]), reverse=True):
+        if sum(out) >= cap:
+            break
+        out[i] += 1
+    return out
+
+
+@dataclass
 class _TLine:
     """A printed line of a table: on the column grid (native text, and what the terminal views show) and as each
     cell's text, for a table drawn in a raster font."""
@@ -1957,6 +2090,10 @@ class _NativeInk:
 
     def dots(self, n: int) -> int:
         return n * self.unit
+
+    def from_dots(self, d: int) -> int:
+        """The whole columns that fit in d dots."""
+        return d // self.unit
 
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
         return self.em.render_row(TextRow(ln.cells, (1, 1), "left", t.line), width).convert("L")
@@ -2021,6 +2158,10 @@ class _FontInk:
 
     def dots(self, n: int) -> int:
         return round(n * self.scale / 64)
+
+    def from_dots(self, d: int) -> int:
+        """The whole columns (each as wide as the font's "0") that fit in d dots."""
+        return d * 64 // self.scale
 
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
         """One line of the table in the font: each cell's text aligned in its column (mode L)."""

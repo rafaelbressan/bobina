@@ -50,6 +50,8 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L104": ("warning", "rotated block wider than the paper was cropped", ""),
     "L105": ("warning", "nothing printable: every block was skipped", ""),
     "L106": ("note", "table turned vertical to fit the paper (header on the right)", ""),
+    "L107": ("warning", "table column widths wider than the paper were scaled down", ""),
+    "L108": ("note", "the width each table column got (said by bobina check only)", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),
@@ -180,6 +182,8 @@ class Nudge:
             **({"source": self.source, "part": self.part, "file": self.file} if self.source else {}),
         }
 
+
+CHECK_ONLY = frozenset({"L108"})  # notes bobina check says, kept out of every print (Result.notes)
 
 MARK = {"error": "✗", "warning": "!", "note": "·"}
 

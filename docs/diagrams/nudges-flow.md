@@ -213,6 +213,8 @@ from this list.
 | `L104` | warning | rotated block wider than the paper was cropped |  |
 | `L105` | warning | nothing printable: every block was skipped |  |
 | `L106` | note | table turned vertical to fit the paper (header on the right) |  |
+| `L107` | warning | table column widths wider than the paper were scaled down |  |
+| `L108` | note | the width each table column got (said by bobina check only) |  |
 
 ### Codes (QR, barcodes, Pix)
 

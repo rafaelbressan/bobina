@@ -488,6 +488,64 @@ def _row_attrs(tr, src: list[str]) -> Attrs | None:
     return parse_attrs(m.group(1)) if m else None
 
 
+COLUMN_KEYS = ("width", "prefix", "suffix")  # a column's settings, at the end of its title cell
+COLUMN_HINT = 'a title cell takes width=, prefix= and suffix= for its column: | Price {width=9ch prefix="R$ "} |'
+
+
+def _cell_attrs(inline) -> Attrs | None:
+    """The `{…}` at the end of a cell, with a class or a key (an empty {} or an id alone stays text), taken out of
+    its text. A value from --set/--data is still a placeholder here: its braces never match (FORMAT §7.4)."""
+    kids = inline.children if inline is not None else []
+    if not kids or kids[-1].type != "text":
+        return None
+    m = ATTR_TAIL.search(kids[-1].content)
+    a = parse_attrs(m.group(1)) if m else None
+    if a is None or not (a.classes or set(a.kv) - {"id"}):
+        return None
+    kids[-1].token.content = kids[-1].content[: m.start()]
+    return a
+
+
+def _idle_names(a: Attrs, used: tuple[str, ...]) -> list[str]:
+    """The known classes and keys in a cell's {…} that do nothing there (check_attrs says the unknown ones)."""
+    return [f".{c}" for c in sorted(a.classes & KNOWN_CLASSES)] + [
+        f"{k}=" for k in sorted(a.kv) if k in KNOWN_KEYS and k not in used
+    ]
+
+
+def _title_settings(cell, ln: int, nudges: Nudges) -> Attrs:
+    """A title cell's column settings (width= prefix= suffix=); the rest of its {…} is said (M101)."""
+    a = _cell_attrs(cell.children[0] if cell.children else None)
+    if a is None:
+        return Attrs()
+    check_attrs(a, ln, nudges, extra=frozenset(COLUMN_KEYS))
+    idle = _idle_names(a, COLUMN_KEYS)
+    if idle:
+        nudges.add("M101", f"{', '.join(idle)} at the end of a title cell {'does' if len(idle) == 1 else 'do'} "
+                   "nothing", ln, COLUMN_HINT)  # fmt: skip
+    return Attrs(set(), {k: v for k, v in a.kv.items() if k in COLUMN_KEYS})
+
+
+def _body_settings(cell, at: int, nudges: Nudges) -> None:
+    """width=, prefix=, suffix= at the end of a body cell: said (M101) and taken out of its text; a {…} without
+    them stays text."""
+    inline = cell.children[0] if cell.children else None
+    kids = inline.children if inline is not None else []
+    m = ATTR_TAIL.search(kids[-1].content) if kids and kids[-1].type == "text" else None
+    a = parse_attrs(m.group(1)) if m else None
+    if a is None or not set(a.kv) & set(COLUMN_KEYS):
+        return
+    _cell_attrs(inline)
+    check_attrs(a, at, nudges, extra=frozenset(COLUMN_KEYS))
+    names = [f"{k}=" for k in COLUMN_KEYS if k in a.kv]
+    nudges.add("M101", f"{', '.join(names)} {'works' if len(names) == 1 else 'work'} at the end of a title cell, "
+               "for its column", at, f"move it to the title cell of that column ({COLUMN_HINT})")  # fmt: skip
+    idle = _idle_names(a, COLUMN_KEYS)
+    if idle:
+        nudges.add("M101", f"{', '.join(idle)} at the end of a table cell {'does' if len(idle) == 1 else 'do'} "
+                   "nothing", at, "a cell takes **bold**, *italic*, [word]{.underline}, [word]{.invert}")  # fmt: skip
+
+
 def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     tb = Table(line=ln)
     body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
@@ -500,13 +558,18 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     for section in n.children:
         for tr in section.children:
             cells, aligns = [], []
+            at = _line(tr, ln - _line(n, 0)) or ln
             for cell in tr.children:
                 style = (cell.attrs or {}).get("style", "")
                 aligns.append("right" if "right" in style else "center" if "center" in style else "left")
+                if section.type == "thead":
+                    tb.columns.append(_title_settings(cell, ln, nudges))
+                else:
+                    _body_settings(cell, at, nudges)
                 cells.append(inline_runs(cell.children[0]) if cell.children else [])
             if section.type == "thead":
                 tb.header, tb.aligns = cells, aligns
             else:
                 tb.rows.append(cells)
-                tb.row_lines.append(_line(tr, ln - _line(n, 0)) or ln)
+                tb.row_lines.append(at)
     return tb

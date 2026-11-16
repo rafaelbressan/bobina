@@ -4,13 +4,13 @@ Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
 **✓ implemented** (in bobina v0.1, covered by tests) or **◇ planned** (part of the format, not implemented yet;
 using it gives the note `M103` or `M102`, never an error).
 
-A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown — it reads well on GitHub
-or Obsidian — and it maps predictably onto narrow, low-resolution printers.
+A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
+or Obsidian) and maps predictably onto narrow, low-resolution printers.
 
 ## 0. Principles
 
 - **Plain Markdown first.** Any Markdown file is a valid `.bob.md`.
-- **Readable over terse.** Names are full English words (`invert`, `align=center`), never codes.
+- **Readable over terse.** Names are full English words (`invert`, `align=center`), lowercase, never codes.
 - **Reuse standards.** CommonMark + Pandoc-style attributes for markup, Jinja for variables, Unicode CLDR for
   dates and numbers, BCP 47 for languages, IANA for time zones.
 - **The document says what, the printer profile says how.** Native command or raster, dots per millimetre and
@@ -58,7 +58,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=auto\|vertical\|horizontal`: [guides/tables.md](guides/tables.md) |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |
@@ -95,7 +95,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 | `render=raster\|native` | force how a block is printed (text blocks and QR codes) | ✓ |
 | `thickness=` | divider stroke in dots (minimum 2, nudge `B101`) | ✓ |
 | `leading=` | space between lines: `leading=18` dots, `18px` or `2mm`. Printer font: line height + N (`ESC 3`) | ✓ |
-| `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, ×2 at 2× width per the spec (not on the MTP-II: `native.tracking_unscaled_at`); line breaks use the real width | ✓ |
+| `tracking=` | extra space after each character, in dots (≤ 32). Printer font: `ESC SP n`, ×2 at 2× width (not on the MTP-II: `native.tracking_unscaled_at`) | ✓ |
 | `indent=` | left indent: `indent=4` columns, or `indent=3mm` / `24px`; wrapped lines stay aligned | ✓ |
 
 Unknown classes or keys and those a block does not take (`leading=` on a table…) give `M101` and are ignored.
@@ -497,7 +497,7 @@ Nudges:
 | `Q108` | warning | barcode module too thin to scan |
 | `Q109` | warning | invalid barcode content |
 | `Q110` | warning | barcode turned vertical to fit the paper |
-| `Q111` | warning | payment code not built: an attribute is missing or invalid (the code is left out, the rest prints, exit 9) |
+| `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
@@ -505,9 +505,11 @@ Nudges:
 | `L104` | warning | rotated block wider than the paper was cropped |
 | `L105` | warning | nothing printable: every block was skipped |
 | `L106` | note | table turned vertical |
-| `I101` | warning | image not found, unreadable or in an unsupported format (the hint lists the formats) |
+| `L107` | warning | table column widths scaled down to the paper |
+| `L108` | note | the width each table column got (`check` only) |
+| `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
-| `I103` | warning | network image skipped: fetching shows the server when you print, and a shared document could reach your local network; add `--allow-net` if you trust it |
+| `I103` | warning | network image skipped: fetching tells the server you print and can reach your network; `--allow-net` if trusted |
 | `I104` | note | image fetched from the network (the server sees the print) |
 | `I105` | warning | PDF/SVG support not installed |
 | `I106` | warning | network source refused (private address, redirect, type, size) |

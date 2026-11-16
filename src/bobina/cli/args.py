@@ -41,7 +41,7 @@ TEXT
   | table |  (stretches to the paper; {.compact} narrow; {orientation=vertical} turned)    > quote
     on the line under it, all in one {…}: style=plain|receipt|lines|grid|header-invert|zebra
     font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
-    (docs/guides/tables.md)
+    a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (docs/guides/tables.md)
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
 
