@@ -28,13 +28,20 @@ class FixedQR:
         capped at param_max_version, raised when the content needs more (3 → 3; 6, 8, 9 → 6)."""
         return max(needed, min(param, self.param_max_version))
 
-    def code(self, needed: int) -> tuple[int, int] | None:
-        """(parameter to send, version printed) for the smallest code within the tested parameters; None when the
-        content needs more than the firmware prints (an image instead)."""
-        if needed > self.content_max_version:
+    def code(self, needed: int, worst: int = 0) -> tuple[int, int] | None:
+        """(parameter to send, version printed) for the smallest code within the tested parameters, for content that
+        needs version `needed` (segno's mode choice). None when the content may need more than the firmware prints
+        (an image instead), judged by `worst`: the version it needs if the firmware encodes it in byte mode."""
+        if max(needed, worst) > self.content_max_version:
             return None
         param = max(self.tested[0], min(self.tested[1], needed))
         return param, self.printed_version(needed, param)
+
+
+QR_KEYS = frozenset({  # what the [qr] section of a profile may hold: anything else is reported (M101), not ignored
+    "native", "default_module", "default_ecc", "min_module_native", "min_module_raster", "native_module_param",
+    "native_module_dots", "native_param_max_version", "native_content_max_version", "native_param_tested",
+})  # fmt: skip
 
 
 @dataclass
@@ -74,6 +81,11 @@ class Profile:
             content_max_version=int(self.get("qr.native_content_max_version", FixedQR.content_max_version)),
             tested=(int(lo), int(hi)),
         )
+
+    def unknown_keys(self) -> list[str]:
+        """Keys of the [qr] section bobina does not read (a misspelt or renamed key would be ignored silently)."""
+        qr = self.get("qr")
+        return [f"qr.{k}" for k in qr if k not in QR_KEYS] if isinstance(qr, dict) else []
 
     def get(self, dotted: str, default=None):
         cur = self.data

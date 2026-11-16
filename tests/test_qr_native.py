@@ -5,6 +5,8 @@ is 5 dots; content up to version 7 prints, version 8 and above print the firmwar
 module= (a size the firmware cannot give) and content above version 7 print as an exact image (Q113); width= prints
 an image of that width, silently. Profiles whose native QR takes the module in dots (ESC/POS) are unchanged."""
 
+from pathlib import Path
+
 import pytest
 from PIL import ImageOps
 
@@ -76,7 +78,7 @@ def test_bobina_sends_the_smallest_code_the_tested_range_gives(data, param, vers
     res = build(f"```qr\n{data}\n```\n")
     [row] = qrs(res)
     assert (row.module, row.param) == (5, param) and not res.nudges
-    assert row.version == (3 if version == 3 else 0)  # 0: the smallest version the content fits
+    assert row.version == version  # always the version printed: the preview encodes that one
     assert b"\x1d(k\x03\x001C" + bytes([param]) in res.data
     assert ink_width(res.image) == (17 + 4 * version) * 5  # 145, 185, 225 dots: the paper's ~146, ~187, ~225
 
@@ -122,6 +124,76 @@ def test_too_much_data_for_a_readable_image_says_less_data():
     res = build(f"```qr\n{data}\n```\n")
     [n] = [n for n in res.nudges if n.code == "Q101"]
     assert n.suggestion.startswith("less data or ecc=L") and "module=" not in n.suggestion
+    assert n.message == "QR module 3 in raster mode: it may not scan"  # never module 3 as if it were fine
+
+
+# ---------------------------------------------------------------- review, second round
+
+
+@pytest.mark.parametrize(
+    "data, native",
+    [
+        ("HTTPS://EXAMPLE.COM/" + "A" * 140, False),  # alphanumeric: version 7, version 9 in bytes
+        ("HTTPS://EXAMPLE.COM/" + "A" * 80, True),  # alphanumeric: version 5, version 7 in bytes
+        ("1234567890" * 28, True),  # numeric stays numeric (paper 16/11): version 7; bytes would need 12
+        ("É" * 60, True),  # segno: 60 Latin-1 bytes, version 4; the printer gets 120 UTF-8 bytes: version 7
+        ("É" * 80, False),  # 160 UTF-8 bytes: version 9
+    ],
+)
+def test_native_or_image_is_decided_by_the_worst_mode_the_firmware_may_use(data, native):
+    likely, worst = imaging.qr_versions(data, "M")
+    assert likely == needed(data) and worst >= likely
+    res = build(f"```qr\n{data}\n```\n")
+    assert bool(qrs(res)) == native and bool(q113(res)) == (not native) and (worst <= 7) == native
+    if native:
+        assert qrs(res)[0].version == max(3, likely)  # the preview keeps segno's mode: at worst one version off
+    else:
+        assert f"QR version {likely}, {worst} if the printer encodes it as bytes" in q113(res)[0].message
+
+
+@pytest.mark.parametrize("data, version", [(V2, 3), (V5, 5)])
+def test_the_preview_is_the_code_at_the_ecc_sent_never_boosted(data, version):
+    import segno
+
+    res = build(f"```qr\n{data}\n```\n")
+    [row] = qrs(res)
+    sent = segno.make(data, error="m", version=version, micro=False, boost_error=False)
+    assert sent.error == "M" and row.version == version
+    assert imaging.qr_matrix(data, "M", row.version) == tuple(tuple(r) for r in sent.matrix)
+
+
+def test_a_fixed_module_code_is_encoded_once_and_without_exceptions():
+    imaging.qr_matrix.cache_clear()
+    res = build(f"```qr\n{V5}\n```\n")
+    assert res.image and res.length_mm
+    info = imaging.qr_matrix.cache_info()
+    assert (info.misses, info.currsize) == (1, 1)  # layout reads versions; preview and length share one matrix
+
+
+def test_an_unreadable_width_keeps_the_printers_own_code():
+    res = build(f"```qr {{width=wide}}\n{V2}\n```\n")
+    assert qrs(res) and not q113(res) and [n.code for n in res.nudges] == ["M101"]
+
+
+def test_a_raster_qr_near_the_paper_width_keeps_its_quiet_zone_and_says_it_may_not_scan():
+    data = "https://example.com/" + "x" * 545  # version 19: 93 modules, 372 dots at module 4, 388 with the quiet zone
+    res = build(f"```qr\n{data}\n```\n", profile_name=RASTER)
+    codes = [(n.code, n.message) for n in res.nudges]
+    assert ("Q103", "QR does not fit: module reduced to 3") in codes
+    assert ("Q101", "QR module 3 in raster mode: it may not scan") in codes
+    box = ink_box(res.image)
+    assert box[2] - box[0] == 93 * 3 and box[0] >= 6 and 384 - box[2] >= 6
+
+
+def test_an_unknown_qr_key_in_a_profile_is_reported(tmp_path):
+    src = (Path(profile.__file__).parent / "profiles" / "mtp-ii-58.toml").read_text(encoding="utf-8")
+    old = tmp_path / "old.toml"
+    old.write_text(src.replace("[qr]\n", "[qr]\nnative_max_version = 6\n"), encoding="utf-8")
+    res = build(f"```qr\n{V2}\n```\n", profile_name=str(old))
+    [n] = [n for n in res.nudges if n.code == "M101"]
+    assert n.message == "profile mtp-ii-58: unknown key qr.native_max_version (ignored)"
+    assert not [n for n in build("hi\n").nudges if n.code == "M101"]  # the built-in profiles are clean
+    assert all(not profile.load(p).unknown_keys() for p in profile.available())
 
 
 def test_module_asked_prints_that_size_as_an_image_with_q113():

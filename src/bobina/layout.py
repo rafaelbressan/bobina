@@ -189,17 +189,6 @@ def _remember(key, value) -> None:
     _IMAGES[key] = value
 
 
-def qr_matrix_from(data: str, ecc: str, floor: int = 0) -> tuple:
-    """The QR matrix at version `floor` when the content fits it (a fixed-module printer's smallest code: one encoding
-    shared by layout, preview and length), else at the smallest version that holds it."""
-    if floor:
-        try:
-            return imaging.qr_matrix(data, ecc, floor)
-        except Exception:  # noqa: BLE001 - more data than version `floor` holds
-            pass
-    return imaging.qr_matrix(data, ecc, 0)
-
-
 class Layout:
     def __init__(self, profile, doc: Document, rendered: Rendered | None, nudges: Nudges, net: bool = False,
                  locale=None, image_dirs: tuple[str, ...] | None = None):  # fmt: skip
@@ -1081,9 +1070,9 @@ class Layout:
             self.n.add("M101", f"unknown ecc '{ecc}'", f.line, "L, M, Q or H")
             ecc = "M"
         fixed = self.p.qr_fixed() if render == "native" else None
-        floor = fixed.tested[0] if fixed else 0
-        try:
-            m = qr_matrix_from(data, ecc, floor)
+        try:  # a fixed-module printer's code is sized by its versions; any other by its matrix
+            versions = imaging.qr_versions(data, ecc) if fixed else None
+            m = None if fixed else imaging.qr_matrix(data, ecc, 0)
         except Exception as e:  # noqa: BLE001 - segno: DataOverflowError and friends
             self.n.add(
                 "Q109",
@@ -1094,7 +1083,7 @@ class Layout:
             return []
         target = self.object_width(kv.get("width"), f.line)
         if fixed:
-            row = self._fixed_native_qr(f, data, ecc, len(m), floor, fixed, align)
+            row = self._fixed_native_qr(f, data, ecc, versions, target, fixed, align)
             if row:
                 return [row]
             render, m = "raster", imaging.qr_matrix(data, ecc, 0)  # an image: the smallest version, as any raster QR
@@ -1102,41 +1091,45 @@ class Layout:
                 mod = max(1, min(fixed.dots, self.W // (len(m) + 4)))
         units = len(m) + (0 if render == "native" else 4)  # an image carries its quiet zone, 2 modules each side
         lo = int(self.p.get(f"qr.min_module_{render}", 4))
+        cannot = units * lo > self.W  # even the smallest module that scans would not fit the paper
+        less = f"less data or ecc=L (module {lo} would not fit the paper)"
         mod = self.fit_module(target, units, mod, 16 if render == "native" else 64)
         if mod < lo:
             what = f"width={kv['width']} gives module {mod}" if target else f"QR module {mod}"
             hint = f"a larger width or less data (module ≥ {lo})" if target else f"use module={lo}"
-            if units * lo > self.W:  # even module lo would not fit the paper
-                hint = f"less data or ecc=L (module {lo} would not fit the paper)"
-            self.n.add("Q101", f"{what} in {render} mode", f.line, hint)
+            self.n.add("Q101", f"{what} in {render} mode" + (": it may not scan" if cannot else ""), f.line,
+                       less if cannot else hint)  # fmt: skip
         while units * mod > self.W and mod > 1:
             mod -= 1
             self.n.add("Q103", f"QR does not fit: module reduced to {mod}", f.line, "shorten the content")
+            if mod < lo:  # the paper took it below what scans: say so, never as if fine
+                self.n.add("Q101", f"QR module {mod} in {render} mode: it may not scan", f.line, less)
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]
 
-    def _fixed_native_qr(self, f: Fence, data: str, ecc: str, n: int, floor: int, fixed, align: str) -> QRRow | None:
-        """The printer's own code on a fixed-module firmware (profile.FixedQR), from its matrix of n modules (at
-        version `floor` when the content fits it). None when it must be an image instead: more data than the firmware
-        prints (Q113), module= other than its own (Q113) or width= (silent: the image is exactly the size asked). With
-        render=native the code stays and Q113 says module=/width= do nothing."""
+    def _fixed_native_qr(self, f: Fence, data: str, ecc: str, versions, target, fixed, align: str) -> QRRow | None:
+        """The printer's own code on a fixed-module firmware (profile.FixedQR), for content that needs versions
+        (segno's mode choice, the worst case in byte mode). None when it must be an image instead: content that may
+        need more than the firmware prints (Q113), module= other than its own (Q113), or a readable width= (silent: the
+        image is exactly that wide). With render=native the code stays and Q113 says module=/width= do nothing."""
         kv = f.attrs.kv
-        version = (n - 17) // 4  # what the content needs, or `floor` when it fits there (the same code: floor ≤ cap)
+        needed, worst = versions
         explicit = kv.get("render") == "native"
-        code = fixed.code(version)
+        code = fixed.code(needed, worst)
         if code is None:
+            bytes_ = f", {worst} if the printer encodes it as bytes" if worst > needed else ""
             self.n.add(
                 "Q113",
                 ("render=native ignored: " if explicit else "")
-                + f"QR version {version} ({len(data)} characters at ECC {ecc}); this printer's own QR stops at "
+                + f"QR version {needed}{bytes_} ({len(data)} characters at ECC {ecc}); this printer's own QR stops at "
                 f"version {fixed.content_max_version}: printed as an image",
                 f.line,
                 "nothing to fix: the image prints exactly; less data gives the printer's own code",
             )
             return None
         module = "module" in kv and int(kv["module"]) != fixed.dots  # module=5 (or 05): what it gives anyway
-        width = bool(str(kv.get("width", "")).strip())
+        width = target is not None  # an unreadable width= (M101) asks for nothing
         asked = [f"{k}={kv[k]}" for k, on in (("module", module), ("width", width)) if on]
         names = " and ".join(a.split("=")[0] + "=" for a in asked)
         if asked and explicit:
@@ -1159,8 +1152,7 @@ class Layout:
         elif width:
             return None
         param, printed = code
-        return QRRow(data, fixed.dots, ecc, align, f.line, version=printed if printed == floor == version else 0,
-                     param=param)  # fmt: skip
+        return QRRow(data, fixed.dots, ecc, align, f.line, version=printed, param=param)
 
     def barcode(self, f: Fence) -> list:
         from . import codes

@@ -296,6 +296,23 @@ def qr_matrix(data: str, ecc: str, version: int) -> tuple:
     return tuple(tuple(r) for r in q.matrix)
 
 
+@functools.lru_cache(maxsize=256)
+def qr_versions(data: str, ecc: str) -> tuple[int, int]:
+    """(the version the content needs with segno's mode choice, the version it needs if the printer encodes it in
+    byte mode). Numeric content stays numeric (a firmware does it, MTP-II 16/11); anything else counts as the UTF-8
+    bytes sent, the most a firmware could need (41: more than any QR holds). Raises when no QR holds it at all."""
+    import segno
+
+    q = segno.make(data, error=ecc.lower(), micro=False)
+    if q.mode == "numeric":
+        return q.version, q.version
+    try:
+        worst = segno.make(data.encode("utf-8"), error=ecc.lower(), micro=False, mode="byte").version
+    except Exception:  # noqa: BLE001 - segno.DataOverflowError: more than version 40 holds in bytes
+        worst = 41
+    return q.version, max(q.version, worst)
+
+
 def qr_image(data: str, module: int, ecc: str, border: int = 0, version: int = 0) -> Image.Image:
     m = qr_matrix(data, ecc, version)
     n = len(m) + 2 * border

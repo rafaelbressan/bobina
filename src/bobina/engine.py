@@ -261,6 +261,9 @@ def build(
         merged.update({k: v for k, v in meta.items() if k != "template"})
         meta = merged
     prof = apply_overrides(profiles.load(profile_name or meta.get("profile") or config_profile), overrides)
+    for key in prof.unknown_keys():
+        hint = "compare with the built-in mtp-ii-58.toml, which uses every [qr] key"
+        nudges.add("M101", f"profile {prof.id}: unknown key {key} (ignored)", None, hint)
     rendered, choice = None, None
     if plain:
         doc = Document(meta=meta, base_dir=base_dir, blocks=[Paragraph(line=1, runs=[Run(body.rstrip("\n"))])])

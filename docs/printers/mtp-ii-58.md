@@ -89,11 +89,13 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 Every module is 5 dots. The parameter is read as the **minimum version**, capped at 6, and raised when the content
 needs more, up to version 7; content needing version 8 or more prints the error text instead of a code. bobina
 before this measure sent such codes natively (module parameter 4), so they printed that text. 100 digits printed
-version 4 under parameter 4: the firmware uses numeric mode (bytes would need version 6) and bobina sizes with the
-same mode choice (segno). Profile `[qr]`: `native_module_param = "min_version"`, `native_module_dots = 5`,
-`native_param_max_version = 6`, `native_content_max_version = 7`, `native_param_tested = [3, 9]`. bobina sends
-max(version needed, 3), the smallest code, and previews it as printed. `width=` prints an exact image of that
-width; `module=` (a size the firmware cannot give) and content above version 7 print an exact image with `Q113`.
+version 4 under parameter 4: the firmware uses numeric mode (bytes would need version 6). Profile `[qr]`:
+`native_module_param = "min_version"`, `native_module_dots = 5`, `native_param_max_version = 6`,
+`native_content_max_version = 7`, `native_param_tested = [3, 9]` (another key there is reported, `M101`). bobina
+sends max(version needed, 3), the smallest code, and previews it as printed, at the ECC sent. Native or image is
+decided by the worst case: the version the content needs if the firmware encodes all but digits as the UTF-8 bytes it
+receives; above 7, an exact image with `Q113`, never the error text. `width=` prints an exact image of that width;
+`module=` (a size the firmware cannot give) an exact image with `Q113`.
 
 ## Raster drawing rules
 
@@ -104,7 +106,7 @@ width; `module=` (a size the firmware cannot give) and content above version 7 p
 | Checkerboard / hatching | ≥ 2 dots (1 becomes blurry grey) |
 | Minimum text | **12 px Terminus**, 14 px Atkinson Hyperlegible (8 px illegible, 10 px borderline) |
 | Inverted text (white on black) | bold ≥ 20 px with ≥ 4 dots of margin |
-| QR in raster | **module ≥ 4** (2 and 3 did not read); native: always 5-dot modules |
+| QR in raster | **module ≥ 4** (2 and 3 did not read), with a 2-module quiet zone kept on the paper: near the paper width the module drops (`Q103`, and `Q101` "it may not scan" below 4); native: always 5-dot modules |
 | Raster band height (`GS v 0`) | **16 rows** (13/11: with 64 rows a light line appears at a random height, a different one on the same image, where the Bluetooth link starves the printer; with 16 none) |
 | Light grey behind text (table zebra, `.shade`) | **2-dot squares every 4 dots**, staggered (16/11: every 3 is heavy, every 6 a texture, 3-dot squares look like accents) |
 | Grid and box strokes | **2 dots** (16/11: with 3-dot strokes the text in the same rows printed faded: the head shares its heat across the line) |
@@ -161,3 +163,6 @@ a grid; threshold is for line art. The dot-gain curve and the warm-up effect are
 
 UPC-E with 8 digits, the dot-gain curve, native QR parameters 1–2, and whether the native QR uses alphanumeric
 mode (upper-case content printed version 4 under parameter 4, the minimum it forces, so the test could not tell).
+Until then bobina decides native or image as if it did not (bytes, the worst case) and previews segno's choice
+(alphanumeric, the likely one): upper-case content may print one version larger than the preview, never the
+error text.

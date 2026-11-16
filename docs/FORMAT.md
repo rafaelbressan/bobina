@@ -1,7 +1,7 @@
 # The `.bob.md` format — `bob/1` (draft v0.4)
 
 Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
-**✓ implemented** (in bobina v0.1, covered by tests) or **◇ planned** (part of the format, not implemented yet;
+**✓ implemented** (covered by tests) or **◇ planned** (part of the format, not implemented yet;
 using it gives the note `M103` or `M102`, never an error).
 
 A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
@@ -170,8 +170,8 @@ https://example.com
 
 `module=` dots per module (profile default 4; minimum 3 native, 4 raster → `Q101`), `ecc=L|M|Q|H` (`L` → `Q102`),
 `width=` (native: module ≤ 16), `render=raster`, `caption="Menu"`. Content that fits no QR → `Q109`, nothing printed.
-The MTP-II's own QR always has 5-dot modules (version 3–7, the smallest that fits): `width=` prints an image that
-wide; `module=` or more data, an image with `Q113`.
+An image keeps its 2-module quiet zone on the paper (`Q103`: a smaller module). The MTP-II's own QR always
+has 5-dot modules (version 3–7): `width=` prints an image that wide; `module=` or more data, an image with `Q113`.
 
 ### 6.2 Barcodes ✓
 
@@ -221,8 +221,8 @@ A missing or invalid attribute (an IBAN with a wrong check digit, a UPI ID witho
 currency has) gives `Q111` with a working example, and the code is not printed: the rest of the document is, and
 the command exits with 9 so a script or agent knows (`--allow Q111` for 0). A scheme nobody has scanned with its
 real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). No brand logos (they need
-a licence). What each field means in each scheme, its official name and its limit: `bobina help pay SCHEME`
-(`--json` too) and [pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
+a licence). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
+[pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
 An amount that reads two ways (`amount=1.890`) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
 The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is printed as typed with `M202`.
 
