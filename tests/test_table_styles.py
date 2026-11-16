@@ -31,7 +31,7 @@ def dividers(res) -> list:
 
 
 def drawn(res) -> list:
-    return [r for r in res.rows if isinstance(r, BitmapRow) and r.kind in ("drawn", "band")]
+    return [r for r in res.rows if isinstance(r, BitmapRow) and r.kind in ("text", "band")]
 
 
 def ink(im) -> int:
@@ -425,3 +425,75 @@ def test_the_format_cheat_sheet_shows_what_a_table_takes(capsys):
     out = capsys.readouterr().out
     assert "style=plain|receipt|lines|grid|header-invert|zebra" in out
     assert "font=Terminus size=16px" in out and "48 columns on 58 mm" in out and "| | |" in out
+
+
+# --- second review --------------------------------------------------------------------------------------------------
+
+ANSI = r"\x1b\[[0-9;]*m"
+
+
+def boxed_lines(text: str) -> list[str]:
+    """The lines of the first view box in a command's output, without colours."""
+    import re
+
+    out = [re.sub(ANSI, "", ln) for ln in text.splitlines()]
+    top = next(i for i, ln in enumerate(out) if ln.startswith("┌"))
+    end = next(i for i, ln in enumerate(out) if ln.startswith("└") and i > top)
+    return out[top : end + 1]
+
+
+@pytest.mark.parametrize("command", [["view"], ["print", "--dry-run", "--yes"]])
+def test_the_frame_grows_to_hold_every_column_of_a_table_in_a_font(isolated, capsys, command):
+    from bobina import cli
+
+    doc = isolated / "zebra.bob.md"
+    doc.write_text("# Bar\n\n" + BILL.replace("Cheese bread", "Cheese bread with a long name and butter") +
+                   "{style=zebra font=Terminus size=16px}\n\nThanks {.center}\n")  # fmt: skip
+    cli.main([*command, str(doc), "--profile", "mtp-ii-58"])
+    box = boxed_lines(capsys.readouterr().out)
+    widths = {len(ln) for ln in box}
+    assert len(widths) == 1 and widths.pop() > 34  # wider than the paper's 32 columns and 2 sides, all alike
+    assert all(ln[0] in "┌│└" and ln[-1] in "┐│┘" for ln in box)
+    assert any("long name" in ln and "39,00" in ln for ln in box)  # no column dropped
+    assert any(ln.strip("│").rstrip().startswith(" ") and "Thanks" in ln for ln in box)  # centred on the paper
+
+
+def test_a_bad_front_matter_size_is_said_once_at_its_line():
+    doc = "---\nsize: tiny\n---\nA {font=Terminus}\n\nB {font=Terminus}\n\n" + BILL + "{font=Terminus}\n\nC\n"
+    res = build(doc)
+    notes = [n for n in res.nudges if n.code == "M101"]
+    assert [(n.line, "size: tiny" in n.message) for n in notes] == [(2, True)]
+    assert not any("size=" in n.message for n in res.nudges)  # the table gave only font=
+
+
+def test_an_unreadable_block_size_falls_back_to_the_document_size():
+    front = "---\nsize: large\n---\n"
+    for bad, good in (
+        ("W {font=Terminus size=tiny}\n", "W {font=Terminus}\n"),
+        ("| W |\n|---|\n| W |\n{font=Terminus size=tiny}\n", "| W |\n|---|\n| W |\n{font=Terminus}\n"),
+    ):
+        res = build(front + bad)  # fmt: skip
+        assert "M101" in codes(res)
+        assert res.image.tobytes() == build(front + good).image.tobytes(), bad
+
+
+def test_only_what_is_white_on_black_on_paper_reads_reversed_in_the_terminal():
+    import re
+
+    def reversed_words(doc):
+        return [re.sub(ANSI, "", ln).split() for ln in view_of(build(doc)) if "\x1b[7m" in ln]
+
+    assert reversed_words("Hello there {font=Terminus}\n") == []  # a raster paragraph
+    assert reversed_words("> Quoted big {size=2x}\n") == []  # a quote's bar drawn into a 2x line
+    assert reversed_words("SALE {font=Terminus size=24px .bold .invert}\n") == [["SALE"]]  # a band
+    assert reversed_words("SALE {.invert}\n") == [["SALE"]]
+    assert reversed_words("Hi [you]{.invert} {font=Terminus}\n") == [["Hi", "you"]]  # the word, by its cell
+
+
+@pytest.mark.parametrize("size,said", [("2x1", True), ("1x2", True), ("2x", False), ("3x3", False)])
+def test_a_multiplier_whose_width_and_height_differ_is_said_in_a_raster_font(size, said):
+    for doc in (f"W {{font=Terminus size={size}}}\n", BILL + f"{{font=Terminus size={size}}}\n"):
+        notes = [n for n in build(doc).nudges if n.code == "F303"]
+        assert bool(notes) is said, doc
+        if said:
+            assert "scales evenly" in notes[0].message and "height" in notes[0].message

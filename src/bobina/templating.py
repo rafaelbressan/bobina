@@ -183,6 +183,19 @@ class Rendered:
 FM_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.S)
 
 
+def front_matter_lines(text: str) -> dict[str, int]:
+    """The line each top-level key of the document's front matter is written on (problems are said there)."""
+    m = FM_RE.match(text)
+    if not m:
+        return {}
+    out: dict[str, int] = {}
+    for n, line in enumerate(m.group(0).split("\n"), start=1):
+        key = re.match(r"([A-Za-z_][\w-]*)\s*:", line)
+        if key:
+            out.setdefault(key.group(1), n)
+    return out
+
+
 def split_front_matter(text: str) -> tuple[dict, str, int]:
     """Returns (meta, body, number of lines taken by the front matter)."""
     m = FM_RE.match(text)

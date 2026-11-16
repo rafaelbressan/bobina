@@ -749,7 +749,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | a grid in the printer font, bold titles, a rule under them; `{style=receipt font=Terminus size=16px}` under it: styles (`zebra` ⚠ not tested on paper), fonts, turned tables: [guides/tables.md](docs/guides/tables.md) |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra` (`zebra` ⚠ not tested on paper), `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=auto\|vertical\|horizontal`: [guides/tables.md](docs/guides/tables.md) |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `![alt](photo.jpg){…}` | image (§6.5) |

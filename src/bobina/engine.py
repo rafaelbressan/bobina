@@ -289,6 +289,7 @@ def build(
             labels=labels, quiet_names=frozenset(empty_required), locale=choice,
         )  # fmt: skip
         doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta)
+        doc.meta_lines = templating.front_matter_lines(source)
     rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")

@@ -199,7 +199,7 @@ class Layout:
         self.cols = profile.columns
         meta = doc.meta
         self.align = str(meta.get("align", "left"))
-        self.size = str(meta.get("size", "normal"))
+        self.size = self.document_size(meta)
         tasks = meta.get("tasks") or {}
         self.done = str(tasks.get("done", "strike")) if isinstance(tasks, dict) else "strike"
         img = meta.get("image") or {}
@@ -246,6 +246,16 @@ class Layout:
         return [*cells[:room], *reversed(lead)] if rtl else [*lead, *cells[:room]]
 
     # ------------------------------------------------------------ helpers
+    def document_size(self, meta: dict) -> str:
+        """The front matter's size: (normal when absent). One it cannot read is said once, at its line, and every
+        block uses normal instead (never one problem per block)."""
+        size = str(meta.get("size", "normal"))
+        if size in self.p.get("native.sizes", {}) or rasterfont.readable(size, self.p):
+            return size
+        self.n.add("M101", f"size: {size} in the front matter is not a size: normal is used",
+                   self.doc.meta_lines.get("size"), rasterfont.SIZE_HINT)  # fmt: skip
+        return "normal"
+
     def text(self, s: str) -> str:
         if self.r is not None:
             s = self.r.resolve(s)
@@ -541,11 +551,11 @@ class Layout:
         )
         view_rows = [
             TextRow(
-                self.view_with_bars([Cell(ch, wide=is_wide(ch)) for ch in fit_columns(t, self.cols)], indent, rtl),
+                self.view_with_bars(self.view_cells(t), indent, rtl),
                 (1, 1),
                 "left" if align == "justify" else align,
                 line,
-            )
+            )  # fmt: skip
             for t in texts
         ]
         if attrs.has("invert"):
@@ -563,6 +573,18 @@ class Layout:
                 )
             return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows)]
         return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows)]
+
+    def view_cells(self, toks) -> list[Cell]:
+        """A line of drawn text as cells for the terminal views, within the paper's columns: inverted words stay
+        inverted (the rest of a drawn line is plain, as on paper)."""
+        out, used = [], 0
+        for t in toks:
+            for ch in t.text:
+                used += 2 if is_wide(ch) else 1
+                if used > self.cols:
+                    return out
+                out.append(Cell(ch, wide=is_wide(ch), invert=t.invert))
+        return out
 
     def text_block(
         self,
@@ -587,8 +609,8 @@ class Layout:
         fam = self.raster_family(attrs, role, runs)
         if fam is not None:
             named = {1: "title", 2: "large", 3: "normal"}.get(level) if role == "title" else None
-            size = attrs.kv.get("size") or named or self.size
-            px = rasterfont.px_for(size, self.p, 20, self.n, line)
+            fallback = rasterfont.px_for(named or self.size, self.p, 20)  # an unreadable size= falls back to it
+            px = rasterfont.px_for(attrs.kv.get("size") or named or self.size, self.p, fallback, self.n, line)
             return self.raster_block(
                 runs,
                 fam,
@@ -1611,7 +1633,8 @@ class Layout:
         size = str(kv.get("size") or "")
         if fam.lower() == "native" and not size:
             return None
-        px = rasterfont.px_for(size or self.size, self.p, 20, self.n, self.said_at(t, "size="))
+        doc_px = rasterfont.px_for(self.size, self.p, 20)  # an unreadable size= falls back to the document's
+        px = rasterfont.px_for(size or self.size, self.p, doc_px, self.n, self.said_at(t, "size=" if size else "font="))
         if fam.lower() == "native":
             fam = "Spleen" if px % self.p.cell[1] == 0 else "Terminus"
         return fam, px
@@ -1781,11 +1804,11 @@ class Layout:
             return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
-        drawn = "drawn" if kind == "line" else piece[3]
         pad = [Cell(" ")] * shift if geo.ink.native else []
         view = [TextRow([*self.lead(indent), *pad, *ln.cells], (1, 1), "left", t.line) for ln in lines]
-        return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if drawn == "band" else "drawn", view,
-                         untested=("zebra",) if drawn == "zebra" else ())  # fmt: skip
+        band = kind == "image" and piece[3] == "band"
+        return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
+                         untested=_marks([piece]))  # fmt: skip
 
     def table_turned(self, t: Table, head, body, natural: list[int], style: str, ink) -> list:
         """The table drawn as an image and turned 90 degrees clockwise, like a book's spine: the header on the
@@ -1832,7 +1855,7 @@ class Layout:
                 TextRow(ln.cells, (1, 1), "left", t.line)
                 for ln in heads + [ln for k in chunk for ln in _body_lines(groups[k])]
             ]
-            marks = tuple(sorted({p[3] for k in chunk for p in groups[k] if p[0] == "image" and p[3] == "zebra"}))
+            marks = _marks([p for k in chunk for p in groups[k]])
             out.append(BitmapRow(imaging.place(turned, self.W, align), t.line, "table", view, untested=marks))
         return out
 
@@ -1847,7 +1870,15 @@ class Layout:
 
 def _body_lines(pieces: list) -> list[_TLine]:
     """The lines of text in a body row's pieces (for the terminal views)."""
-    return [ln for p in pieces if p[0] != "rule" for ln in ([p[1]] if p[0] == "line" else p[2])]
+    return [ln for p in pieces for ln in ([p[1]] if p[0] == "line" else p[2])]
+
+
+UNTESTED_PIECES = {"zebra": "zebra"}  # a drawn piece's kind -> the feature not tested on paper it draws (P301)
+
+
+def _marks(pieces: list) -> tuple[str, ...]:
+    """The features not tested on paper these pieces draw (BitmapRow.untested)."""
+    return tuple(sorted({UNTESTED_PIECES[p[3]] for p in pieces if p[0] == "image" and p[3] in UNTESTED_PIECES}))
 
 
 def _bw(im: Image.Image) -> Image.Image:

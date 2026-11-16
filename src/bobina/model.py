@@ -98,3 +98,4 @@ class Document:
     meta: dict = field(default_factory=dict)
     blocks: list[Block] = field(default_factory=list)
     base_dir: str = "."
+    meta_lines: dict[str, int] = field(default_factory=dict)  # front matter key -> the line it was written on

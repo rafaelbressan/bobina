@@ -92,12 +92,21 @@ def px_for(size: str | None, profile, default_px: int = 20, nudges=None, line: i
         if nudges is not None:
             nudges.add("M101", f"size={size}: not a size", line, SIZE_HINT)
         return default_px
+    m = SIZE_RE.match(str(size or ""))
+    if m and m.group(2) and m.group(1) != m.group(2) and nudges is not None:
+        nudges.add("F303", f"size {size}: a raster font scales evenly, so the height was used ({px}px)", line,
+                   f"write {m.group(2)}x or {px}px")  # fmt: skip
     if PX_MIN <= px <= PX_MAX:
         return px
     clamped = min(max(px, PX_MIN), PX_MAX)
     if nudges is not None:
         nudges.add("F205", f"font size {size} is out of range: using {clamped}px", line, f"use {PX_MIN} to {PX_MAX}px")
     return clamped
+
+
+def readable(size, profile) -> bool:
+    """Whether px_for can read this size (a name, Npx, Nmm, N, 2x or 1x2)."""
+    return _px(size, profile, 0) is not None
 
 
 def _px(size, profile, default_px: int) -> int | None:
@@ -419,7 +428,8 @@ def render_block(
     prefix: Image.Image | None,
     indent: int = 0,
     rtl: bool = False,
-) -> tuple[Image.Image, list[str]]:
+) -> tuple[Image.Image, list[list[Tok]]]:
+    """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views)."""
     pw = prefix.width if prefix else 0
     lines = layout_lines(toks, width - indent - pw, 0)
     imgs, texts = [], []
@@ -446,7 +456,7 @@ def render_block(
             row.paste(p, (int(x), 0))
             x += p.width + extra.get(k, 0)
         imgs.append(row)
-        texts.append("".join(t.text for t in logical))
+        texts.append(logical)
     out = Image.new("L", (width, sum(i.height for i in imgs)), 255)
     y = 0
     for im in imgs:
