@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Checks of the table tasks in evals/agent-eval.yaml, graded from what the real bobina says and shows: `bobina check
---json` (problems, and the width each column got: L108) and `bobina view` (the strip as text, as wide as the paper
-has printer-font columns; a drawn rule is a line of braille dots; a table drawn in a smaller font is a map of the
-paper, each column's text where it prints, cut with "…" when it has more letters than that room has printer
-columns, so text is matched whole or cut). The document is read only for what never prints (a value typed in a cell
+--json` (problems, and the width each column got: L108) and `bobina view` (the strip as text; a drawn rule is a
+line of braille dots; a table in a raster font is a map of the paper when it fits the paper's printer-font columns,
+else on its own grid in a wider frame, every cell whole; only a raster paragraph wider than the frame is cut with
+"…", so text is matched whole or cut). The document is read only for what never prints (a value typed in a cell
 versus a column's prefix). Standard library only: it runs with the sandbox's python3 and its `bobina`.
 
     table_checks.py CHECK FILE      exit 0 when the check passes; otherwise it says why
@@ -62,8 +62,8 @@ def problems(path: str) -> list[dict]:
 
 
 def view(path: str) -> list[str]:
-    """The lines inside the first view box, each as wide as the paper has printer-font columns: the paper's text as
-    it prints, and a table in a raster font as a map of the paper (a cut word ends in "…")."""
+    """The lines inside the first view box, each as wide as the frame: the paper's printer-font columns, or more
+    for a table in a smaller font (its own grid, every cell whole; the paper's text keeps the paper's columns)."""
     out, inside = [], False
     for ln in bobina("view", path).stdout.splitlines():
         if ln.startswith("┌"):
@@ -133,9 +133,10 @@ def body_rows(path: str) -> list[str]:
     return rows
 
 
-def shown(text: str, least: int = 1) -> str:
-    """A regex for `text` as the view shows it: whole, or cut with "…" after at least its first `least` letters."""
-    cut = (re.escape(text[:k]) + "…" for k in range(len(text) - 1, least - 1, -1))
+def shown(text: str) -> str:
+    """A regex for `text` as the view shows it: whole, or cut with "…" after at least its first letter (a raster
+    paragraph wider than the frame; a table's cells are never cut)."""
+    cut = (re.escape(text[:k]) + "…" for k in range(len(text) - 1, 0, -1))
     return "(?:" + "|".join([re.escape(text), *cut]) + ")"
 
 
@@ -227,13 +228,13 @@ def market_code_narrow(path):
 
 def market_discount_under_description(path):
     """The discount comes right after item 003, starts where the description does and runs on past the
-    description's column: at least 'Desconto no item 3' on one line (the rest may be cut in the view)."""
+    description's column: the whole 'Desconto no item 3 - 3,27' on one line (a table's cells are never cut)."""
     lines = view(path)
     item = find(lines, "BANANA")
     if item < 0:
         fail("no item 003 (no line with BANANA)")
     d = next((i for i, ln in enumerate(lines) if "Desconto" in ln), -1)
-    if d < 0 or not re.search(shown("Desconto no item 3 - 3,27", len("Desconto no item 3")), lines[d]):
+    if d < 0 or "Desconto no item 3 - 3,27" not in lines[d]:
         fail(f"'Desconto no item 3 - 3,27' is not on one line (squeezed into one column?): {lines[d : d + 2]}")
     nxt = find(lines, "LENTILHA")
     if not item < d < (nxt if nxt >= 0 else len(lines)):

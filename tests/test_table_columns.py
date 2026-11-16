@@ -488,9 +488,9 @@ def test_a_column_of_codes_is_not_text_even_left_aligned():
     assert lines(res) == ["Código        Nome", "7896016500213 Lentilha", "2000000010014 Arroz"]
 
 
-def test_the_view_of_a_font_table_without_titles_maps_the_paper():
-    """The terminal view of a raster-font table is the paper in printer-font columns: the label on the left, the
-    value where it prints, at the right margin (cut with "…" where the paper has more letters than columns)."""
+def test_the_view_of_a_font_table_without_titles_keeps_every_value_whole():
+    """A headerless raster-font table in a smaller font: on its own grid of 48 columns, the label on the left, the
+    value whole at the table's right edge, not next to its label."""
     res = build('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n{font=Terminus size=16px}\n')
     assert notes(res)[0].endswith("(+1 gap = 48 of 48)")
-    assert lines(res) == ["SUBTOTAL".ljust(26) + "R$ 10…", "TROCO".ljust(26) + "R$ 7,…"]
+    assert lines(res) == ["SUBTOTAL".ljust(39) + "R$ 105,70", "TROCO".ljust(41) + "R$ 7,57"]

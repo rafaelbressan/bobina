@@ -2,6 +2,8 @@
 table as it always printed; receipt and lines stay native text with dividers; grid, header-invert and zebra are
 drawn. A font draws the whole table in it, a column as wide as the font's "0". Checked on the rows and the dots."""
 
+from pathlib import Path
+
 import pytest
 
 from bobina import imaging
@@ -385,34 +387,38 @@ def mapped(res) -> list[str]:
     return [ln for r in drawn(res) for ln in ("".join(c.ch for c in t.cells) for t in r.text_rows)]
 
 
-def test_the_view_of_a_table_in_a_font_is_a_map_of_the_paper():
-    """Printer-font columns, as wide as the paper: each column's text where it prints (a right-aligned one ends
-    where it ends), cut with "…" when the room is shorter; every column shows."""
-    shown = mapped(styled(MARKET, "font=Terminus size=16px", profile_name="mtp-ii-58"))
-    assert shown == ["IT C… DESCRIÇÃO    QTD … UN… TO…",
-                     "0… 7… ARROZ BRANC…   1 … 24… 24…",
-                     "0… 7… BANANA PRAT… 1.… … 9,… 16…"]  # fmt: skip
-    assert all(len(ln) <= 32 for ln in shown)
+TOTALS_RS = '| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n'
 
 
-def test_totals_in_a_large_font_end_at_the_right_margin():
-    res = styled('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n',
-                 "font=Terminus size=32px", profile_name="mtp-ii-58")  # fmt: skip
-    assert mapped(res) == ["SUBTOTAL".ljust(23) + "R$ 105,70", "TROCO".ljust(25) + "R$ 7,57"]
+def test_a_table_in_a_smaller_font_shows_every_cell_whole_on_its_own_grid():
+    """More character columns than the paper's 32: the table's own grid, each column as wide as it prints, every
+    cell whole, right-aligned values ending at their column's right edge."""
+    res = styled(MARKET, "font=Terminus size=16px", profile_name="mtp-ii-58")
+    assert mapped(res) == ["IT   CÓD DESCRIÇÃO            QTD UN  UNIT TOTAL",
+                           "001 7891 ARROZ BRANCO 5KG       1 un 24,90 24,90",
+                           "003 7369 BANANA PRATA ORG   1.635 kg  9,99 16,33"]  # fmt: skip
+    assert all(r.wide_view for r in drawn(res))
 
 
-def test_totals_in_a_small_font_keep_the_label_left_and_the_value_at_the_margin():
-    res = styled('| | {prefix="R$ "} |\n|---|--:|\n| SUBTOTAL | 105,70 |\n| TROCO | 7,57 |\n',
-                 "font=Terminus size=16px", profile_name="mtp-ii-58")  # fmt: skip
-    assert mapped(res) == ["SUBTOTAL".ljust(26) + "R$ 10…", "TROCO".ljust(26) + "R$ 7,…"]
+def test_totals_in_a_smaller_font_end_at_the_tables_right_edge():
+    shown = mapped(styled(TOTALS_RS, "font=Terminus size=16px", profile_name="mtp-ii-58"))
+    assert shown == ["SUBTOTAL".ljust(39) + "R$ 105,70", "TROCO".ljust(41) + "R$ 7,57"]  # 48 columns
 
 
-def test_a_proportional_font_loses_no_column_in_the_view():
-    shown = mapped(styled(BILL, 'font="Atkinson Hyperlegible" size=20px', profile_name="mtp-ii-58"))
-    assert len(shown) >= 5 and all(len(ln) <= 32 for ln in shown)
-    rows = [ln.split() for ln in shown if any(ch.isdigit() for ch in ln)]
-    assert all(len(r) >= 3 for r in rows)  # a description, a quantity and a price on every item's line
-    assert len({len(ln) for ln in shown if any(ch.isdigit() for ch in ln)}) == 1  # prices end in one place
+def test_totals_in_a_large_font_are_a_map_of_the_paper_ending_at_its_margin():
+    res = styled(TOTALS_RS, "font=Terminus size=32px", profile_name="mtp-ii-58")
+    assert mapped(res) == ["SUBTOTAL".ljust(23) + "R$ 105,70", "TROCO".ljust(25) + "R$ 7,57"]  # 32 columns
+    assert not any(r.wide_view for r in drawn(res))
+
+
+def test_a_proportional_font_loses_no_letter_in_the_view():
+    """A proportional font's letters are narrower or wider than a column: the view takes the wider of the two, so
+    no letter is lost (here 34 character columns: a frame wider than the paper)."""
+    table = BILL.replace("Cheese bread", "Cheese bread with butter")
+    shown = mapped(styled(table, 'font="Atkinson Hyperlegible" size=20px', profile_name="mtp-ii-58"))
+    assert shown[:3] == ["Item                     Qty Price", "Espresso                   2  9,00",
+                         "Cheese bread with butter   1 39,00"]  # fmt: skip
+    assert "…" not in "".join(shown) and len({len(ln) for ln in shown}) == 1  # prices end in one place
 
 
 def test_a_turned_lines_table_has_no_dotted_rule_under_the_titles_of_any_block():
@@ -468,17 +474,21 @@ def boxed_lines(text: str) -> list[str]:
 
 
 @pytest.mark.parametrize("command", [["view"], ["print", "--dry-run", "--yes"]])
-def test_the_frame_stays_the_papers_width_with_a_table_in_a_font(isolated, capsys, command):
+def test_the_frame_is_as_wide_as_the_widest_table_line(isolated, capsys, command):
+    """The supermarket example (Terminus 16px): the frame grows to the table's widest line, every value whole; the
+    paper's own text keeps its 32 columns inside it."""
     from bobina import cli
 
-    doc = isolated / "zebra.bob.md"
-    doc.write_text("# Bar\n\n" + BILL.replace("Cheese bread", "Cheese bread with a long name and butter") +
-                   "{style=zebra font=Terminus size=16px}\n\nThanks {.center}\n")  # fmt: skip
+    example = Path(__file__).resolve().parents[1] / "examples" / "tables" / "supermarket.bob.md"
+    doc = isolated / "supermarket.bob.md"
+    doc.write_text(example.read_text(encoding="utf-8") + "\nThanks {.center}\n", encoding="utf-8")
     cli.main([*command, str(doc), "--profile", "mtp-ii-58"])
     box = boxed_lines(capsys.readouterr().out)
-    assert {len(ln) for ln in box} == {34}  # the paper's 32 columns and 2 sides
-    assert any("Cheese bread" in ln and " 1 39…" in ln for ln in box)  # no column dropped, cut where the paper is
-    assert any(ln[1:-1].rstrip().startswith(" ") and "Thanks" in ln for ln in box)  # centred on the paper
+    inner = [ln[1:-1] for ln in box[1:-1]]
+    assert {len(ln) for ln in box} == {50} and max(len(ln.rstrip()) for ln in inner) == 48  # 48 columns, 2 sides
+    assert any(ln.startswith("SUBTOTAL") and ln.endswith("R$ 105,70") for ln in inner)
+    assert any(ln.startswith("001 2000000 ARROZ") for ln in inner) and "…" not in "".join(inner)
+    assert any(ln.rstrip() == " " * 13 + "Thanks" for ln in inner)  # centred on the paper's 32 columns
 
 
 def test_a_bad_front_matter_size_is_said_once_at_its_line():

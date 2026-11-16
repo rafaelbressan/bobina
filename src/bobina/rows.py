@@ -49,6 +49,8 @@ class BitmapRow:
     kind: str = "image"
     text_rows: list | None = None  # for text drawn as an image (inverted bands): shown as text in views
     untested: tuple[str, ...] = ()  # features not tested on paper it draws (features.py, "zebra"): note P301
+    wide_view: bool = False  # a table in a smaller font whose text rows need more columns than the paper: the
+    # terminal views widen their frame to hold them (view.width)
 
 
 @dataclass
