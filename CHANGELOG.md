@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.1.4 — 2026-11-17
+
+Security (upgrade if you print templates filled from `--data`, `--set`, `--ask`, MCP or chat):
+- Data can no longer reach Python's internals through a format string: `{{ greeting.format(name) }}` with a value
+  from data could print environment variables. `.format()` and `.format_map()` are now refused in templates (M311):
+  use the `|format` filter or `~`.
+- Data rendered with `| markdown` brings text markup only (paragraphs, emphasis, lists, headings, quotes, tables). It
+  is parsed on its own and spliced in after the document is parsed, so it can never send raw bytes, choose an image
+  file, make a QR, barcode, payment or contact code, open or close a `:::` block, define links or set `{…}`
+  attributes (M121, M122, M123). Full Markdown from `| markdown` is for the author's own values only (front matter,
+  field defaults, labels, literals).
+- Templates are made of an allowlist of Jinja constructs, checked before they run: `if`, `for`, `set x = …`,
+  `with`, `{{ }}` and filters. `macro`, `call`, `filter`, block `set`, recursive loops and the rest are refused with
+  M311 saying what to write instead. A counter's name cannot come from data.
+- The characters bobina reserves for its own marks are removed from data and from template results (M124).
+
+Tables:
+- `style=plain|receipt|lines|grid|header-invert|zebra`, and `font=`/`size=` to fit more columns (Terminus 16px: 48
+  on 58 mm).
+- Column settings at the end of a title cell: `| Price {width=9ch prefix="R$ "} |`, also in a table without titles.
+  A table never prints wider than the paper (L107 says how it was fitted); `bobina check` shows each column's width
+  (L108).
+- A cell's own `{.bold}`, `.invert`, `.shade`, alignment; `span=all|N` across columns; a whole row after its closing
+  pipe: `| TOTAL | 61,00 | {.invert .bold}`.
+- A title row of empty cells prints no title, as in Pandoc; cells wrap at spaces; spare room goes to the text column;
+  tables can turn along the paper (`orientation=`).
+- `bobina help table`, guides tables.md, table-cells.md and receipts.md, the receipt template with `style=receipt`,
+  and whole receipts in examples/tables.
+
+Layout:
+- `::: {.box}` draws a frame around any blocks: a title on the border, inside or on a black band, line styles,
+  width, placement, light grey, boxes in boxes (guide: layout.md). A `:::` never closed says what it holds (M105).
+
+Printing on the Goldensky MTP-II, from paper:
+- Its native QR always has 5-dot modules and reads the module number as a minimum version: the preview now shows
+  what prints, `module=` prints an image (Q113), and content past version 7 (which printed "2QR CREAT ERR!",
+  for example a Pix with a random key) prints as an image.
+- Light grey (2-dot squares every 4 dots) and 2-dot grid strokes tested on paper; raster sent in 16-row bands.
+
+Also:
+- The contact block: QR codes for WhatsApp, Telegram, Signal, Instagram, vCard and 25 more networks.
+- Icons in documents (`:fragile:`, `:wash-30:` …) with a guide of what each means.
+- Images: drawing or photo detected (`.dither`, `.threshold`), any `rotate=` angle, `mirror=`; every object placed and
+  sized the same way (`.left/.center/.right`, `width=`), captions with `caption-align=`.
+- `bobina config` and `bobina printer show|set|unset`; a problem policy in config.toml; `bobina history export` and
+  `--log`; `bobina update` with a once-a-day notice; `print --step` stops between labels to tear them off.
+- Attributes at the end of any line of a paragraph apply to it; inline styles work in table cells; settings a table
+  does not take are reported (M101), and a word cut in a cell says so (L101).
+
 ## 0.1.3 — 2026-11-12
 
 - Two names that say what they change: the paper style (how the answers look on paper: `--paper-style`,
