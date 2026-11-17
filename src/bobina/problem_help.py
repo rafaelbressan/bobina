@@ -83,6 +83,10 @@ FIX = {
         "less text or smaller sizes, or wrap=wrap to move a column to a label of its own. A block drawn smaller or "
         "cut between two labels: give it a smaller width= or size=, or take it out of the turned columns."
     ),
+    "L114": (
+        "Nothing is lost: the block goes on in the next label, cut across a line. Read the labels together, or "
+        "make it fit: a longer length=, a smaller size= or width=, less in it, or take it out of the turned columns."
+    ),
     "L113": (
         "Nothing to fix if you want the picture turned. For a label read sideways, write orientation=vertical on "
         "the columns instead of rotate=: they are laid out along the roll, length= long (72 mm by default)."

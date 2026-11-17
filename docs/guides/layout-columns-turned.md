@@ -45,9 +45,10 @@ Nothing is lost:
 - Otherwise what does not fit goes on in another label printed after it, each column at its place, cut between
   lines and blocks (`L112`).
 - A single block taller than the label: a QR code or Data Matrix gets the largest whole module that fits (`Q101`
-  when it may not scan), a barcode shorter bars; a picture is drawn smaller; a block of text (a box, a table) at
-  most 70% smaller, so it still reads, and if still too tall it goes on in the next label, cut at a blank line
-  near the edge, else across its lines (`L112` as a warning).
+  when it may not scan), in a box too; a barcode shorter bars. A picture is drawn smaller; a block of text (a box,
+  a table) at most 70% smaller, so it still reads. Codes are never drawn smaller: what is still too tall goes on
+  in the next label, cut at a blank line near the edge, never through a code (`L112`), else across its lines
+  (`L114`, a warning); a code taller than the label is cut and will not scan (`Q101`, `Q108`).
 
 ## Good to know
 

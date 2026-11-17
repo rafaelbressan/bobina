@@ -61,7 +61,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
-| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)) ⚠ not tested on paper; blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`) ⚠ not tested on paper; along the roll with `orientation=vertical` ⚠ not tested on paper |
+| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)) ⚠ not tested on paper; blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`) ⚠ not tested on paper; along the roll: `orientation=vertical` ⚠ not tested on paper |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
@@ -397,7 +397,7 @@ labels:
 - `required: true` → empty gives `M131` (a warning in the confirmation screen); a `default:` may be an expression.
 - `was: [old_name]` → a document that still uses a renamed field gets `M101` naming the new one.
 - `labels` are picked by the document language (`{{ label.total }}`) and overridable with `labels:` in the document.
-- Using one (`template: NAME`), where bobina finds it, the built-in ones, `template show` and `template new`:
+- Using one (`template: NAME`), its lookup, the built-ins, `template show`/`new`:
   [guides/templates.md](guides/templates.md).
 - `--ask` (on `print`, `check`, `preview`) asks the fields still missing on the terminal, in the order the
   template declares them, showing `help`, `example` and the default (`[automatic]` for expressions);
@@ -485,8 +485,9 @@ Nudges:
 | `L109` | warning | box title cut (…) |
 | `L110` | note | a column that did not fit moved to a new row |
 | `L111` | warning | no room for a box or columns: printed without them |
-| `L112` | note | turned columns too tall: more labels, or a block drawn smaller |
+| `L112` | note | turned label too tall: more labels, or a block shrunk |
 | `L113` | note | `rotate=90` on columns: `orientation=vertical` meant? |
+| `L114` | warning | turned label: a block cut across its lines |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |

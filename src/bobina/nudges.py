@@ -62,6 +62,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L111": ("warning", "no room for a box or columns here: what they hold printed without them", ""),
     "L112": ("note", "turned columns too tall for the label: they go on in more labels, or a block drawn smaller", ""),
     "L113": ("note", "rotate=90 on columns turns their picture: orientation=vertical lays them out along the roll", ""),
+    "L114": ("warning", "turned columns: a block cut across its lines between two labels (read them together)", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),
@@ -233,10 +234,8 @@ class Nudges(list):
         super().__init__(*args)
         self.check_only: list[Nudge] = []
 
-    def add(self, code: str, message: str, line: int | None = None, suggestion: str = "", evidence: str = "",
-            severity: str = ""):  # fmt: skip
-        """severity: the catalog's unless given (a code whose cases differ: L112's cut across lines is a warning)."""
-        n = Nudge(code, message, line, suggestion, evidence, severity)
+    def add(self, code: str, message: str, line: int | None = None, suggestion: str = "", evidence: str = ""):
+        n = Nudge(code, message, line, suggestion, evidence)
         into = self.check_only if code in CHECK_ONLY else self
         if not any(x.code == n.code and x.line == n.line and x.message == n.message for x in into):
             into.append(n)

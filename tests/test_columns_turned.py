@@ -387,16 +387,17 @@ def test_a_box_a_little_too_tall_is_drawn_smaller_but_never_below_70_percent():
 def test_text_too_tall_even_at_70_percent_goes_on_cut_at_a_blank_line_as_a_note():
     turned = "\n".join(f"line {i}" for i in range(30)) + " {rotate=180}"  # a turned block: 30 lines, ~900 dots
     res = build(cols(turned, "x"))
-    (n,) = [n for n in res.nudges if n.code == "L112" and ", cut " in n.message]
-    assert n.severity == "note" and "between its lines" in n.message and "70%" in n.message
+    (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
+    assert n.code == "L112" and n.severity == "note" and "between its lines" in n.message and "70%" in n.message
     assert len(labels(res)) >= 2
 
 
-def test_a_box_too_tall_even_at_70_percent_goes_on_cut_across_it_as_a_warning():
+def test_a_box_too_tall_even_at_70_percent_goes_on_cut_across_it_as_l114_one_problem():
     box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"  # its sides leave no blank row
     res = build(cols(box, "x"))
-    (n,) = [n for n in res.nudges if n.code == "L112" and ", cut " in n.message]
-    assert n.severity == "warning" and "nothing is lost" in n.message
+    (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]  # one problem for the overflow, not two
+    assert n.code == "L114" and n.severity == "warning" and n.message.startswith("column 1: ")
+    assert "cut across its lines" in n.message and "read the labels together" in n.suggestion
     first = labels(res)[0]
     assert ink(first.image, (0, 0, W, 23 * CW))[2] - ink(first.image, (0, 0, W, 23 * CW))[0] <= W
 
@@ -454,3 +455,99 @@ def test_the_lengths_in_dots_said_are_the_ones_printed():
     guide = (Path(__file__).resolve().parents[1] / "docs" / "guides" / "layout-columns-turned.md").read_text()
     assert "575" in LENGTH_HINT and "`575` dots" in guide and "576" not in LENGTH_HINT + guide
     assert labels(build(cols("a", opts="length=575")))[0].image.height == MM72
+
+
+# --- second review ------------------------------------------------------------------------------------------------
+
+
+def _all_rows(rows) -> list:
+    """Every row, the ones inside columns and boxes too."""
+    out = []
+    for r in rows:
+        out.append(r)
+        if isinstance(r, BitmapRow) and r.columns:
+            out += _all_rows([x for c in r.columns.columns for x in c.rows])
+        if isinstance(r, BitmapRow) and r.box:
+            out += _all_rows(r.box.rows)
+    return out
+
+
+def _whole_modules(res, data: str) -> list[int]:
+    """The height in modules of each QR drawn for `data`, asserting whole modules."""
+    from bobina import imaging
+
+    side = len(imaging.qr_matrix(data, "M", 0))
+    out = []
+    for r in _all_rows(res.rows):
+        if isinstance(r, BitmapRow) and r.kind == "qr":
+            box = ink(r.image)
+            assert (box[3] - box[1]) % side == 0 and box[3] - box[1] <= W
+            out.append((box[3] - box[1]) // side)
+    return out
+
+
+QR_DATA = "https://example.com/p/4471"
+
+
+def test_standing_columns_inside_a_turned_column_fit_their_codes_to_the_label():
+    inner = standing(f"```qr {{width=full}}\n{QR_DATA}\n```", "text").replace("::::", ":::::")
+    res = build(cols(inner, opts="length=200mm").replace("::: {.column ", ":::::: {.column ", 1))
+    assert _whole_modules(res, QR_DATA) and not {"L112", "L114"} & set(codes(res))
+
+
+def test_a_qr_in_a_box_in_a_turned_column_fits_with_the_frame_never_resampled():
+    res = build(cols(f'::: {{.box title="SCAN"}}\n```qr {{width=full}}\n{QR_DATA}\n```\n:::', opts="length=200mm"))
+    (module,) = _whole_modules(res, QR_DATA)
+    boxes = [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "box"]
+    assert module >= 2 and ink(boxes[0].image)[3] - ink(boxes[0].image)[1] <= W
+    assert not {"L112", "L114"} & set(codes(res))
+
+
+def test_a_block_holding_a_code_is_never_drawn_smaller():
+    lines = "\n".join(f"line {i}" for i in range(12))
+    res = build(cols(f"::: {{.box}}\n```qr\n{QR_DATA}\n```\n{lines}\n:::", "x"))
+    assert not any("drawn at" in m for m in said(res, "L112") + said(res, "L114"))
+    from bobina import imaging
+
+    units = len(imaging.qr_matrix(QR_DATA, "M", 0)) + 4  # the QR picture: its modules and quiet zone
+    spans = [sp for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "box" for sp in r.code_spans]
+    assert len(labels(res)) >= 2 and spans  # it goes on in another label
+    assert all((b - a) % units == 0 for a, b, _ in spans) and not said(res, "Q101")  # whole, at its size, never cut
+
+
+def test_a_code_cut_across_labels_says_it_will_not_scan():
+    res = build(cols("```barcode {type=code128 orientation=vertical}\nPED-1042-2026-11-17-ABCDEFGH\n```", "x"))
+    (n,) = [n for n in res.nudges if n.code in ("Q108", "L112", "L114")]
+    assert n.code == "Q108" and n.severity == "warning" and "will not scan" in n.message
+    assert "length=" in n.suggestion and "nothing is lost" not in n.message
+
+
+def test_percent_widths_over_100_with_length_auto_blame_the_widths():
+    res = build(cols("a", "b", "c", opts="length=auto", each=("width=50%", "width=50%", "width=50%")))
+    (msg,) = [m for m in said(res, "M101") if "narrowed" in m]
+    assert "% widths add up to 150%" in msg and "content needs" not in msg
+
+
+@pytest.mark.parametrize("turn", ["", "orientation=vertical"])
+def test_a_gap_that_moves_a_column_is_blamed_not_the_widths(turn):
+    make = cols if turn else standing
+    res = build(make("a", "b", "c", opts="wrap=wrap gap=25ch"))
+    (n,) = [n for n in res.nudges if n.code == "L110"]
+    assert "the gap of 25 letters between 3 columns leaves" in n.message and "widths ask" not in n.message
+    assert "a smaller gap=" in n.suggestion
+
+
+def test_a_data_matrix_stepped_down_says_one_q101_for_its_last_module():
+    inner = cols("```datamatrix {width=full}\nLOTE-4471-2026-11-17\n```", opts="length=200mm")
+    res = build(":::::: {.columns}\n::::: {.column width=6ch}\n" + inner + ":::::\n::: {}\nx\n:::\n::::::\n")
+    q = said(res, "Q101")
+    assert len(q) == 1 and "datamatrix module" in q[0]
+
+
+def test_trials_are_split_and_the_barcode_imports_nothing_locally():
+    import inspect
+
+    from bobina.layout import Layout
+
+    assert hasattr(Layout, "column_squeezed") and hasattr(Layout, "column_height")
+    assert not hasattr(Layout, "column_probe") and "import preview" not in inspect.getsource(Layout.barcode)

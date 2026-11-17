@@ -6,13 +6,13 @@ template below prints on a 58 mm roll with no warning.
 ```bash
 bobina template list                          # every template and its fields
 bobina template show label                    # one template: fields, required, examples
-bobina template new label box.bob.md          # a starter file: every field marked # required or # optional
+bobina template new label box.bob.md          # a starter: every field marked # required or # optional
 bobina preview box.bob.md -o box.png          # look before printing
 bobina print box.bob.md                       # confirmation screen, then paper
 ```
 
-Built in: `receipt` (items, total, optional Pix), `note`, the recipes and the gallery below. A document uses a
-template with `template: NAME` in its front matter; **the other keys are the fields**. A field
+Built in: `receipt` (items, total, optional Pix), `note` and the ones below. A document uses a template
+with `template: NAME` in its front matter; **the other keys are the fields**. A field
 can also come from `--set NAME=VALUE`, `--ask` (asked on the terminal) or a column of `--data` (one label per row,
 see [batch-printing.md](batch-printing.md)). `locale: pt-BR` switches the template's fixed words and the date
 format to Portuguese (without it: the machine's, `bobina config get locale`). The full rules are in [FORMAT.md §8](../FORMAT.md).
@@ -103,7 +103,7 @@ the printer. Copy one, change the values, print.
 
 A template is a `.bob.md` with a `fields:` front matter (FORMAT.md §8). Put it in `~/.config/bobina/templates/`
 and `template: my-price` finds it; one with the same name as a built-in one wins over it. A value ending in
-`.md` or with a `/` is a path (`template: tags/price.bob.md`), read only in the document's folder or
+`.md` or with a `/` is a path (`template: tags/price.bob.md`), only from the document's folder or
 `~/.config/bobina/templates/`. The built-in ones are in
 [`src/bobina/templates/`](../../src/bobina/templates/): copy one and change its layout. `bobina template list`
 shows only the built-in ones.
