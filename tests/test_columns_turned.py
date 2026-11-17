@@ -392,8 +392,18 @@ def test_text_too_tall_even_at_70_percent_goes_on_cut_at_a_blank_line_as_a_note(
     assert len(labels(res)) >= 2
 
 
-def test_a_box_too_tall_even_at_70_percent_goes_on_cut_across_it_as_l114_one_problem():
-    box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"  # its sides leave no blank row
+def test_a_box_too_tall_even_at_70_percent_goes_on_cut_between_its_lines_its_side_lines_aside():
+    box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"
+    res = build(cols(box, "x"))
+    (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
+    assert n.code == "L112" and "between its lines" in n.message and n.message.startswith("column 1: ")
+
+
+GRID = "| a | b |\n|---|---|\n" + "\n".join(f"| {i} | item {i} |" for i in range(40)) + "\n{style=grid}"
+
+
+def test_a_box_with_no_blank_line_goes_on_cut_across_it_as_l114_one_problem():
+    box = f"::: {{.box}}\n{GRID}\n:::"  # a grid's lines run through every row
     res = build(cols(box, "x"))
     (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]  # one problem for the overflow, not two
     assert n.code == "L114" and n.severity == "warning" and n.message.startswith("column 1: ")
@@ -551,3 +561,101 @@ def test_trials_are_split_and_the_barcode_imports_nothing_locally():
 
     assert hasattr(Layout, "column_squeezed") and hasattr(Layout, "column_height")
     assert not hasattr(Layout, "column_probe") and "import preview" not in inspect.getsource(Layout.barcode)
+
+
+# --- third review -------------------------------------------------------------------------------------------------
+
+
+def test_a_picture_drawn_smaller_and_a_column_spilling_are_both_said(tmp_path):
+    Image.new("1", (100, 900), 0).save(tmp_path / "bar.png")
+    paragraphs = "\n\n".join(f"line {i}" for i in range(30))
+    res = build(cols("![](bar.png){width=100}\n\n" + paragraphs, "x"), base_dir=str(tmp_path))
+    notes = said(res, "L112")
+    assert any("a picture" in m and "drawn smaller" in m for m in notes)
+    assert any(m.startswith("column 1 is taller than the label") for m in notes)
+
+
+def test_turned_pictures_keep_their_codes_where_they_go():
+    from bobina.layout import _turned_spans
+
+    spans = ((10, 40, "qr"),)
+    assert _turned_spans(spans, 100, 0) == spans and _turned_spans(spans, 100, 180) == ((60, 90, "qr"),)
+    assert _turned_spans(spans, 300, 90) == _turned_spans(spans, 300, 270) == ((0, 300, "qr"),)
+
+
+def test_a_small_qr_in_a_turned_block_away_from_the_cut_is_never_said_cut():
+    lines = "\n".join(f"line {i}" for i in range(30))
+    res = build(cols(f"::: {{rotate=180}}\n```qr\n{QR_DATA}\n```\n\n{lines}\n:::", "x"))
+    rotated = [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "rotated"]
+    assert "Q101" not in codes(res) and len(labels(res)) >= 2
+    assert not rotated or all(b - a < 300 for r in rotated for a, b, _ in r.code_spans)  # the QR, not the block
+
+
+def test_a_cut_at_a_codes_edge_is_clean():
+    qrs = "\n\n".join(f"```qr\n{QR_DATA}/{i}\n```" for i in range(3))  # grey everywhere but the codes' edges
+    res = build(cols(f"::: {{.box .shade}}\n{qrs}\n:::", "x"))
+    found = [n for n in res.nudges if n.code in ("L112", "L114", "Q101")]
+    assert found and {n.code for n in found} == {"L112"}
+
+
+def test_a_code_cut_counts_the_labels_it_is_on_and_a_cut_through_text_is_said_too():
+    barcode = "```barcode {type=code128 orientation=vertical}\nPED-1042-2026-11-17-ABCDEFGH\n```"
+    res = build(cols(f"::: {{.box}}\n{GRID}\n\n{barcode}\n:::", "x"))
+    (q,) = said(res, "Q108")
+    on = int(q.split("cut across ")[1].split(" ")[0])
+    assert 2 <= on < len(labels(res)) and said(res, "L114")  # both facts, each said once
+
+
+@pytest.mark.parametrize(
+    "box", ['.box title="SCAN"', '.box title="A LONG TITLE THAT WRAPS ON TWO LINES OR MORE" title-style=band']
+)
+def test_a_qr_in_any_box_fits_with_what_its_title_takes(box):
+    res = build(cols(f"::: {{{box}}}\n```qr {{width=full}}\n{QR_DATA}\n```\n:::", opts="length=200mm"))
+    (module,) = _whole_modules(res, QR_DATA)
+    boxed = [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "box"]
+    assert module >= 2 and ink(boxed[0].image)[3] - ink(boxed[0].image)[1] <= W
+    assert not {"L112", "L114", "Q101"} & set(codes(res))
+
+
+def test_an_inside_title_takes_nothing_off_and_the_box_goes_on_never_through_its_code():
+    res = build(cols(f'::: {{.box title="SCAN" title-style=inside}}\n```qr {{width=full}}\n{QR_DATA}\n```\n:::',
+                     opts="length=200mm"))  # fmt: skip
+    from bobina import imaging
+
+    units = len(imaging.qr_matrix(QR_DATA, "M", 0)) + 4  # the QR picture: its modules and quiet zone
+    spans = [sp for r in _all_rows(res.rows) if isinstance(r, BitmapRow) for sp in r.code_spans if r.kind == "box"]
+    assert spans and all((b - a) % units == 0 for a, b, _ in spans) and "Q101" not in codes(res)
+
+
+def _code_heights(monkeypatch, src: str) -> list:
+    """The height each QR was laid out to fit (Layout.tall_max as _qr_code saw it)."""
+    from bobina.layout import Layout
+
+    seen, real = [], Layout._qr_code
+    monkeypatch.setattr(Layout, "_qr_code", lambda self, *a, **k: seen.append(self.tall_max) or real(self, *a, **k))
+    build(src)
+    return seen
+
+
+def test_a_box_turned_90_does_not_take_its_frame_off_the_codes_height(monkeypatch):
+    qr = f"```qr\n{QR_DATA}\n```"
+    assert set(_code_heights(monkeypatch, cols(f"::: {{.box rotate=90}}\n{qr}\n:::"))) == {W}
+    assert all(h < W for h in _code_heights(monkeypatch, cols(f"::: {{.box rotate=180}}\n{qr}\n:::")))
+
+
+def test_a_turned_block_draws_its_rows_once(monkeypatch):
+    from bobina import layout
+
+    calls = []
+    real = layout.preview.row_image
+    monkeypatch.setattr(layout.preview, "row_image", lambda r, *a: calls.append(r) or real(r, *a))
+    res = build("one\ntwo\nthree {rotate=90}\n")
+    rotated = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "rotated"]
+    assert rotated and len(calls) == len(set(map(id, calls)))  # no row drawn twice
+
+
+def test_widths_and_a_gap_that_move_a_column_suggest_both():
+    res = build(standing("a", "b", opts="wrap=wrap gap=3ch", each=("width=15ch", "width=15ch")))
+    (n,) = [n for n in res.nudges if n.code == "L110"]
+    assert "the widths and the gap of 3 letters ask for 33 of the 32" in n.message
+    assert "smaller widths or a smaller gap= keep them on one row" in n.suggestion

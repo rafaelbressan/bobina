@@ -869,12 +869,15 @@ class Layout:
         return self.stacked([preview.row_image(r, self.p, self.em) for r in rows], self.W)
 
     def rotate(self, rows, ang: float, attrs, line: int) -> BitmapRow:
-        im = self.compose(rows)
+        pics = [preview.row_image(r, self.p, self.em) for r in rows]
+        im = self.stacked(pics, self.W)
+        codes = _code_spans(rows, pics)
         box = ImageOps.invert(im).getbbox()
         if box:
             im = im.crop(
                 (max(0, box[0] - 4), max(0, box[1] - 4), min(im.width, box[2] + 4), min(im.height, box[3] + 4))
             )
+            codes = tuple((a - max(0, box[1] - 4), b - max(0, box[1] - 4), k) for a, b, k in codes)
         im = im.rotate(
             -ang,
             expand=True,
@@ -892,7 +895,7 @@ class Layout:
         align = attrs.kv.get("align") or next((x for x in ("left", "right", "center") if attrs.has(x)), "center")
         bw = im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
         marks = tuple(sorted({u for r in rows if isinstance(r, BitmapRow) for u in r.untested}))  # P301 stays
-        spans = _whole(bw.height, _code_spans(rows, [preview.row_image(r, self.p, self.em) for r in rows]))
+        spans = _turned_spans(codes, bw.height, ang)
         return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks, code_spans=spans)
 
     def _block(self, b, indent: int) -> list:
@@ -1057,28 +1060,31 @@ class Layout:
         kids = d.children
         if title and how == "inside":  # the first line inside, bold: a paragraph like any other, it wraps
             kids = [Paragraph(line=line, runs=[Run(raw, bold=True)]), *kids]
-        outer = self.tall_max  # in a turned label: what the frame, its room and its title take off its height
-        if outer:
-            self.tall_max = max(1, outer - 2 * stroke - 2 * BOX_ROOM - (2 * ch if title else 0))
+        on_border = bool(title) and how == "border"
+        top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
+        title_y = max(0, top + stroke // 2 - ch // 2)
+        ang = self.angle(a, line) % 360
+        outer = self.tall_max
         try:
             with self.narrow(inner):
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
+                band_im = self.compose(band) if band else None
+                if outer and ang % 180 != 90:  # in a turned label: what the frame, its room and a border or band
+                    above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
+                                title_y + ch + 2 if on_border else 0)  # fmt: skip
+                    self.tall_max = max(1, outer - above - BOX_ROOM - stroke)  # (turned 90: its width; the cuts)
                 rows = self.blocks(kids, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
                 pics = [preview.row_image(r, self.p, self.em) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
-                band_im = self.compose(band) if band else None
         finally:
             self.tall_max = outer
         codes = _code_spans(rows, pics)
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
                        "put the raw block after the ::: line that closes the box")  # fmt: skip
-        on_border = bool(title) and how == "border"
-        top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
-        title_y = max(0, top + stroke // 2 - ch // 2)
         y = top + stroke
         parts = []
         if band_im is not None:  # black from side to side of the frame, the title centred in it
@@ -1103,11 +1109,10 @@ class Layout:
         if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
         shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
-        ang = self.angle(a, line) % 360
         if ang:
             exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
             im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
-            codes = _whole(im.height, codes)
+            codes = _turned_spans(codes, im.height, ang)
             if im.width > room:
                 self.n.add("L104", f"turned box is {im.width} dots wide: cropped to {room}", line,
                            "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
@@ -1317,7 +1322,8 @@ class Layout:
                 where = "a new label, " + ("after this one" if wrap == "wrap" else "before this one")
             else:
                 where = "a new row of columns, " + ("under them" if wrap == "wrap" else "above them")
-            fix = "a smaller gap= keeps" if why.startswith("the gap") else "smaller widths keep"
+            fix = ("a smaller gap= keeps" if why.startswith("the gap") else "smaller widths or a smaller gap= keep"
+                   if why.startswith("the widths and the gap") else "smaller widths keep")  # fmt: skip
             self.n.add("L110", f"column {i + 1} does not fit beside column {i} ({why}): it starts {where}",
                        cols[i].line, f"wrap=nowrap keeps the columns side by side, squeezed; {fix} them on one "
                        f"{row}")  # fmt: skip
@@ -1631,9 +1637,9 @@ class Layout:
         for k, (c, w) in enumerate(zip(cols, widths, strict=True)):
             rows, raw, pics = self.laid_column(c, w, tall)
             raws += raw
-            bands, height, said = self.label_bands(rows, pics, tall, w * cw, k + 1)
+            bands, height, cut = self.label_bands(rows, pics, tall, w * cw, k + 1)
             stacks.append(bands)
-            if len(bands) > 1 and not said:  # one problem per overflow: fit_label's names the column already
+            if len(bands) - 1 > cut:  # labels its cut blocks do not account for (fit_label said those)
                 more = len(bands) - 1
                 self.n.add("L112", f"column {k + 1} is taller than the label ({height} of the {tall} dots across the "
                            f"paper): what does not fit goes on in {more} more label{'s' if more > 1 else ''} after "
@@ -1661,17 +1667,17 @@ class Layout:
                      for u in r.untested} | {"columns", "turned-columns"}  # fmt: skip
             turned = canvas.rotate(-90, expand=True)  # clockwise, like a turned table: the top goes to the right
             view = Columned(views, "", turned=True)
-            spans = _whole(turned.height, [s for bands in stacks if b < len(bands) for s in bands[b][2]])
+            spans = _turned_spans([s for bands in stacks if b < len(bands) for s in bands[b][2]], turned.height, 90)
             out.append(BitmapRow(_bw(turned), line, "columns", untested=tuple(sorted(marks)), columns=view,
                                  code_spans=spans))  # fmt: skip
         return [*out, *raws]
 
-    def label_bands(self, rows: list, pics: list, tall: int, width: int, column: int = 0) -> tuple[list, int, bool]:
+    def label_bands(self, rows: list, pics: list, tall: int, width: int, column: int = 0) -> tuple[list, int, int]:
         """A turned column's rows in bands no taller than the label (tall dots): (each band's rows, its picture and
-        the codes in it; the column's whole height; whether a row too tall was said). Cut between rows, never inside
-        one; a gap at a band's edge is left out. A row taller than the label is fitted to it, or cut into pieces that
-        go on in the next labels (fit_label)."""
-        bands, cur, used, height, said = [], [], 0, 0, False
+        the codes in it; the column's whole height; the labels added by cutting a row too tall, which fit_label
+        said). Cut between rows, never inside one; a gap at a band's edge is left out. A row taller than the label
+        is fitted to it, or cut into pieces that go on in the next labels (fit_label)."""
+        bands, cur, used, height, cut = [], [], 0, 0, 0
 
         def close() -> int:
             while cur and isinstance(cur[-1][0], FeedRow):
@@ -1688,8 +1694,8 @@ class Layout:
             height += im.height
             pieces = [(r, im)]
             if im.height > tall and not isinstance(r, FeedRow):
-                pieces, told = self.fit_label(r, im, tall, width, column)
-                said = said or told
+                pieces = self.fit_label(r, im, tall, width, column)
+                cut += len(pieces) - 1
             for k, (piece, pic) in enumerate(pieces):
                 if cur and (used + pic.height > tall or k):  # a piece cut at a label's edge starts the next label
                     used = close()
@@ -1698,18 +1704,19 @@ class Layout:
                 cur.append((piece, pic))
                 used += pic.height
         close()
-        return bands, height, said
+        return bands, height, cut
 
     def fit_label(self, r, im: Image.Image, tall: int, width: int,
-                  column: int = 0) -> tuple[list[tuple[BitmapRow, Image.Image]], bool]:  # fmt: skip
-        """A row taller than a turned label (its ink), as pieces no taller than the label, and whether it said so
-        (one problem for it, naming its column):
+                  column: int = 0) -> list[tuple[BitmapRow, Image.Image]]:  # fmt: skip
+        """A row taller than a turned label (its ink), as pieces no taller than the label, each fact said once,
+        naming its column:
         - a photo or drawing (an image) is drawn smaller to fit it (L112);
         - a block with text (a box, a turned block, a table) is drawn at most LEGIBLE_SHRINK smaller (L112);
         - what is still too tall, and whatever holds a code (never resampled: a code is laid out to fit the label
-          already, laid_column), goes on in the next labels: cut at a blank line near each cut, never through a
-          code (L112, a note); across its lines when there is none (L114, a warning); through a code only when the
-          code itself is taller than the label (Q101 or Q108: it will not scan)."""
+          already, laid_column), goes on in the next labels, cut where no code is: at a blank line near each cut
+          (a box's side lines aside) or at a code's edge, a clean cut (L112, a note); across its lines when there is
+          no such place (L114, a warning); through a code only when the code itself is taller than the label
+          (Q101, Q108 for a barcode: it will not scan). A block cut both ways says both."""
         line = getattr(r, "line", 0)
         g = im.convert("L")
         box = ImageOps.invert(g).getbbox() or (0, 0, im.width, im.height)
@@ -1719,6 +1726,8 @@ class Layout:
         photo = isinstance(r, BitmapRow) and r.kind == "image" and not spans
         kind = r.kind if isinstance(r, BitmapRow) else spans[0][2] if spans else "text"
         mark = getattr(r, "untested", ())
+        framed = getattr(r, "box", None)
+        sides = (ink.width - framed.inner) // 2 if framed and framed.turned % 180 != 90 else 0  # a box's side lines
 
         def row(piece: Image.Image, top: int = 0) -> tuple[BitmapRow, Image.Image]:
             small = imaging.place(_bw(piece), width, align)
@@ -1727,51 +1736,58 @@ class Layout:
             return BitmapRow(small, line, kind, untested=mark, code_spans=inside), small
 
         if ink.height <= tall:  # only the white around it was too tall
-            return [row(ink)], False
+            return [row(ink)]
         who = f"column {column}: " if column else ""
         what = (f"{who}{'a picture' if photo else 'a block'} {ink.height} dots tall at line {line} is taller than the "
                 f"label ({tall} dots across the paper)")  # fmt: skip
         if photo:
             self.n.add("L112", f"{what}: drawn smaller to fit it", line, "a smaller width= for it")
-            return [row(ink.resize((max(1, round(ink.width * tall / ink.height)), tall), Image.BOX))], True
+            return [row(ink.resize((max(1, round(ink.width * tall / ink.height)), tall), Image.BOX))]
         scale = 1.0
         if not spans:
             scale = max(LEGIBLE_SHRINK, tall / ink.height)
             ink = ink.resize((max(1, round(ink.width * scale)), max(1, round(ink.height * scale))), Image.BOX)
+            sides = math.ceil(sides * scale)
             if ink.height <= tall:
                 self.n.add("L112", f"{what}: drawn at {scale:.0%} to fit it", line, "a smaller size= or less text")
-                return [row(ink)], True
+                return [row(ink)]
 
         def free(y: int) -> bool:  # a row that cuts no code
             return not any(a < y < b for a, b, _ in spans)
 
-        pieces, top, across, through = [], 0, False, ""
+        def clean(y: int) -> bool:  # a blank line (inside a box's side lines), or a code's edge
+            return _white_row(ink, y, sides) or any(y in (a, b) for a, b, _ in spans)
+
+        pieces, top, across, through = [], 0, False, []
         while ink.height - top > tall:
             cut = top + tall
-            at = next((y for y in range(cut, top + tall * 2 // 3, -1) if free(y) and _white_row(ink, y)), None)
-            if at is None:  # no blank line near the edge: the lowest place that cuts no code, else the edge
+            at = next((y for y in range(cut, top + tall * 2 // 3, -1) if free(y) and clean(y)), None)
+            if at is None:  # no clean place near the edge: the lowest place that cuts no code, else the edge
                 at = next((y for y in range(cut, top, -1) if free(y)), None)
-                across = True
                 if at is None:
-                    at, through = cut, next(k for a, b, k in spans if a < cut < b)
+                    at = cut
+                    through += [s for s in spans if s[0] < cut < s[1] and s not in through]
+                else:
+                    across = across or not clean(at)
             pieces.append((top, ink.crop((0, top, ink.width, at))))
             top = at
         pieces.append((top, ink.crop((0, top, ink.width, ink.height))))
         more = f"{len(pieces) - 1} more label{'s' if len(pieces) > 2 else ''}"
         shrunk = f"drawn at {scale:.0%} (smaller would not read) and " if scale < 1 else ""
-        if through:
-            name = {"qr": "QR code", "datamatrix": "Data Matrix", "pdf417": "PDF417"}.get(through, "barcode")
+        for a, b, k in through:
+            name = {"qr": "QR code", "datamatrix": "Data Matrix", "pdf417": "PDF417"}.get(k, "barcode")
             turn = ", or orientation=horizontal on the barcode" if name == "barcode" else ""
+            labels = sum(1 for t, p in pieces if t < b and a < t + p.height)  # the labels the code itself is on
             self.n.add("Q108" if name == "barcode" else "Q101", f"{who}a {name} at line {line} is cut across "
-                       f"{len(pieces)} turned labels: it will not scan", line,
+                       f"{labels} turned labels: it will not scan", line,
                        f"a longer length=, a smaller module={turn}")  # fmt: skip
-        elif across:
+        if across:
             self.n.add("L114", f"{what}: {shrunk}it goes on in {more}, cut across its lines", line,
                        "read the labels together; a smaller size= or width=, or less in it")  # fmt: skip
-        else:
+        elif not through:
             self.n.add("L112", f"{what}: {shrunk}it goes on in {more}, cut between its lines", line,
                        "a smaller size= or width=, or less in it")  # fmt: skip
-        return [row(p, t) for t, p in pieces], True
+        return [row(p, t) for t, p in pieces]
 
     def fence(self, f: Fence, indent: int) -> list:
         kind = f.kind
@@ -3253,14 +3269,21 @@ def _code_spans(rows: list, pics: list) -> tuple:
     return tuple(out)
 
 
-def _whole(height: int, spans) -> tuple:
-    """Codes in a picture that was turned: where they went is not followed, the whole picture holds one."""
-    return ((0, height, spans[0][2]),) if spans else ()
+def _turned_spans(spans, height: int, ang: float) -> tuple:
+    """The codes of a picture `height` dots tall after it was turned `ang` degrees: where they were (0), mirrored
+    (180), or, turned any other way, over its whole height (a code then runs across where it was)."""
+    ang %= 360
+    if not spans or ang == 0:
+        return tuple(spans)
+    if ang == 180:
+        return tuple((height - b, height - a, k) for a, b, k in spans)
+    return ((0, height, spans[0][2]),)
 
 
-def _white_row(im: Image.Image, y: int) -> bool:
-    """Whether row y of an image (mode L) has no ink: a place to cut it between lines."""
-    return im.crop((0, y, im.width, y + 1)).getextrema()[0] >= 128
+def _white_row(im: Image.Image, y: int, sides: int = 0) -> bool:
+    """Whether row y of an image (mode L) has no ink between `sides` dots from each edge (a box's side lines): a
+    place to cut it between lines."""
+    return im.crop((sides, y, max(sides + 1, im.width - sides), y + 1)).getextrema()[0] >= 128
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:
