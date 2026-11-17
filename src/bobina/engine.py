@@ -301,7 +301,7 @@ def build(
                 labels=labels, quiet_names=frozenset(empty_required), locale=choice,
             )  # fmt: skip
         except SecurityError as e:  # refused in the template file, not in the document: say which, and its line
-            if template_name and e.nudge.code in ("M310", "M311"):
+            if template_name and getattr(e, "compiled", False):
                 where = f", line {e.nudge.line}" if e.nudge.line else ""
                 e.nudge.message = f"template {template_name}{where}: {e.nudge.message}"
                 e.nudge.line = None

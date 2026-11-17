@@ -28,8 +28,7 @@ from babel import numbers as bnumbers
 from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, UndefinedError, nodes, pass_context
 from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
-from jinja2.nodes import EvalContext
-from jinja2.runtime import Context, LoopContext, TemplateReference
+from jinja2.runtime import LoopContext
 from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedFormatter
 from jinja2.utils import Namespace
 from markupsafe import Markup
@@ -133,7 +132,7 @@ def _scrubbed(value):
         if flag is not None:
             flag.append(True)
         out = RESERVED_CHARS.sub("", PH_RE.sub("", str.__str__(value)))  # a placeholder whole, never its number
-        return type(value)(out) if isinstance(value, (Tainted, Trusted)) else out
+        return Tainted(out) if isinstance(value, Tainted) else Trusted(out) if isinstance(value, Trusted) else out
     if isinstance(value, (list, tuple)):
         return type(value)(_scrubbed(v) for v in value)
     return value
@@ -154,7 +153,7 @@ def carry(result, inputs) -> object:
     """What an operation on values gives: never a reserved character; the author's own text stays Trusted only
     when it comes out unchanged (|default, |first), never when an operation made a new string ('{}'.format(…));
     a result from data is data (Tainted)."""
-    if isinstance(result, (Trusted, MdSafe)) and not _same(result, inputs):
+    if isinstance(result, (Trusted, MdSafe, Default, TaintedDefault)) and not _same(result, inputs):
         result = str.__str__(result)  # '{}'.format(literal): Jinja gives back the type of the format string
     result = _scrubbed(result)
     return taint(result) if any(_has_taint(x) for x in inputs) else result
@@ -165,20 +164,26 @@ PLAIN_TYPES = (str, bytes, int, float, complex, bool, type(None), Undefined, dat
 VIEWS = (type({}.keys()), type({}.values()), type({}.items()))
 
 
-def _has_taint(x) -> bool:
-    """Data, or something that may hold data: fails closed. A string, a number, a date and lists, tuples, sets and
-    dicts of them (keys too) are looked into; anything else (a dict view, a namespace, a generator, an object) is
-    counted as data, so what the template makes from it is data too."""
+def _has_taint(x, seen: set | None = None, depth: int = 0) -> bool:
+    """Data, or something that may hold data: fails closed. Strings, numbers, dates and times, Decimal, ranges and
+    bobina's counters are what they are; lists, tuples, sets, dicts (keys too), dict views and namespaces are looked
+    into (a cycle or more than 64 levels: data); anything else (a loop, a template reference, a generator, an
+    object) is counted as data, so what the template makes from it is data too."""
     if isinstance(x, Tainted):
         return True
-    if isinstance(x, (list, tuple, set, frozenset, *VIEWS)):
-        return any(_has_taint(v) for v in x)
-    if isinstance(x, dict):
-        return any(_has_taint(k) or _has_taint(v) for k, v in x.items())
+    if isinstance(x, (PLAIN_TYPES, SafeRange, Seq, Counter)) or (callable(x) and not isinstance(x, LoopContext)):
+        return False
+    seen = set() if seen is None else seen
+    if id(x) in seen or depth > 64:
+        return True
+    seen.add(id(x))
     if isinstance(x, Namespace):  # namespace(): what it holds
-        return _has_taint(dict(x._Namespace__attrs))
-    own = (PLAIN_TYPES, Sandbox, EvalContext, Context, SafeRange, Seq, Counter, LoopContext, TemplateReference)
-    return not (isinstance(x, own) or callable(x))
+        x = dict(x._Namespace__attrs)
+    if isinstance(x, dict):
+        return any(_has_taint(k, seen, depth + 1) or _has_taint(v, seen, depth + 1) for k, v in x.items())
+    if isinstance(x, (list, tuple, set, frozenset, *VIEWS)):
+        return any(_has_taint(v, seen, depth + 1) for v in x)
+    return True
 
 
 def _data_texts(x) -> list[str]:
@@ -195,9 +200,11 @@ def keep_taint(f):
     """Wraps a Jinja filter: if any argument is data, the result is data too."""
     import functools
 
+    skip = 1 if getattr(f, "jinja_pass_arg", None) else 0  # the environment, eval context or context it is handed
+
     @functools.wraps(f)  # keeps jinja_pass_arg (filters that receive the environment or the context)
     def wrapper(*a, **k):
-        return carry(f(*a, **k), (*a, *k.values()))
+        return carry(f(*a, **k), (*a[skip:], *k.values()))
 
     return wrapper
 
@@ -212,18 +219,32 @@ class Trusted(str):
     plain str again, so it is not: trust is never inferred, it is only given here (render)."""
 
 
-class Default(Tainted):
-    """A template field's default with {{ }} that has data in it: its text (values resolved) for expressions, so
-    `k | upper` and `k == 'Bob!'` work; .source, the author's text with the values as placeholders, for the
-    document (finalize)."""
+class Default(str):
+    """A template field's default with {{ }}: its text (values resolved) for expressions, so `k | upper` and
+    `k == 'Bob!'` work; _source (private: the sandbox hides it), the author's text with every value a
+    placeholder, for the document (finalize). Never a value's text pasted into the author's Markdown."""
 
-    source: str = ""
+    _source: str | None = None
+
+
+class TaintedDefault(Tainted):
+    """The same, with data among its values: expressions on it give data."""
+
+    _source: str | None = None
+
+
+def strip_raw(text: str) -> tuple[str, bool]:
+    """The author's Markdown without raw blocks (```raw, ```RAW, ~~~raw…, closed or not), its line breaks as
+    markdown-it reads them first: (the text, whether one was removed). One helper for f_markdown and finalize."""
+    text = LINE_BREAK.sub("\n", text)
+    out = RAW_FENCE.sub("", text)
+    return out, out != text
 
 
 def author_md(text: str) -> str:
     """The author's Markdown on its way into the document: without raw blocks (M121 is said where they are
     written as a value, f_markdown)."""
-    return RAW_FENCE.sub("", text) if "raw" in text else text
+    return strip_raw(text)[0]
 
 
 class MdData(str):
@@ -1059,9 +1080,18 @@ class Seq:
     def __init__(self, store, budget):
         self._store, self._budget, self._c = store, budget, {}
 
+    def __getitem__(self, name):  # seq[p]: the sandbox would hand __getattr__ a plain copy of p's text
+        if isinstance(name, Tainted):
+            raise SecurityError("M311", "a counter's name cannot come from data: write it, seq.ticket")
+        if not isinstance(name, str):
+            raise KeyError(name)
+        return getattr(self, name)
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
+        if isinstance(name, Tainted):  # seq|attr(p): a counter's values are the author's, so its name is too
+            raise SecurityError("M311", "a counter's name cannot come from data: write it, seq.ticket")
         if name not in self._c:
             self._c[name] = Counter(self._store, name, self._budget)
         return self._c[name]
@@ -1336,8 +1366,8 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         author = isinstance(v, (Trusted, MdSafe))
         text = LINE_BREAK.sub("\n", str(v) if author else _scrubbed(str(v)))
         if author:  # proven to be the author's own: all of Markdown but raw blocks
-            cleaned = RAW_FENCE.sub("", text)
-            if cleaned != text:
+            cleaned, removed = strip_raw(text)
+            if removed:
                 nudges.add("M121", "a raw block inside a variable was removed")
             return MdSafe(cleaned)
         from . import icons
@@ -1365,7 +1395,7 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     }
 
 
-RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
+RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?(?:^[ \t]*\1[ \t]*$\n?|\Z)", re.S | re.M | re.I)
 LINE_BREAK = re.compile(r"\r\n?")
 
 
@@ -1484,6 +1514,7 @@ def render(
     choice = locale or choose(meta)
     loc, tz = choice.locale, resolve_tz(meta)
     values: list[Value] = []
+    made = [0]  # characters of every value so far
     undefined_names: list[str] = []
     budget = Budget(seconds=MAX_SECONDS)
     store = counters or CounterStore(meta.get("counters"), nudges)
@@ -1507,8 +1538,8 @@ def render(
         return n
 
     def finalize(v):  # every {{ }}: a placeholder (the only place one is made), or the author's Markdown
-        if isinstance(v, Default):  # a field's default: the author's text, its values placeholders
-            return v.source
+        if isinstance(v, (Default, TaintedDefault)) and v._source is not None:  # the author's text, values as
+            return v._source  # placeholders
         if isinstance(v, MdSafe):  # the author's Markdown: never a raw block, never a reserved character
             return author_md(_scrubbed(str(v)))
         if isinstance(v, Undefined):
@@ -1516,10 +1547,15 @@ def render(
             return ""
         if v is None:
             return ""
-        text = _scrubbed(str(v))
-        values.append(Value(text, _has_taint(v), isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
+        raw = v if isinstance(v, str) else str(v)
+        made[0] += len(raw)  # every value, printed or not (a default's, a loop's): within the output's limit,
+        if made[0] > MAX_OUTPUT:  # measured before any copy of it is made
+            raise SecurityError("M313", "the values grew beyond 2 MB while rendering")
+        text = str.__str__(_scrubbed(raw))
+        tainted = _has_taint(v)
+        values.append(Value(text, tainted, isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
-        return Tainted(ph) if _has_taint(v) else ph
+        return Tainted(ph) if tainted else ph
 
     env = Sandbox(
         budget,
@@ -1559,15 +1595,24 @@ def render(
     env.globals.clear()
 
     def default_value(made: str):
-        """A field's default with {{ }}: expressions see its text (its values resolved); the document gets the
-        author's text with its values as placeholders (Default.source), so `**{{ name }}**` stays bold and name stays
-        data. With no data in it, it is the author's Markdown (MdSafe)."""
-        used = [values[int(i)] for i in PH_RE.findall(made) if int(i) < len(values)]
-        text = PH_RE.sub(lambda m: values[int(m.group(1))].text if int(m.group(1)) < len(values) else "", made)
-        if not any(v.tainted for v in used):
-            return MdSafe(text)
-        out = Default(_scrubbed(text))
-        out.source = author_md(made)
+        """A field's default with {{ }}: expressions see its text (its values resolved: TaintedDefault when one
+        was data); the document gets the author's text with every value a placeholder (_source), whatever they
+        hold, so `**{{ name }}**` stays bold and name stays data. Measured before it is built (M313)."""
+        found = [int(i) for i in PH_RE.findall(made)]
+        check_estimate(len(made) + sum(len(values[i].text) for i in found if i < len(values)))
+        tainted = False
+
+        def text_of(m):
+            nonlocal tainted
+            i = int(m.group(1))
+            if i >= len(values):
+                return ""
+            tainted = tainted or values[i].tainted
+            return values[i].text
+
+        text = PH_RE.sub(text_of, made)  # one pass: the text, and whether a value in it was data
+        out = (TaintedDefault if tainted else Default)(text)
+        out._source = author_md(made)
         return out
 
     for k, d in (defaults or {}).items():
@@ -1582,7 +1627,11 @@ def render(
                 raise ValueError(f"default of field '{k}': {e}") from e
 
     try:
-        tpl = env.from_string(body)
+        try:
+            tpl = env.from_string(body)
+        except SecurityError as e:
+            e.compiled = True  # refused by the allowlist in this body (engine: the template file's name)
+            raise
         out, size = [], 0
         for chunk in tpl.generate(ctx):
             size += resolved_len(chunk)  # {{ b }} 1000 times is 1000 times b, whatever the placeholders weigh

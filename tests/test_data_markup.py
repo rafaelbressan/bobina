@@ -604,3 +604,87 @@ def test_a_refused_construct_is_said_at_its_document_line_or_in_its_field_or_tem
     with pytest.raises(SecurityError) as err:
         build("---\ntemplate: t.bob.md\n---\n", base_dir=str(tmp_path))
     assert "template t.bob.md, line 2" in err.value.nudge.message and err.value.nudge.line is None
+
+
+# --- fail closed: never a value's text in the author's Markdown, never an object that can hold data -------------
+
+
+@pytest.mark.parametrize(
+    "payload", ["::: {.box title=HACK}\nyo\n:::\n", "```qr\nHACKED\n```\n", "# **big** {.center}\n"]
+)
+def test_a_default_never_pastes_a_values_text_into_the_document(payload):
+    front = ("---\nfields:\n  k:\n    default: \"{% for c in d %}{% if loop.first %}{{ '{0.nextitem}'.format(loop) }}"
+             "{% endif %}{% endfor %}\"\n  j:\n    default: \"{{ x }}\"\n---\n")  # fmt: skip
+    res = build(front + "{{ k }}\n\n{{ j }}\n", fields={"d": [T("a"), T(payload)], "x": payload})
+    assert {type(b) for b in res.doc.blocks} == {Paragraph} and not fences(res) and not divs(res)
+
+
+def test_a_loop_holds_data():
+    for src in ("{% for c in p %}{% if loop.first %}![](/{{ loop | join }}){% endif %}{% endfor %}\n",
+                "{% for x in d %}{% if loop.first %}![]({{ '/{0.nextitem}'.format(loop) }}){% endif %}{% endfor %}\n"):  # fmt: skip
+        with pytest.raises(SecurityError) as err:
+            build(src, fields={"p": T("X/etc/hostname"), "d": [T("a"), T("etc/hostname")]})
+        assert err.value.nudge.code == "M312"
+
+
+def test_a_counters_name_cannot_come_from_data():
+    for expr in ("seq[p]", "seq | attr(p)"):
+        with pytest.raises(SecurityError) as err:
+            md("[{{ " + expr + " }}]\n", p="invoice")
+        assert err.value.nudge.code == "M311" and "counter's name" in err.value.nudge.message, expr
+    res = build("![](img/{{ seq.n }}.png)\n")  # a counter's value is the author's
+    assert "I101" in codes(res)
+
+
+@pytest.mark.parametrize(
+    "block",
+    ["```raw\\n1b 40\\n```", "```RAW\\n1b 40\\n```", "```Raw\\n1b 40\\n```", "~~~raw\\n1b 40\\n~~~",
+     "```raw\\r1b 40\\r```", "```raw\\r\\n1b 40\\r\\n```", "```raw\\n1b 40"],
+)  # fmt: skip
+def test_the_authors_markdown_never_carries_a_raw_block(block):
+    for src in (f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ 1 }}}}"\n---\n{{{{ k }}}}\n',
+                f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ name }}}}"\n---\n{{{{ k }}}}\n',
+                f"{{{{ '{block}' | markdown }}}}\n"):  # fmt: skip
+        res = md(src, name="Bob")
+        assert not raws(res), src
+
+
+def test_formatting_a_default_keeps_its_text():
+    front = "---\nfields:\n  k:\n    default: '{{ name }}!'\n---\n"
+    res = md(front + "[{{ k.format() }}]|[{{ k.format_map({}) }}]|[{{ k }}]\n", name="Bob")
+    assert "[Bob!]|[Bob!]|[Bob!]" in printed(res)
+    with pytest.raises(SecurityError) as err:  # its document form is private: the sandbox hides it
+        md(front + "{{ k._source }}\n", name="Bob")
+    assert err.value.nudge.code == "M311"
+
+
+def test_a_huge_default_is_refused_quickly_with_little_memory():
+    import tracemalloc
+
+    from bobina.nudges import Nudges
+    from bobina.templating import render
+
+    tracemalloc.start()
+    try:
+        for d, fields in (("{% for i in range(1500) %}{{ b }}{% endfor %}", {"b": T("x" * 1_000_000)}),
+                          ("{% for i in range(1500) %}{{ c }}{% endfor %}", {})):  # fmt: skip
+            start = time.perf_counter()
+            with pytest.raises(SecurityError) as err:
+                render("{{ k | length }}", {"c": "y" * 1_000_000}, Nudges(), fields=fields, defaults={"k": d})
+            assert err.value.nudge.code == "M313" and time.perf_counter() - start < 2
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 64 * 2**20
+
+
+def test_a_namespace_that_holds_itself_is_fine():
+    res = build("{% set ns = namespace(a=1) %}{% set ns.me = ns %}[{{ ns.a }}]\n")
+    assert "[1]" in printed(res)
+
+
+def test_only_a_template_files_own_construct_is_said_in_its_name(tmp_path):
+    (tmp_path / "t.bob.md").write_text("[{{ seq[p] }}]\n")
+    with pytest.raises(SecurityError) as err:
+        build("---\ntemplate: t.bob.md\n---\n", base_dir=str(tmp_path), fields={"p": T("x")})
+    assert "counter's name" in err.value.nudge.message and "template t.bob.md" not in err.value.nudge.message
