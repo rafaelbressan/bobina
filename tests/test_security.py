@@ -122,3 +122,31 @@ def test_filters_and_methods_cannot_launder_data_into_an_image_path(tmp_path):
             )
     # a path written by the author still works next to unrelated data
     build("---\nlogo: ok.png\n---\n![]({{ logo }}) {{ p }}", fields={"p": Tainted("nada")}, base_dir=str(tmp_path))
+
+
+# A data value used as a format string (`{{ greeting.format(name) }}`) goes through the sandbox's own formatter: it
+# cannot walk attributes into Python's internals (environment variables, the data row), and its result stays data.
+@pytest.mark.parametrize(
+    "fmt",
+    [
+        "{0.__class__.__getitem__.__globals__[paths].os.environ[PROBE_SECRET]}",
+        "{0.__class__}",
+        "{0.upper.__self__.__class__.__mro__}",
+    ],
+)
+def test_data_as_a_format_string_cannot_reach_python_internals(fmt, monkeypatch):
+    monkeypatch.setenv("PROBE_SECRET", "s3cr3t-value")
+    try:
+        res = build("Hello {{ g.format(n) }}\n", fields={"g": Tainted(fmt), "n": Tainted("Bob")})
+    except Exception as e:  # a refusal is fine
+        assert "s3cr3t-value" not in str(e)
+        return
+    text = "".join(c.ch for r in res.rows for c in getattr(r, "cells", []))
+    assert "s3cr3t-value" not in text and "class" not in text
+
+
+def test_a_format_string_from_data_still_formats_and_stays_data():
+    res = build("{{ g.format(n) }}\n", fields={"g": Tainted("Oi, {0}!"), "n": Tainted("Bob")})
+    assert "Oi, Bob!" in "".join(c.ch for r in res.rows for c in getattr(r, "cells", []))
+    with pytest.raises(Exception, match="image path"):
+        build("![]({{ g.format(n) }})\n", fields={"g": Tainted("/etc/{0}"), "n": Tainted("hostname")})

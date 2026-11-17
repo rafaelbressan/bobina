@@ -101,7 +101,7 @@ class Tainted(str):
 
 
 _STR_METHODS = {
-    "capitalize", "casefold", "center", "expandtabs", "format", "format_map", "join", "ljust", "lower", "lstrip",
+    "capitalize", "casefold", "center", "expandtabs", "join", "ljust", "lower", "lstrip",
     "partition", "removeprefix", "removesuffix", "replace", "rjust", "rpartition", "rsplit", "rstrip", "split",
     "splitlines", "strip", "swapcase", "title", "translate", "upper", "zfill",
 }  # fmt: skip
