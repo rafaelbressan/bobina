@@ -1567,10 +1567,11 @@ def render(
     )
     env.globals.clear()
 
-    def default_value(made: str):
+    def default_value(name: str, made: str):
         """A field's default with {{ }}: expressions see its text (its values resolved: TaintedDefault when one
         was data); the document gets the author's text with every value a placeholder (_source), whatever they
-        hold, so `**{{ name }}**` stays bold and name stays data. Measured before it is built (M313)."""
+        hold, so `**{{ name }}**` stays bold and name stays data, and no raw block, as for any variable (M121).
+        Measured before it is built (M313)."""
         found = [int(i) for i in PH_RE.findall(made)]
         check_estimate(len(made) + sum(len(values[i].text) for i in found if i < len(values)))
         tainted = False
@@ -1585,13 +1586,15 @@ def render(
 
         text = PH_RE.sub(text_of, made)  # one pass: the text, and whether a value in it was data
         out = (TaintedDefault if tainted else Default)(text)
-        out._source = author_md(made)
+        out._source, removed = strip_raw(made)
+        if removed:
+            nudges.add("M121", f"a raw block in the default of field {name} was removed")
         return out
 
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                ctx[k] = default_value(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
+                ctx[k] = default_value(k, env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
             except SecurityError as e:
                 e.nudge.message = f"default of field '{k}': {e.nudge.message}"
                 e.nudge.line = None

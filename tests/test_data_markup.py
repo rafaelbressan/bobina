@@ -645,11 +645,14 @@ def test_a_counters_name_cannot_come_from_data():
      "```raw\\r1b 40\\r```", "```raw\\r\\n1b 40\\r\\n```", "```raw\\n1b 40"],
 )  # fmt: skip
 def test_the_authors_markdown_never_carries_a_raw_block(block):
-    for src in (f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ 1 }}}}"\n---\n{{{{ k }}}}\n',
-                f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ name }}}}"\n---\n{{{{ k }}}}\n',
+    for src in (f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ 1 }}}}"\n---\n{{{{ k }}}}\n\n{{{{ k }}}}\n',
+                f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ name }}}}"\n---\n{{{{ k }}}}\n\n{{{{ k }}}}\n',
                 f"{{{{ '{block}' | markdown }}}}\n"):  # fmt: skip
-        res = md(src, name="Bob")
-        assert not raws(res), src
+        for res in (md(src, name="Bob"), build(src)):  # with data and with none
+            assert not raws(res) and len(said(res, "M121")) == 1, src
+    res = md(f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ name }}}}"\n---\n{{{{ k }}}}\n', name="Bob")
+    assert "1b 40" not in printed(res)
+    assert "Bob" in printed(res) or not block.endswith(("```", "~~~")), block  # a block never closed runs to the end
 
 
 def test_formatting_a_default_keeps_its_text():
