@@ -298,9 +298,7 @@ def build(
             body, meta, nudges, fields=fields, line_offset=fm_lines, counters=counters, defaults=defaults,
             labels=labels, quiet_names=frozenset(empty_required), locale=choice,
         )  # fmt: skip
-        doc = parse(
-            rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, markdown=rendered.markdown()
-        )
+        doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, values=rendered.values)
         doc.meta_lines = templating.front_matter_lines(source)
     rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):

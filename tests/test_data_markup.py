@@ -259,15 +259,22 @@ def test_data_that_appears_in_the_authors_own_text_changes_nothing(data, tmp_pat
     logo = folder / "logo.png"
     Image.new("L", (40, 20), 0).save(logo)
     mine = f"::: {{.box title=Shop}}\nfor 100 :fragile:\n:::\n\n![logo]({logo})\n"
-    res = build("{{ v | markdown }}\n\n{{ d }}\n", fields={"v": mine, "d": T(data)})
+    front = "---\nv: |\n" + "".join(f"  {ln}\n" for ln in mine.splitlines()) + "---\n"  # the author's own value
+    res = build(front + "{{ v | markdown }}\n\n{{ d }}\n", fields={"d": T(data)})
     assert divs(res) and images(res) and not codes(res) - {"P301", "I109"}
 
 
 def test_plain_values_are_unchanged_and_the_authors_markdown_keeps_everything():
     res = md("{{ d }}\n", d="::: {.box}\n```raw\n1b 40\n```")
     assert [type(b) for b in res.doc.blocks] == [Paragraph] and not raws(res) and not codes(res)
-    res = build("{{ v | markdown }}\n", fields={"v": "::: {.box}\n```qr\nhi\n```\n:::"})  # the author's own
-    assert divs(res) and fences(res) and "M123" not in codes(res)
+    for src in (
+        '---\nv: "::: {.box}\\n```qr\\nhi\\n```\\n:::"\n---\n{{ v | markdown }}\n',  # front matter
+        '{{ "::: {.box}\\n```qr\\nhi\\n```\\n:::" | markdown }}\n',
+    ):  # a literal of the template
+        res = build(src)
+        assert divs(res) and fences(res) and "M123" not in codes(res), src
+    res = build("{{ v | markdown }}\n", fields={"v": "::: {.box}\n```qr\nhi\n```\n:::"})  # handed in: data
+    assert not divs(res) and not fences(res) and "M123" in codes(res)
 
 
 # --- data never carries bobina's reserved characters -------------------------------------------------------------
@@ -290,3 +297,81 @@ def test_ordinary_data_is_untouched_and_not_copied():
     assert clean_data(fields, Nudges()) is fields
     res = build("{{ d }}\n", fields=fields)
     assert "Café 10:30 · R$ 4,50" in printed(res) and "M124" not in codes(res)
+
+
+# --- only the author's own values get all of Markdown ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "{% for v in row.values() %}{{ v | markdown }}{% endfor %}\n",
+        "{% for k in row.keys() %}{{ k | markdown }}{% endfor %}\n",
+        "{% for k, v in row.items() %}{{ k | markdown }}{{ v | markdown }}{% endfor %}\n",
+        "{% set ns = namespace(x=row['k']) %}{{ ns.x | markdown }}\n",
+        "{{ (row['k'] | string)[0:] | markdown }}\n",
+        "{{ row['k'] | replace('Q', '\\n') | markdown }}\n",
+        "{{ [row['k']] | first | markdown }}\n",
+    ],
+)
+def test_values_inside_containers_and_computed_strings_are_never_the_authors(src, photo):
+    for value in (RAW, f"![x]({photo})", BOX, "{.invert}"):
+        for row in ({T(value): T(value), "k": T(value)}, {value: value, "k": value}):  # tainted or plain
+            res = build(src, fields={"row": row})
+            assert not raws(res) and not images(res) and not divs(res) and not fences(res), (src, value)
+            assert not any(b.attrs.classes for b in walk(res.doc.blocks)), (src, value)
+
+
+def test_an_image_path_from_data_is_refused_through_nested_set_blocks():
+    src = "{% set a %}{{ d }}{% endset %}{% set b %}{{ a }}{% endset %}{% set c %}{{ b }}{% endset %}![x]({{ c }})\n"
+    with pytest.raises(SecurityError):
+        md(src, d="/etc/secret.png")
+
+
+def test_markdown_inside_a_macro_or_a_set_block_is_spliced():
+    for src in ("{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) }}\n",
+                "{% set x %}A {{ d | markdown }}{% endset %}{{ x }}\n"):  # fmt: skip
+        res = md(src, d="**B**")
+        runs = [r for b in res.doc.blocks for r in b.runs]
+        assert any(r.bold and r.text == "B" for r in runs) and "**" not in printed(res), src
+
+
+def test_the_authors_front_matter_may_name_a_code_blocks_kind():
+    res = build("---\nk: python\n---\n```{{ k }}\nx = 1\n```\n")
+    assert "M102" in codes(res) and "M123" not in codes(res)  # as before: an unknown kind, printed as text
+
+
+def test_refusals_are_said_at_the_line_the_value_is_written_on():
+    res = md("intro\nsecond line {{ d | markdown }}\n", d="![x](p.png)")
+    assert [n.line for n in said(res, "M122")] == [2]
+    res = md("| a | b |\n|---|---|\n| 1 | 2 |\n| x | {{ d | markdown }} |\n", d="![x](p.png)")
+    assert [n.line for n in said(res, "M122")] == [4]
+
+
+@pytest.mark.parametrize("tail", [" {.center}", "\n{.center}"])
+def test_the_authors_attributes_after_a_value_apply_to_its_blocks(tail):
+    res = md("{{ d | markdown }}" + tail + "\n", d="# Title\n\nline one\n\nline two")
+    assert [type(b) for b in res.doc.blocks] == [Heading, Paragraph, Paragraph]
+    assert all(b.attrs.has("center") for b in res.doc.blocks)
+
+
+def test_escaped_braces_in_data_print_as_braces():
+    res = md("{{ d | markdown }}\n", d="\\{x} and {y}")
+    assert "".join(r.text for r in res.doc.blocks[0].runs) == "{x} and {y}"
+
+
+def test_two_documents_built_at_once_keep_their_own_values():
+    import threading
+
+    results = {}
+
+    def one(name):
+        res = md("{{ d | markdown }}\n", d=f"**{name}**")
+        results[name] = "".join(r.text for b in res.doc.blocks for r in b.runs)
+
+    threads = [threading.Thread(target=one, args=(f"N{k}",)) for k in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == {f"N{k}": f"N{k}" for k in range(8)}

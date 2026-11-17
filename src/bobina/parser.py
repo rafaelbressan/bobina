@@ -3,7 +3,9 @@ Pandoc-style attributes `{.class key=value}`, fenced objects. Jinja runs before 
 
 from __future__ import annotations
 
+import contextvars
 import re
+from dataclasses import replace
 from urllib.parse import unquote
 
 from markdown_it import MarkdownIt
@@ -27,7 +29,7 @@ from .model import (
     Table,
 )
 from .nudges import Nudges
-from .templating import PH_CLOSE, PH_OPEN
+from .templating import PH_CLOSE, PH_OPEN, PH_RE
 
 PH_SPLIT = re.compile(f"({PH_OPEN}\\d+{PH_CLOSE})")  # a value's placeholder, kept by re.split
 
@@ -238,13 +240,18 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
     def walk(n, st: Run):
         for c in n.children:
             t = c.type
-            if t == "text" and _SPLICE.values and PH_OPEN in c.content:  # data rendered as Markdown, inline
-                for k, part in enumerate(PH_SPLIT.split(c.content)):
-                    i = int(part[1:-1]) if k % 2 else None
-                    if i in _SPLICE.values:
-                        out.extend(_SPLICE.runs(i, st))
-                    elif part:
-                        out.append(Run(**{**st.__dict__, "text": part}))
+            if t == "text" and PH_OPEN in c.content and (sp := _splice()).inline(c.content):  # Markdown values
+                text = ""
+                for k, part in enumerate(PH_SPLIT.split(sp.expand(c.content))):
+                    if k % 2 and sp.markdown(int(part[1:-1])):
+                        if text:
+                            out.append(Run(**{**st.__dict__, "text": text}))
+                        text = ""
+                        out.extend(sp.runs(int(part[1:-1]), st))
+                    else:
+                        text += part
+                if text:
+                    out.append(Run(**{**st.__dict__, "text": text}))
             elif t == "text":
                 out.append(Run(**{**st.__dict__, "text": c.content}))
             elif t in ("softbreak", "hardbreak"):
@@ -397,39 +404,98 @@ FROM_DATA = {  # what data rendered as Markdown may not bring: (code, what the p
     "raw": ("M121", "a raw block in a --data/--set value was removed"),
     "image": ("M122", "an image inside a --data/--set value was removed (data cannot choose files)"),
     "block": ("M123", "a code block, ::: line or link definition in a --data/--set value was removed"),
-    "kind": ("M123", "a --data/--set value cannot choose a code block's kind: printed as plain text"),
+    "kind": ("M123", "a code block's kind cannot come from a value that is not the author's: printed as text"),
 }
 DATA_HINT = "data brings text, lists, quotes, tables and headings; other markup belongs in the document"
 ATTR_GUARD = "\ue004"  # a { of data while its Markdown is read: never a {…} attribute (templating.RESERVED_CHARS)
 
 
 class _Splice:
-    """Data rendered as Markdown ({{ value | markdown }} on --data/--set values): placeholders in the document, as
-    every value is, filled in once the document is parsed. A placeholder alone in its paragraph becomes the value's
-    blocks; one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line
-    breaks. In a code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
+    """Values rendered as Markdown that are not the author's own ({{ value | markdown }} on data, a computed string,
+    a literal…: templating.MdData): placeholders in the document, as every value is, filled in once the document is
+    parsed. A placeholder alone in its paragraph (with the author's {…} after it or not) becomes the value's blocks;
+    one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line breaks. In a
+    code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }}). A placeholder of
+    a {% set %} block or a macro holding one is opened first, so the one inside is spliced too."""
 
-    def __init__(self, values: dict[int, str] | None = None, nudges: Nudges | None = None, off: int = 0):
-        self.values, self.nudges, self.off = values or {}, nudges, off
-        self.line = 0  # the document line being read: where a refusal is said
+    def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=()):
+        self.values, self.nudges, self.off = values or [], nudges, off
+        self.line = 0  # the document line (1-based, offset) of the block being read: refusals inside it go there
         self.parsed: dict[int, tuple[list[Block], list[tuple[str, str]]]] = {}
+        self.at: dict[int, int] = {}  # placeholder -> the document line it is written on
+        for k, text in enumerate(lines):
+            for m in PH_RE.finditer(text):
+                self.at.setdefault(int(m.group(1)), k + 1 + off)
 
-    def index(self, text: str) -> int | None:
-        """The data placeholder that is all of `text` (spaces aside), else None."""
-        from .templating import PH_RE
+    def value(self, i: int):
+        return self.values[i] if 0 <= i < len(self.values) else None
 
-        m = PH_RE.fullmatch(text.strip())
-        return int(m.group(1)) if m and int(m.group(1)) in self.values else None
+    def markdown(self, i: int) -> bool:
+        v = self.value(i)
+        return bool(v and v.markdown)
+
+    def holds(self, i: int, depth: int = 0) -> bool:
+        """The value at placeholder i is, or holds, one to splice."""
+        v = self.value(i)
+        if v is None or depth > 8:
+            return False
+        return v.markdown or any(self.holds(int(m.group(1)), depth + 1) for m in PH_RE.finditer(v.text))
+
+    def expand(self, text: str) -> str:
+        """`text` with the placeholders of {% set %} blocks and macros that hold one to splice opened (their text:
+        the template's own, and placeholders), so that one is found where it is."""
+        if not self.values or PH_OPEN not in text:
+            return text
+
+        def opened(m):
+            i = int(m.group(1))
+            if self.markdown(i) or not self.holds(i):
+                return m.group(0)
+            line = self.at.get(i)
+            for inner in PH_RE.finditer(self.values[i].text):
+                if line:
+                    self.at.setdefault(int(inner.group(1)), line)
+            return self.values[i].text
+
+        for _ in range(8):
+            done = PH_RE.sub(opened, text)
+            if done == text:
+                break
+            text = done
+        return text
+
+    def inline(self, text: str) -> bool:
+        """`text` holds a placeholder to splice (directly, or in a {% set %} block's or a macro's)."""
+        return bool(self.values) and any(self.holds(int(m.group(1))) for m in PH_RE.finditer(text))
+
+    def block(self, content: str) -> tuple[int, Attrs] | None:
+        """(the placeholder, the author's {…} on its line or the lines under it) when a paragraph is only one
+        placeholder to splice, else None."""
+        if not self.values:
+            return None
+        lines = self.expand(content).split("\n")
+        a = Attrs()
+        while len(lines) > 1 and (m := ATTRS_ONLY.fullmatch(lines[-1])) and (got := parse_attrs(m.group(1))):
+            a = got.merged(a)
+            lines.pop()
+        if len(lines) != 1:
+            return None
+        line = lines[0]
+        tail = ATTR_TAIL.search(line)
+        if tail and (got := parse_attrs(tail.group(1))) is not None:
+            a, line = got.merged(a), line[: tail.start()]
+        m = PH_RE.fullmatch(line.strip())
+        return (int(m.group(1)), a) if m and self.markdown(int(m.group(1))) else None
 
     def blocks(self, i: int, line: int) -> list[Block]:
-        """The value's blocks (copies), each at the document's `line`; its refusals said there."""
+        """The value's blocks (copies), each at the document's `line`; its refusals said where it is written."""
         import copy
 
         if i not in self.parsed:
-            self.parsed[i] = data_blocks(self.values[i])
+            self.parsed[i] = data_blocks(self.values[i].text)
         kept, refused = self.parsed[i]
         for code, message in refused:
-            self.nudges.add(code, message, line, DATA_HINT)
+            self.nudges.add(code, message, self.at.get(i, line), DATA_HINT)
         out = copy.deepcopy(kept)
         for b in _all_blocks(out):
             b.line = line
@@ -438,17 +504,26 @@ class _Splice:
     def runs(self, i: int, st: Run) -> list[Run]:
         """The value as inline text: its blocks' runs, one line each, styled with the text around it."""
         out: list[Run] = []
-        for r in _flat(self.blocks(i, self.line)):
+        for r in _flat(self.blocks(i, self.at.get(i, self.line))):
             if r.text == "\n":
                 out.append(r)
                 continue
-            out.append(Run(r.text, bold=r.bold or st.bold, italic=r.italic or st.italic, strike=r.strike or st.strike,
-                           underline=r.underline or st.underline, invert=r.invert or st.invert,
-                           mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
+            out.append(replace(r, bold=r.bold or st.bold, italic=r.italic or st.italic, strike=r.strike or st.strike,
+                               underline=r.underline or st.underline, invert=r.invert or st.invert,
+                               mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
         return out
 
+    def chose_kind(self, info: str) -> bool:
+        """A fence's kind word holds a value that is not the author's own (data does not choose what a block is)."""
+        word = (info.split("{", 1)[0].split() or [""])[0]
+        return any(not (v := self.value(int(m.group(1)))) or not v.trusted for m in PH_RE.finditer(word))
 
-_SPLICE = _Splice()  # the one in use while a document is parsed (parse sets it, data_blocks clears it)
+
+_SPLICE: contextvars.ContextVar[_Splice] = contextvars.ContextVar("bobina_splice")  # per thread (the chat's too)
+
+
+def _splice() -> _Splice:
+    return _SPLICE.get(None) or _Splice()
 
 
 def data_blocks(text: str) -> tuple[list[Block], list[tuple[str, str]]]:
@@ -457,20 +532,19 @@ def data_blocks(text: str) -> tuple[list[Block], list[tuple[str, str]]]:
     headings, lists, quotes, tables, rules. Refused: code blocks of any kind (raw M121, image M122, the rest M123),
     images (M122), ::: blocks (their content stays) and link definitions (M123). Its { never starts an attribute:
     data does not set attributes, they print as written. No icons from data either."""
-    global _SPLICE
     refused: list[tuple[str, str]] = []
     env: dict = {}
-    guarded = text.replace("{", ATTR_GUARD)
+    guarded = text.replace("\\{", ATTR_GUARD).replace("{", ATTR_GUARD)  # \{ too: it prints as {
     tokens = _md(icons=False).parse(guarded, env)
     if env.get("references") or any(t.type == "fenced_div" for t in tokens):  # a closer alone too
         refused.append(FROM_DATA["block"])
     if any(t.type == "inline" and any(c.type == "image" for c in t.children or []) for t in tokens):
         refused.append(FROM_DATA["image"])
-    outer, _SPLICE = _SPLICE, _Splice()
+    token = _SPLICE.set(_Splice())  # nothing to splice inside a value
     try:
         blocks = _blocks(SyntaxTreeNode(tokens).children, Nudges(), 0, _Source(guarded.split("\n")))
     finally:
-        _SPLICE = outer
+        _SPLICE.reset(token)
 
     def keep(bs: list[Block]) -> list[Block]:
         out: list[Block] = []
@@ -546,16 +620,15 @@ def parse(
     line_offset: int = 0,
     base_dir: str = ".",
     meta: dict | None = None,
-    markdown: dict[int, str] | None = None,
+    values: list | None = None,
 ) -> Document:
-    """markdown: the placeholders of data rendered as Markdown and their data (Rendered.markdown): spliced in
-    after the document is parsed, so they never meet its source (_Splice)."""
-    global _SPLICE
-    outer, _SPLICE = _SPLICE, _Splice(markdown, nudges, line_offset)
+    """values: the render's values (Rendered.values): those rendered as Markdown that are not the author's own are
+    spliced in after the document is parsed, so they never meet its source (_Splice)."""
+    token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text)))
     try:
         return _parse(text, nudges, line_offset, base_dir, meta)
     finally:
-        _SPLICE = outer
+        _SPLICE.reset(token)
 
 
 def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dict | None) -> Document:
@@ -725,10 +798,15 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             out.append(_div(n, nudges, off, src))
             continue
         ln = _line(n, off)
-        _SPLICE.line = ln
+        sp = _splice()
+        sp.line = ln
         t = n.type
-        if t == "paragraph" and (i := _SPLICE.index(n.children[0].content)) is not None:
-            out.extend(_SPLICE.blocks(i, ln))  # data rendered as Markdown, alone in its paragraph: its blocks
+        if t == "paragraph" and (hit := sp.block(n.children[0].content)) is not None:
+            i, a = hit  # a value as Markdown, alone in its paragraph: its blocks, with the author's {…} on each
+            check_attrs(a, ln, nudges)
+            for b in sp.blocks(i, ln):
+                b.attrs = b.attrs.merged(a)
+                out.append(b)
             continue
         if t == "heading":
             inline = n.children[0]
@@ -819,7 +897,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 arg = rest[: attrs.start()].strip() if attrs else rest.strip()
                 a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
-            if PH_OPEN in (info.split("{", 1)[0].split() or [""])[0]:  # ```{{ lang }}: data does not choose a kind
+            if _splice().chose_kind(info):  # ```{{ lang }}: only the author chooses what a block is
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
                 kind, k, a, arg = "text", "text", Attrs(), ""
             check_attrs(

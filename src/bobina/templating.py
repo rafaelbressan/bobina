@@ -22,7 +22,7 @@ import yaml
 from babel import Locale
 from babel import dates as bdates
 from babel import numbers as bnumbers
-from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, UndefinedError, nodes
+from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, UndefinedError, nodes, pass_context
 from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
 from jinja2.runtime import LoopContext, Macro
@@ -150,10 +150,32 @@ class MdSafe(str):
     """A value explicitly marked to be interpreted as Markdown."""
 
 
+class Trusted(str):
+    """The author's own text: a front matter value (the document's or its template's), a template field's default,
+    a label. Only these get all of Markdown from | markdown. Anything computed from them (~, a filter, a method) is a
+    plain str again, so it is not: trust is never inferred, it is only given here (render)."""
+
+
+class MdData(str):
+    """A value to render as Markdown that is not the author's own ({{ value | markdown }} on data, on a computed
+    string, a literal, a number…). It never enters the document's source: like any value it is a placeholder there,
+    and once the document is parsed the parser splices in the value parsed alone, with text markup only
+    (parser.data_blocks)."""
+
+
 class TaintedMd(Tainted):
-    """Data to render as Markdown ({{ value | markdown }} on a --data/--set value). It never enters the document's
-    source: like any value it is a placeholder there, and once the document is parsed the parser splices in the
-    value parsed alone, with text markup only (parser.data_blocks). Anything built from it is plain data."""
+    """The same for a --data/--set value: still data for the other rules (paths, raw blocks)."""
+
+
+def trust(v):
+    """The author's values marked Trusted: strings, and those inside lists and dicts (keys too)."""
+    if isinstance(v, str) and not isinstance(v, (Tainted, MdSafe)):
+        return Trusted(v)
+    if isinstance(v, dict):
+        return {trust(k): trust(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return type(v)(trust(x) for x in v)
+    return v
 
 
 RESERVED_CHARS = re.compile("[\ue000-\ue004]")  # bobina's own marks (PH_OPEN, PH_CLOSE, parser.ATTR_GUARD…); icons
@@ -165,40 +187,41 @@ def clean_data(fields: dict | None, nudges: Nudges) -> dict | None:
     the characters bobina reserves for its own marks: a value can then never point at another value's text (a
     placeholder). Said once (M124) when some were there; the same container when there were none."""
 
-    def dirty(v) -> bool:
-        if isinstance(v, str):
-            return bool(RESERVED_CHARS.search(v))
-        if isinstance(v, dict):
-            return any(dirty(k) or dirty(x) for k, x in v.items())
-        if isinstance(v, (list, tuple)):
-            return any(dirty(x) for x in v)
-        return False
+    found = False
 
-    def clean(v):
+    def clean(v):  # one walk; a container is copied only when something in it changed
+        nonlocal found
         if isinstance(v, str):
+            if not RESERVED_CHARS.search(v):
+                return v
+            found = True
             out = RESERVED_CHARS.sub("", str.__str__(v))
             return Tainted(out) if isinstance(v, Tainted) else out
         if isinstance(v, dict):
-            return {clean(k): clean(x) for k, x in v.items()}
+            pairs = [(clean(k), clean(x)) for k, x in v.items()]
+            same = all(a is k and b is x for (a, b), (k, x) in zip(pairs, v.items(), strict=True))
+            return v if same else dict(pairs)
         if isinstance(v, (list, tuple)):
-            return type(v)(clean(x) for x in v)
+            items = [clean(x) for x in v]
+            return v if all(a is x for a, x in zip(items, v, strict=True)) else type(v)(items)
         return v
 
-    if not fields or not dirty(fields):
-        return fields
-    nudges.add(
-        "M124",
-        "characters bobina reserves for its own marks were removed from a --data/--set value",
-        suggestion="nothing to fix: they are private-use characters (U+E000 to U+E004) no text needs",
-    )
-    return clean(fields)
+    out = clean(fields) if fields else fields
+    if found:
+        nudges.add(
+            "M124",
+            "characters bobina reserves for its own marks were removed from a --data/--set value",
+            suggestion="nothing to fix: they are private-use characters (U+E000 to U+E004) no text needs",
+        )
+    return out
 
 
 @dataclass
 class Value:
     text: str
     tainted: bool = False
-    markdown: bool = False  # data to splice as Markdown after parsing (TaintedMd); its text is the data as given
+    markdown: bool = False  # to splice as Markdown after parsing (MdData, TaintedMd); its text is as given
+    trusted: bool = False  # the author's own (Trusted): a fence's kind may come from it
 
 
 @dataclass
@@ -207,10 +230,6 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
-
-    def markdown(self) -> dict[int, str]:
-        """The placeholders of data rendered as Markdown: index -> the data (parse splices it in)."""
-        return {i: v.text for i, v in enumerate(self.values) if v.markdown}
 
     def resolve(self, s: str) -> str:
         from . import icons
@@ -225,9 +244,12 @@ class Rendered:
         return s
 
     def tainted_in(self, s: str) -> bool:
-        seen = set(PH_RE.findall(s))
-        for i in list(seen):
-            seen |= set(PH_RE.findall(self.values[int(i)].text))
+        seen, todo = set(), list(PH_RE.findall(s))
+        while todo:  # every placeholder, however deep ({% set %} blocks inside {% set %} blocks)
+            i = todo.pop()
+            if i not in seen and int(i) < len(self.values):
+                seen.add(i)
+                todo += PH_RE.findall(self.values[int(i)].text)
         if any(self.values[int(i)].tainted for i in seen):
             return True
         # last line of defence: a data value that reached the text some other way ('img/' ~ p joins plain strings)
@@ -669,6 +691,13 @@ class _CountingCodeGenerator(CodeGenerator):
             a.node = call("bobina_value", a.node, a.lineno)
         super().visit_Template(node, frame)
 
+    def visit_Const(self, node, frame):  # a string written in the template is the author's own (Trusted)
+        val = node.as_const(frame.eval_ctx)
+        if isinstance(val, str) and not isinstance(val, Markup):
+            self.write(f"environment.bobina_literal({val!r})")
+        else:
+            super().visit_Const(node, frame)
+
     def visit_Concat(self, node, frame):  # no constant folding: the result size is checked at render time
         self.write("environment.bobina_join((")
         for arg in node.nodes:
@@ -690,6 +719,10 @@ class Sandbox(ImmutableSandboxedEnvironment):
         self.loops, self.calls = loops, calls
         self.code_generator_class = _CountingCodeGenerator
         self.concat = self.bobina_concat  # {% set %}…{% endset %}, macro bodies, {% filter %} blocks
+
+    def bobina_literal(self, text: str) -> str:
+        """A string literal of the template: the author's own text (| markdown gives it all of Markdown)."""
+        return Trusted(text)
 
     def is_safe_attribute(self, obj, attr, value):
         """As Jinja's, and no bytes: d.encode().decode() would give back data without its mark (M311)."""
@@ -1189,19 +1222,22 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         n = num(v, "int", f"counted as {default}")
         return default if n is None else int(n)
 
-    def f_markdown(v):
+    @pass_context  # never folded at compile time: a literal reaches it as the Trusted string it is (visit_Const)
+    def f_markdown(_context, v):
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
         # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
         text = LINE_BREAK.sub("\n", str(v))
-        if not _has_taint(v):  # the author's own value: all of Markdown but raw blocks
+        if isinstance(v, (Trusted, MdSafe)):  # proven to be the author's own: all of Markdown but raw blocks
             cleaned = RAW_FENCE.sub("", text)
             if cleaned != text:
                 nudges.add("M121", "a raw block inside a variable was removed")
             return MdSafe(cleaned)
         from . import icons
 
-        nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
-        return TaintedMd(icons.strip(text))  # a placeholder in the document; spliced in after parsing
+        if _has_taint(v):
+            nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
+        # anything else (data, a computed string, a literal, a number…): a placeholder, spliced in after parsing
+        return (TaintedMd if _has_taint(v) else MdData)(icons.strip(text))
 
     return {
         **text_filters(loc),
@@ -1374,7 +1410,7 @@ def render(
             return ""
         text = str(v)
         lengths.append(resolved_len(text))
-        values.append(Value(text, _has_taint(v), isinstance(v, TaintedMd)))
+        values.append(Value(text, _has_taint(v), isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
         return Tainted(ph) if _has_taint(v) else ph
 
@@ -1400,7 +1436,7 @@ def render(
         return SafeRange(range(*args), budget)
 
     now = current_time(tz)
-    ctx = {k: v for k, v in meta.items() if k not in RESERVED}
+    ctx = {k: trust(v) for k, v in meta.items() if k not in RESERVED}  # the author's: all of Markdown
     ctx.update(fields or {})
     ctx.update(
         {
@@ -1409,14 +1445,14 @@ def render(
             "seq": Seq(store, budget),
             "range": safe_range,
             "namespace": _BudgetNamespace,
-            "label": pick_labels(labels, meta.get("labels"), loc),
+            "label": trust(pick_labels(labels, meta.get("labels"), loc)),
         }
     )
     env.globals.clear()
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else d
+                ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
             except SecurityError:
                 raise
             except Exception as e:  # noqa: BLE001

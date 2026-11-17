@@ -38,7 +38,9 @@ def test_data_cannot_fill_an_image_fence(private_png):
 
 
 def test_author_can_still_use_markdown_values_with_images(private_png):
-    assert images(build("{{ d | markdown }}", fields={"d": f"![x]({private_png})"}))
+    # the author's own value: from the front matter (a value handed in by a caller is data: text markup only)
+    assert images(build(f'---\nd: "![x]({private_png})"\n---\n{{{{ d | markdown }}}}'))
+    assert not images(build("{{ d | markdown }}", fields={"d": f"![x]({private_png})"}))
 
 
 def test_template_path_outside_document_folder_is_refused(tmp_path):

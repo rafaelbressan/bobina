@@ -374,8 +374,8 @@ them, and `bobina seq set NAME N` starts one at N, even before its first print.
 - can never produce a `raw` block (`M314` for variables inside `raw`), choose an image path (`M312`), or carry
   control characters (removed from all text and barcode data before encoding).
 
-`{{ value | markdown }}` opts one value in, without `raw` blocks (`M121`); data is spliced in after parsing,
-text markup only (no `{…}`): images (`M122`), code blocks, `:::`, link definitions (`M123`) go. Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
+`| markdown`: the author's values (front matter, literals) get all but `raw` (`M121`); others get
+text markup only, after parsing (no `{…}`; images `M122`; code blocks, `:::`, link definitions `M123`). Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
 iterations or 2 MB of output (`M313`), template paths outside the document folder and
 `~/.config/bobina/templates` (`M315`). See `docs/SECURITY.md`.
 
