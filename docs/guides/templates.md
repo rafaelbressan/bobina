@@ -6,7 +6,7 @@ template below prints on a 58 mm roll with no warning.
 ```bash
 bobina template list                          # every template and its fields
 bobina template show label                    # one template: fields, required, examples
-bobina template new label box.bob.md          # a starter file with every field, marked required / optional
+bobina template new label box.bob.md          # a starter file: every field marked # required or # optional
 bobina preview box.bob.md -o box.png          # look before printing
 bobina print box.bob.md                       # confirmation screen, then paper
 ```
@@ -102,7 +102,8 @@ the printer. Copy one, change the values, print.
 ## Your own templates
 
 A template is a `.bob.md` with a `fields:` front matter (FORMAT.md §8). Put it in `~/.config/bobina/templates/`
-and `template: my-price` finds it; one with the same name as a built-in one wins over it. A `.bob.md` path in
-the document's folder works too (`template: tags/price.bob.md`), and is looked for first. The built-in ones are in
+and `template: my-price` finds it; one with the same name as a built-in one wins over it. A value ending in
+`.md` or with a `/` is a path (`template: tags/price.bob.md`), read only in the document's folder or
+`~/.config/bobina/templates/`. The built-in ones are in
 [`src/bobina/templates/`](../../src/bobina/templates/): copy one and change its layout. `bobina template list`
 shows only the built-in ones.

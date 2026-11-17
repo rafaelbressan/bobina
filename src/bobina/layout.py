@@ -63,7 +63,13 @@ COLUMNS_HINT = (":::: {.columns wrap=nowrap|wrap|wrap-reverse valign=top|middle|
                 "(docs/guides/layout-columns.md)")  # fmt: skip
 TURNED_LENGTH_MM = 72  # orientation=vertical on columns: a label this long along the roll, unless length= says
 TURNED_MOST_MM = 300  # … and never longer than this (length=auto too: a column's content measured up to it)
-LENGTH_HINT = "72mm (the default), 7.2cm, 576 (dots) or auto (as long as the columns' content needs)"
+LENGTH_HINT = "72mm (the default), 7.2cm, 575 (dots) or auto (as long as the columns' content needs)"
+CODE_KINDS = frozenset({"qr", "barcode", "datamatrix", "pdf417"})  # rows a turned label never resamples (fit_label)
+# a block holding text taller than a turned label is drawn at most this much smaller: the printer font's 24-dot
+# letters become 17 dots tall, their 2-dot strokes about 1.4: resampled letters blur where a font drawn that size
+# would not, so this keeps them well above Terminus 12px, the smallest text tested legible on paper (tables.md)
+LEGIBLE_SHRINK = 0.7
+BAR_MIN_DOTS = 40  # a barcode laid out to fit a turned label keeps bars at least this tall (5 mm), else Q108
 COLUMN_HINT = "a column takes width=auto|40%|30mm|12ch and valign=top|middle|bottom (docs/guides/layout-columns.md)"
 WRAPS = ("nowrap", "wrap", "wrap-reverse")  # wrap= on columns: CSS flex-wrap's names
 VALIGNS = {"top": "top", "middle": "middle", "center": "middle", "bottom": "bottom"}  # center (CSS's word): middle
@@ -245,6 +251,7 @@ class Layout:
         self.bars: tuple[int, ...] = ()  # the column (at 1x) of the bar of each quote being laid out, outermost first
         self.within = ""  # "column": laid out in a column of :::: {.columns} (narrow)
         self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
+        self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -826,6 +833,9 @@ class Layout:
                 self.n.add("M101", f"'{name}' works on images only: it does nothing here", b.line, "remove it")
         if isinstance(b, Div) and b.attrs.has("box") and getattr(rows[0], "kind", "") == "box":
             return rows  # a box turns itself (Layout.box): placed as written, the quote bars upright
+        if isinstance(b, Div) and b.attrs.has("columns") and any(isinstance(r, BitmapRow) and r.columns
+                                                                and r.columns.turned for r in rows):  # fmt: skip
+            return rows  # turned columns are a turned label already: rotate= and .flip ignored (columns_orientation)
         raws = [r for r in rows if isinstance(r, RawRow)]  # bytes cannot be turned: sent after the turned block
         rows = [r for r in rows if not isinstance(r, RawRow)]
         if not rows:
@@ -856,10 +866,7 @@ class Layout:
         return ang
 
     def compose(self, rows) -> Image.Image:
-        from . import preview
-
-        parts = [im.convert("L") for im in (preview.row_image(r, self.p, self.em) for r in rows) if im is not None]
-        return imaging.vstack(parts, self.W, "L")
+        return self.stacked([preview.row_image(r, self.p, self.em) for r in rows], self.W)
 
     def rotate(self, rows, ang: float, attrs, line: int) -> BitmapRow:
         im = self.compose(rows)
@@ -1308,9 +1315,9 @@ class Layout:
     def row_misfit(self, cols: list[Div], asked: list, idx: list[int], room: int, gap: int,
                    tall: int | None = None) -> str:  # fmt: skip
         """Why these columns do not fit side by side in `room` letters ("" when they do)."""
-        widths, g, need = self.row_widths([asked[i] for i in idx], room, gap)
-        if need + g * (len(idx) - 1) > room:
-            return f"the widths ask for {need + g * (len(idx) - 1)} of the {room} letters"
+        widths, _, need = self.row_widths([asked[i] for i in idx], room, gap)
+        if need + gap * (len(idx) - 1) > room:  # the gap asked for: one too wide for them moves a column too
+            return f"the widths ask for {need + gap * (len(idx) - 1)} of the {room} letters"
         for i, w in zip(idx, widths, strict=True):
             alone = self.row_widths([asked[i]], room, gap)[0][0]  # what it gets on a row of its own
             if not self.content_fits(cols[i], w, alone, tall):
@@ -1326,25 +1333,45 @@ class Layout:
         they are."""
 
         def high(letters: int) -> bool:
-            return tall is not None and self.column_probe(col, letters)[0] > tall
+            return tall is not None and self.column_probe(col, letters, tall)[0] > tall
 
-        squeezed = self.column_probe(col, w)[1] <= self.column_probe(col, alone)[1]
+        squeezed = self.column_probe(col, w, tall)[1] <= self.column_probe(col, alone, tall)[1]
         return squeezed and (not high(w) or high(alone))
 
-    def column_probe(self, col: Div, letters: int) -> tuple[int, frozenset]:
-        """A column laid out at `letters` as a trial: (its height in dots, the SQUEEZED problems it has)."""
+    def column_probe(self, col: Div, letters: int, tall: int | None = None) -> tuple[int, frozenset]:
+        """A column laid out at `letters` as a trial: (its height in dots, the SQUEEZED problems it has). Only a
+        turned label (tall: its height) needs the height: standing columns are never drawn here (height 0)."""
         cache = self.__dict__.setdefault("_fits", {})
-        key = (id(col), letters)
+        key = (id(col), letters, tall)
         if key not in cache:
 
             def build() -> int:
-                with self.narrow(letters * self.p.cell[0], "column"):
-                    rows = [r for r in self.blocks(col.children, 0) if not isinstance(r, RawRow)]
-                    return sum(im.height for im in (preview.row_image(r, self.p, self.em) for r in rows) if im)
+                _, _, pics = self.laid_column(col, letters, tall, pictures=tall is not None)
+                return sum(im.height for im in pics if im is not None)
 
             height, said = self.probe(build)
             cache[key] = (height, frozenset({x.code for x in [*said, *said.check_only]} & SQUEEZED))
         return cache[key]
+
+    def laid_column(self, col: Div, letters: int, tall: int | None = None, pictures: bool = True):
+        """A column laid out `letters` wide by the usual engine, its codes no taller than `tall` (a turned label's
+        height): (its rows, the raw ones apart; its raw rows; each row's picture, None for a row that draws nothing,
+        when `pictures`). What column_row, column_probe and turned_label draw from."""
+        outer, self.tall_max = self.tall_max, tall
+        try:
+            with self.narrow(letters * self.p.cell[0], "column"):
+                rows = self.blocks(col.children, 0)
+                raws = [r for r in rows if isinstance(r, RawRow)]
+                rows = [r for r in rows if not isinstance(r, RawRow)]
+                pics = [preview.row_image(r, self.p, self.em) for r in rows] if pictures else []
+        finally:
+            self.tall_max = outer
+        return rows, raws, pics
+
+    @staticmethod
+    def stacked(pics: list, width: int) -> Image.Image:
+        """Row pictures one under the other, `width` dots wide (mode L)."""
+        return imaging.vstack([im.convert("L") for im in pics if im is not None], width, "L")
 
     def probe(self, build) -> tuple:
         """trial(), and what it judged (a font's size, said once) forgotten: the layout that prints says it."""
@@ -1354,19 +1381,23 @@ class Layout:
         finally:
             self._judged = judged
 
-    def column_at(self, col: Div, dots: int) -> list:
-        with self.narrow(dots, "column"):
-            return self.blocks(col.children, 0)
-
-    def said_widths(self, asked: list, room: int, gap: int, a: Attrs, line: int, row: str) -> tuple[list[int], int]:
+    def said_widths(self, asked: list, room: int, gap: int, a: Attrs, line: int, row: str,
+                    content: bool = False) -> tuple[list[int], int]:  # fmt: skip
         """row_widths (the widths and the gap used), saying a gap with no room and widths asking for more letters
-        than there are (M101); `row` is what wrap=wrap would move a column to: a row, or a turned label."""
+        than there are (M101); `row` is what wrap=wrap would move a column to: a row, or a turned label. content:
+        the widths are what the content needs (length=auto), so the content is what asks for too much."""
         widths, g, need = self.row_widths(asked, room, gap)
         n = len(asked)
         if g < gap:
-            self.n.add("M101", f"gap={a.kv.get('gap')}: no room for it between {n} columns in {room} letters, {g} "
-                       "used", line, "a smaller gap=, or fewer columns")  # fmt: skip
-        if need + g * (n - 1) > room and any(w is not None for w in asked):
+            said = f"gap={a.kv['gap']}" if "gap" in a.kv else "the gap (1 letter, the default)"
+            self.n.add("M101", f"{said}: no room for it between {n} columns in {room} letters, {g} used", line,
+                       "a smaller gap=, or fewer columns")  # fmt: skip
+        if need + g * (n - 1) > room and content:
+            self.n.add("M101", f"the columns' content needs {need + g * (n - 1)} letters, more than the "
+                       f"{TURNED_MOST_MM} mm ({room} letters) a label can have: each narrowed to "
+                       f"{' + '.join(map(str, widths))}", line, "less text or smaller sizes"
+                       + ("" if self.wrapping else ", or wrap=wrap for a label of its own"))  # fmt: skip
+        elif need + g * (n - 1) > room and any(w is not None for w in asked):
             move = "" if self.wrapping else f", or wrap=wrap to move a column that does not fit to a new {row}"
             self.n.add("M101", f"the columns' widths ask for {need + g * (n - 1)} of the {room} letters: each "
                        f"narrowed to {' + '.join(map(str, widths))}", line, "smaller width=" + move)  # fmt: skip
@@ -1380,11 +1411,9 @@ class Layout:
         widths, g = self.said_widths(asked, room, gap, a, line, "row")
         parts, raws = [], []
         for c, w in zip(cols, widths, strict=True):
-            with self.narrow(w * cw, "column"):
-                rows = self.blocks(c.children, 0)
-                raws += [r for r in rows if isinstance(r, RawRow)]
-                rows = [r for r in rows if not isinstance(r, RawRow)]
-                im = self.compose(rows) if any(not isinstance(r, FeedRow) for r in rows) else None
+            rows, raw, pics = self.laid_column(c, w)
+            raws += raw
+            im = self.stacked(pics, w * cw) if any(not isinstance(r, FeedRow) for r in rows) else None
             lead, trail = _blank_edges(im) if im is not None else (0, 0)
             parts.append((rows, im, lead, 0 if im is None else im.height - lead - trail))
         if raws:
@@ -1414,8 +1443,9 @@ class Layout:
 
     def columns_orientation(self, a: Attrs, line: int, indent: int) -> str:
         """orientation= on columns: horizontal (the default: across the paper) or vertical (along the roll, a label
-        read sideways: columns_turned). Said: length= on columns that do not turn, and rotate=90/270, which turns
-        the picture of the columns as they stand across the paper and is rarely what is meant (L112)."""
+        read sideways: columns_turned). Said: length= on columns that do not turn; rotate=90/270 on standing ones,
+        which turns their picture and is rarely what is meant (L113); rotate= and .flip on turned ones, which are
+        ignored (block() does not turn the label again)."""
         given = a.kv.get("orientation", "horizontal")
         if given not in ("horizontal", "vertical"):
             self.n.add("M101", f"orientation={given}", line,
@@ -1429,12 +1459,18 @@ class Layout:
             self.n.add("M101", f"length={a.kv['length']} does nothing on columns across the paper", line,
                        "orientation=vertical lays them out along the roll, length= long")  # fmt: skip
         rot = a.kv.get("rotate")
+        if given == "vertical":
+            for name, on in ((f"rotate={rot}", rot is not None), (".flip", a.has("flip"))):
+                if on:
+                    self.n.add("M101", f"orientation=vertical already turns the label: {name} ignored", line,
+                               f"remove {name.split('=')[0] + ('=' if '=' in name else '')}")  # fmt: skip
+            return given
         try:
             quarter = rot is not None and float(rot) % 180 == 90
         except ValueError:
             quarter = False  # angle() says it
-        if quarter and given != "vertical":
-            self.n.add("L112", f"rotate={rot} turns the picture of the columns as they stand across the paper", line,
+        if quarter:
+            self.n.add("L113", f"rotate={rot} turns the picture of the columns as they stand across the paper", line,
                        "orientation=vertical lays them out along the roll instead: a label read sideways, 72 mm "
                        "long unless length= says")  # fmt: skip
         return given
@@ -1448,29 +1484,31 @@ class Layout:
         a turned table: its top on the right of the paper, its first column printed first. With wrap=wrap a column
         that does not fit (the widths, or its content too tall for the label) starts a new label after this one
         (wrap-reverse: before it, L110); content taller than the label otherwise goes on in more labels."""
-        tall = self.W
+        tall, cw = self.W, self.p.cell[0]
+        most = self.p.mm_to_dots(TURNED_MOST_MM) // cw
         length = self.label_length(a, line)
         if length is None:
             asked = [self.column_need(c) if w is None else w for c, w in zip(cols, asked, strict=True)]
-            room = self.auto_room(cols, asked, gap)
+            room = min(most, self.auto_room(cols, asked, gap))
         else:
-            room = length // self.p.cell[0]
+            room = length // cw
         labels = self.column_rows(cols, asked, room, gap, wrap, line, tall)
         if wrap == "wrap-reverse":
             labels.reverse()
         out: list = []
         for idx in labels:
             sub, mine = [cols[i] for i in idx], [asked[i] for i in idx]
-            here = room if length is not None or len(idx) == len(cols) else self.auto_room(sub, mine, gap)
+            here = room if length is not None or len(idx) == len(cols) else min(most, self.auto_room(sub, mine, gap))
             if out:
                 out.append(FeedRow(int(self.p.get("native.line_gap_dots", 6)) * 4))
             out += self.turned_label(sub, mine, [aligns[i] for i in idx], here, gap,
-                                     length or here * self.p.cell[0], a, line)  # fmt: skip
+                                     length or here * cw, a, line, auto=length is None)  # fmt: skip
         return out
 
     def label_length(self, a: Attrs, line: int) -> int | None:
-        """length= of turned columns, in dots along the roll: 72mm (the default), 7.2cm, 576 or 576dots (dots), or
-        None for auto. Never shorter than a letter, never longer than TURNED_MOST_MM (M101 says what is used)."""
+        """length= of turned columns, in dots along the roll: 72mm (the default, 575 dots at 203 dpi), 7.2cm, 480 or
+        480dots (dots), or None for auto. Never shorter than a letter, never longer than TURNED_MOST_MM (M101 says
+        what is used)."""
         default = self.p.mm_to_dots(TURNED_LENGTH_MM)
         given = a.kv.get("length")
         if given is None:
@@ -1503,55 +1541,59 @@ class Layout:
         it still fits the label's height (its text wraps less as it widens, its image grows: tried at a few widths,
         then the last one that fits narrowed down to the letter)."""
         most, tall = self.p.mm_to_dots(TURNED_MOST_MM) // self.p.cell[0], self.W
-        best = self.column_probe(col, most)
+
+        def probe(letters: int) -> tuple[int, frozenset]:
+            return self.column_probe(col, letters, tall)
+
+        best = probe(most)
 
         def least(ok, lo: int, hi: int) -> int:  # the first letters in lo..hi at which ok() holds, and above them
             while lo < hi:
                 mid = (lo + hi) // 2
-                lo, hi = (lo, mid) if ok(*self.column_probe(col, mid)) else (mid + 1, hi)
+                lo, hi = (lo, mid) if ok(*probe(mid)) else (mid + 1, hi)
             return lo
 
         if best[0] > tall:
             tries = sorted({min(most, round(math.sqrt(2) ** k)) for k in range(40)})
-            fits = [w for w in tries if self.column_probe(col, w)[0] <= tall]
+            fits = [w for w in tries if probe(w)[0] <= tall]
             if fits:
                 after = next((w for w in tries if w > fits[-1]), most)
                 return least(lambda height, _: height > tall, fits[-1], after) - 1  # the last letters that fit
         return least(lambda height, squeezed: height == best[0] and squeezed <= best[1], 1, most)
 
     def auto_room(self, cols: list[Div], asked: list, gap: int) -> int:
-        """length=auto: the letters of a label just long enough for these columns: the letters they ask for, and
-        a share (40%) of the text room no narrower than its content needs (column_need). At most TURNED_MOST_MM."""
-        most = self.p.mm_to_dots(TURNED_MOST_MM) // self.p.cell[0]
-        between = gap * (len(asked) - 1)
-        text = sum(w for w in asked if isinstance(w, int))
+        """length=auto: the letters of a label just long enough for these columns side by side: each at least a
+        letter, the letters they ask for, and each share (40%) of the text room no narrower than its content needs
+        (column_need); shares adding up to more than 100% are narrowed as row_widths does, never below that. The
+        caller keeps it within TURNED_MOST_MM."""
+        n, most = len(asked), self.p.mm_to_dots(TURNED_MOST_MM) // self.p.cell[0]
+        between = gap * (n - 1)
+        text = max(n, sum(w for w in asked if isinstance(w, int)))
         shares = {i: self.column_need(c) for i, (c, w) in enumerate(zip(cols, asked, strict=True))
                   if isinstance(w, float)}  # fmt: skip
         part = sum(asked[i] for i in shares)
         if shares and part < 1:
-            text = math.ceil(text / (1 - part))  # what the letters leave is the shares' room
-        while shares and text + between < most:
-            got = self.column_shares(list(asked), text)
-            if all(got[i] >= need for i, need in shares.items()):
+            text = max(text, math.ceil(text / (1 - part)))  # what the letters leave is the shares' room
+        while shares and text < most:
+            widths, g, need = self.row_widths(list(asked), text + between, gap)
+            if g == gap and all(widths[i] >= w for i, w in shares.items()) and (part > 1 or need <= text):
                 break
             text += 1
-        return max(1, min(most, text + between))
+        return text + between
 
     def turned_label(self, cols: list[Div], asked: list, aligns: list[str], room: int, gap: int, length: int,
-                     a: Attrs, line: int) -> list:  # fmt: skip
+                     a: Attrs, line: int, auto: bool = False) -> list:  # fmt: skip
         """One label of turned columns, `length` dots along the roll and as tall as the paper is wide, then
-        turned: each column laid out at its width and placed by valign= within the label's height, as read.
-        Content taller than the label is never cut: it goes on in more labels after this one, each column at its
-        place (cut between its lines and blocks, never inside one), and a block taller than the label is drawn
-        smaller to fit it (L112 says both)."""
+        turned: each column laid out at its width (its codes no taller than the label) and placed by valign=
+        within the label's height, as read. Content taller than the label is never cut off: it goes on in more
+        labels after this one, each column at its place (label_bands)."""
         cw, tall = self.p.cell[0], self.W
-        widths, g = self.said_widths(asked, room, gap, a, line, "label")
+        widths, g = self.said_widths(asked, room, gap, a, line, "label", content=auto)
         stacks, raws = [], []
         for k, (c, w) in enumerate(zip(cols, widths, strict=True)):
-            with self.narrow(w * cw, "column"):
-                rows = self.blocks(c.children, 0)
-                raws += [r for r in rows if isinstance(r, RawRow)]
-                bands, height = self.label_bands([r for r in rows if not isinstance(r, RawRow)], tall)
+            rows, raw, pics = self.laid_column(c, w, tall)
+            raws += raw
+            bands, height = self.label_bands(rows, pics, tall, w * cw)
             stacks.append(bands)
             if len(bands) > 1:
                 more = len(bands) - 1
@@ -1584,50 +1626,87 @@ class Layout:
             out.append(BitmapRow(_bw(turned), line, "columns", untested=tuple(sorted(marks)), columns=view))
         return [*out, *raws]
 
-    def label_bands(self, rows: list, tall: int) -> tuple[list[tuple[list, Image.Image]], int]:
+    def label_bands(self, rows: list, pics: list, tall: int, width: int) -> tuple[list[tuple[list, Image.Image]], int]:
         """A turned column's rows in bands no taller than the label (tall dots): (each band's rows and its picture,
         the column's whole height). Cut between rows, never inside one; a gap at a band's edge is left out. A row
-        taller than the label is drawn smaller to fit it (L112)."""
+        taller than the label is fitted to it, or cut into pieces that go on in the next labels (fit_label)."""
         bands, cur, used, height = [], [], 0, 0
 
-        def close() -> None:
+        def close() -> int:
             while cur and isinstance(cur[-1][0], FeedRow):
                 cur.pop()
             if cur:
-                bands.append(([r for r, _ in cur], imaging.vstack([im.convert("L") for _, im in cur], self.W, "L")))
+                bands.append(([r for r, _ in cur], self.stacked([im for _, im in cur], width)))
             cur.clear()
+            return 0
 
-        for r in rows:
-            im = preview.row_image(r, self.p, self.em)
+        for r, im in zip(rows, pics, strict=True):
             if im is None:
                 continue
             height += im.height
+            pieces = [(r, im)]
             if im.height > tall and not isinstance(r, FeedRow):
-                r, im = self.fit_label(r, im, tall)
-            if cur and used + im.height > tall:
-                close()
-                used = 0
-            if isinstance(r, FeedRow) and not cur:
-                continue
-            cur.append((r, im))
-            used += im.height
+                pieces = self.fit_label(r, im, tall, width)
+            for k, (piece, pic) in enumerate(pieces):
+                if cur and (used + pic.height > tall or k):  # a piece cut at a label's edge starts the next label
+                    used = close()
+                if isinstance(piece, FeedRow) and not cur:
+                    continue
+                cur.append((piece, pic))
+                used += pic.height
         close()
         return bands, height
 
-    def fit_label(self, r, im: Image.Image, tall: int) -> tuple[BitmapRow, Image.Image]:
-        """A row taller than a turned label, drawn smaller to fit its height (its ink, at its place across the
-        column)."""
+    def fit_label(self, r, im: Image.Image, tall: int, width: int) -> list[tuple[BitmapRow, Image.Image]]:
+        """A row taller than a turned label (its ink), as pieces no taller than the label (L112 says how):
+        - a photo or drawing (an image) is drawn smaller to fit it;
+        - a code is never resampled (a code is laid out to fit already: laid_column; one that cannot be, a barcode
+          printed along the paper, is cut);
+        - anything else holds text (a box, a turned block, a table): drawn at most LEGIBLE_SHRINK smaller, and when
+          that is still too tall cut into pieces that go on in the next labels, at a blank line near each cut when
+          there is one (a note), else across its lines (a warning: nothing is lost, but read the labels together)."""
+        line = getattr(r, "line", 0)
         g = im.convert("L")
         box = ImageOps.invert(g).getbbox() or (0, 0, im.width, im.height)
         ink = g.crop(box)
-        if ink.height > tall:
-            self.n.add("L112", f"a block {ink.height} dots tall at line {getattr(r, 'line', 0)} is taller than the "
-                       f"label ({tall} dots across the paper): drawn smaller to fit it", getattr(r, "line", 0),
-                       "a smaller width= or size= for it, or a longer length= of the label")  # fmt: skip
-            ink = ink.resize((max(1, round(ink.width * tall / ink.height)), tall), Image.BOX)
-        align = "left" if box[0] == 0 else "right" if box[2] == im.width else "center"
-        small = imaging.place(_bw(ink), self.W, align)
-        return BitmapRow(small, getattr(r, "line", 0), "image", untested=getattr(r, "untested", ())), small
+        align = "left" if box[0] == 0 else "right" if box[2] >= im.width else "center"
+        photo = isinstance(r, BitmapRow) and r.kind == "image"
+        code = isinstance(r, (QRRow, BarcodeRow)) or (isinstance(r, BitmapRow) and r.kind in CODE_KINDS)
+        kind = r.kind if isinstance(r, BitmapRow) else "qr" if isinstance(r, QRRow) else "barcode" if code else "text"
+
+        def row(piece: Image.Image) -> tuple[BitmapRow, Image.Image]:
+            small = imaging.place(_bw(piece), width, align)
+            return BitmapRow(small, line, kind, untested=getattr(r, "untested", ())), small
+
+        if ink.height <= tall:  # only the white around it was too tall
+            return [row(ink)]
+        what = (f"{'a picture' if photo else 'a code' if code else 'a block'} {ink.height} dots tall at line {line} is "
+                f"taller than the label ({tall} dots across the paper)")  # fmt: skip
+        if photo:
+            self.n.add("L112", f"{what}: drawn smaller to fit it", line, "a smaller width= for it")
+            return [row(ink.resize((max(1, round(ink.width * tall / ink.height)), tall), Image.BOX))]
+        scale = 1.0
+        if not code:
+            scale = max(LEGIBLE_SHRINK, tall / ink.height)
+            ink = ink.resize((max(1, round(ink.width * scale)), max(1, round(ink.height * scale))), Image.BOX)
+            if ink.height <= tall:
+                self.n.add("L112", f"{what}: drawn at {scale:.0%} to fit it", line, "a smaller size= or less text")
+                return [row(ink)]
+        pieces, top, clean = [], 0, True
+        while ink.height - top > tall:
+            cut = top + tall
+            blank = next((y for y in range(cut, top + tall * 2 // 3, -1) if _white_row(ink, y)), None)
+            clean = clean and blank is not None and scale < 1  # a code cut anywhere does not scan
+            at = blank if blank is not None else cut
+            pieces.append(ink.crop((0, top, ink.width, at)))
+            top = at
+        pieces.append(ink.crop((0, top, ink.width, ink.height)))
+        shrunk = f"drawn at {scale:.0%} (smaller would not read) and " if scale < 1 else ""
+        where = "between its lines" if clean else "across it: nothing is lost, but read the labels together"
+        self.n.add("L112", f"{what}: {shrunk}it goes on in {len(pieces) - 1} more label{'s' if len(pieces) > 2 else ''}"
+                   f", cut {where}", line, "a smaller size= or width=, or less in it",
+                   severity="" if clean else "warning")  # fmt: skip
+        return [row(p) for p in pieces]
 
     def fence(self, f: Fence, indent: int) -> list:
         kind = f.kind
@@ -1837,6 +1916,11 @@ class Layout:
             )
             if mod < lo:  # the paper took it below what scans: say so, never as if fine
                 self.n.add("Q101", f"QR module {mod} in {render} mode: it may not scan", f.line, less)
+        if self.tall_max and units * mod > self.tall_max and mod > 1:  # a turned label: the largest whole module
+            mod = max(1, self.tall_max // units)  # that fits its height (never resampled: fit_label)
+            if mod < lo:
+                self.n.add("Q101", f"QR module {mod} in {render} mode, to fit the turned label's height: it may not "
+                           "scan", f.line, "less data or ecc=L; or take the QR out of the turned columns")  # fmt: skip
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]
@@ -1986,7 +2070,18 @@ class Layout:
                 f.line,
                 "orientation=auto prints it vertically",
             )
-        return [BarcodeRow(kind, data, mod, height, text, align, f.line)]
+        row = BarcodeRow(kind, data, mod, height, text, align, f.line)
+        if self.tall_max:  # a turned label: shorter bars to fit its height, the bars' widths untouched
+            from . import preview
+
+            over = preview.barcode_image(row, self.em).height - self.tall_max
+            if over > 0:
+                row.height = max(1, height - over)
+                if row.height < BAR_MIN_DOTS:
+                    self.n.add("Q108", f"bars {row.height} dots tall, to fit the turned label's height: too short "
+                               "to scan reliably", f.line, "text=none, or take the barcode out of the turned "
+                               "columns")  # fmt: skip
+        return [row]
 
     def matrix_code(self, f: Fence, kind: str) -> list:
         """2D codes the printer cannot draw natively: always raster (R5: module >= 4 for square codes)."""
@@ -2013,6 +2108,12 @@ class Layout:
                 if kind == "datamatrix" and mod < lo:
                     self.n.add("Q101", f"width={f.attrs.kv['width']} gives datamatrix module {mod}", f.line,
                                f"a larger width or less data (module ≥ {lo})")  # fmt: skip
+            while self.tall_max and im.height > self.tall_max and mod > 1:  # a turned label: whole modules
+                mod -= 1
+                im = draw(mod)
+                if kind == "datamatrix" and mod < int(self.p.get("qr.min_module_raster", 4)):
+                    self.n.add("Q101", f"datamatrix module {mod}, to fit the turned label's height", f.line,
+                               "less data, or take it out of the turned columns")  # fmt: skip
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -3070,6 +3171,11 @@ def _box_side(t: int, style: str, cw: int) -> int:
 def _box_least(cw: int) -> int:
     """Dots of the narrowest box: its thinnest frame and room on each side, and 4 letters inside."""
     return 2 * _box_side(2, "solid", cw) + 4 * cw
+
+
+def _white_row(im: Image.Image, y: int) -> bool:
+    """Whether row y of an image (mode L) has no ink: a place to cut it between lines."""
+    return im.crop((0, y, im.width, y + 1)).getextrema()[0] >= 128
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:

@@ -36,7 +36,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/problems/drawing.md": 110,
     "docs/problems/fonts.md": 355,
     "docs/problems/codes.md": 390,
-    "docs/problems/layout.md": 305,
+    "docs/problems/layout.md": 395,  # raised on 17/11 for L112 and L113 (turned columns): ~20% headroom
     "docs/problems/images.md": 335,
     "docs/problems/errors.md": 700,
     "docs/problems/printer-and-paper.md": 465,

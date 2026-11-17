@@ -27,7 +27,7 @@ of the paper, its first column printed first. Read it with that edge up.
 
 | Setting | What it does |
 |---|---|
-| `length=72mm` | the default: the label's length along the roll (`7.2cm`, `576` dots); at most 300 mm |
+| `length=72mm` | the default: the label's length along the roll (`7.2cm`, `575` dots at 203 dpi); at most 300 mm |
 | `length=auto` | as long as the columns' content needs: text on as few lines as it can, an image as big as fits the height |
 
 - The label's height is the paper's printable width: 48 mm (384 dots, 16 lines of text) on 58 mm paper, 72 mm on
@@ -38,17 +38,21 @@ of the paper, its first column printed first. Read it with that edge up.
 
 ## Content taller than the label
 
-Nothing is cut:
+Nothing is lost:
 
 - `wrap=wrap`: a column that does not fit (the widths, or its content taller than the label) starts a new label,
   printed after this one; `wrap=wrap-reverse`, before it (`L110`).
 - Otherwise what does not fit goes on in another label printed after it, each column at its place, cut between
-  lines and blocks; a single block taller than the label (a big image) is drawn smaller to fit it (`L112`).
+  lines and blocks (`L112`).
+- A single block taller than the label: a QR code or Data Matrix gets the largest whole module that fits (`Q101`
+  when it may not scan), a barcode shorter bars; a picture is drawn smaller; a block of text (a box, a table) at
+  most 70% smaller, so it still reads, and if still too tall it goes on in the next label, cut at a blank line
+  near the edge, else across its lines (`L112` as a warning).
 
 ## Good to know
 
 - Only columns outside quotes and lists turn (`M101`); there they stand.
-- `rotate=90` on columns turns the picture of them standing across the paper; bobina suggests
-  `orientation=vertical` (`L112`).
+- `rotate=90` on standing columns turns their picture; bobina suggests `orientation=vertical` (`L113`). On
+  turned columns `rotate=` and `.flip` are ignored (`M101`).
 - `bobina view FILE` shows the label standing, as read, under `↻ columns printed turned, top on the right`.
 - ⚠ Not tested on paper yet.

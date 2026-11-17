@@ -222,15 +222,25 @@ def test_wrap_leaves_a_column_too_tall_even_alone_and_it_goes_on_in_another_labe
 
 
 @pytest.mark.parametrize("angle", ["90", "270", "-90"])
-def test_rotate_90_on_columns_suggests_orientation_vertical(angle):
+def test_rotate_90_on_standing_columns_suggests_orientation_vertical_with_its_own_code(angle):
     res = build(cols("a", "b").replace("orientation=vertical ", f"rotate={angle} "))
-    (note,) = [n for n in res.nudges if n.code == "L112"]
-    assert note.severity == "note" and "orientation=vertical" in note.suggestion
+    (note,) = [n for n in res.nudges if n.code == "L113"]
+    assert note.severity == "note" and "orientation=vertical" in note.suggestion and "L112" not in codes(res)
 
 
 @pytest.mark.parametrize("src", [cols("a", "b").replace("orientation=vertical ", "rotate=180 "), cols("a", "b")])
 def test_no_rotate_hint_for_half_turns_or_turned_columns(src):
-    assert "L112" not in codes(build(src))
+    assert "L113" not in codes(build(src))
+
+
+@pytest.mark.parametrize("extra, word", [("rotate=90", "rotate=90"), ("rotate=180", "rotate=180"), (".flip", ".flip")])
+def test_rotate_and_flip_on_turned_columns_are_ignored_and_said(extra, word):
+    plain = build(cols("left", "right"))
+    res = build(cols("left", "right", opts=extra))
+    (row,) = labels(res)
+    assert row.image.tobytes() == labels(plain)[0].image.tobytes()  # the label is not turned again
+    assert any(f"already turns the label: {word} ignored" in m for m in said(res, "M101"))
+    assert text(res) == text(plain) and "L113" not in codes(res)
 
 
 def test_an_unknown_orientation_is_said_and_the_columns_stand():
@@ -309,3 +319,138 @@ def test_data_inside_turned_columns_stays_text():
     res = build(src, fields={"d": Tainted(":::\n::::\n{.columns orientation=horizontal}")})
     d, end = res.doc.blocks
     assert len(d.children) == 2 and isinstance(end, Paragraph) and labels(res)[0].columns.turned
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+
+def _code_rows(res, kind: str) -> list[BitmapRow]:
+    return [r for lab in labels(res) for c in lab.columns.columns for r in c.rows
+            if isinstance(r, BitmapRow) and r.kind == kind]  # fmt: skip
+
+
+def test_a_qr_too_tall_for_the_label_gets_the_largest_whole_module_that_fits():
+    from bobina import imaging
+
+    data = "https://example.com/p/4471"
+    res = build(cols(f"```qr {{width=full}}\n{data}\n```", opts="length=200mm"))
+    (qr,) = _code_rows(res, "qr")
+    box = ink(qr.image)
+    side = len(imaging.qr_matrix(data, "M", 0))
+    assert box[3] - box[1] <= W and (box[3] - box[1]) % side == 0  # whole modules, not resampled
+    assert (box[3] - box[1]) // side == (W // (side + 4))  # the largest module whose code (and quiet zone) fits
+    assert "L112" not in codes(res) and "Q101" not in codes(res)
+
+
+def test_a_data_matrix_too_tall_for_the_label_gets_a_smaller_whole_module():
+    res = build(cols("```datamatrix {width=full}\nLOTE-4471-2026\n```", opts="length=200mm"))
+    (dm,) = _code_rows(res, "datamatrix")
+    assert ink(dm.image)[3] - ink(dm.image)[1] <= W and "L112" not in codes(res)
+
+
+def test_a_barcode_too_tall_for_the_label_gets_shorter_bars_its_module_kept():
+    from bobina.rows import BarcodeRow
+
+    res = build(cols("```barcode {type=code128 height=600}\nPED-1042\n```"))
+    (bar,) = [r for c in labels(res)[0].columns.columns for r in c.rows if isinstance(r, BarcodeRow)]
+    assert bar.height < 600 and bar.module == 2 and "L112" not in codes(res) and "Q108" not in codes(res)
+
+
+def test_a_barcode_squeezed_below_the_shortest_bars_is_said():
+    from bobina.rows import BarcodeRow
+
+    inner = cols("```barcode {type=code128 height=600}\nAB\n```").replace("\n", "\n")
+    res = build(":::::: {.columns}\n::::: {.column width=5ch}\n" + inner + ":::::\n::: {}\nx\n:::\n::::::\n")
+    bars = [r for row in [r for r in res.rows if isinstance(r, BitmapRow) and r.columns]
+            for c in row.columns.columns for lab in c.rows if isinstance(lab, BitmapRow) and lab.columns
+            for cc in lab.columns.columns for r in cc.rows if isinstance(r, BarcodeRow)]  # fmt: skip
+    assert bars and bars[0].height < 40 and any("too short to scan" in m for m in said(res, "Q108"))
+
+
+@pytest.mark.parametrize("shares", [("50%", "50%"), ("40%", "40%"), ("50%", "50%", "50%")])
+def test_length_auto_holds_every_share_side_by_side(shares):
+    bodies = [chr(ord("a") + k) for k in range(len(shares))]
+    res = build(cols(*bodies, opts="length=auto", each=tuple(f"width={w}" for w in shares)))
+    (row,) = labels(res)
+    assert len(row.columns.columns) == len(shares) and "L110" not in codes(res)
+    assert all(w >= 1 for _, w in spans(row))
+
+
+def test_a_box_a_little_too_tall_is_drawn_smaller_but_never_below_70_percent():
+    box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(13)) + "\n:::"  # ~420 dots
+    res = build(cols(box, "x"))
+    (note,) = said(res, "L112")
+    pct = int(note.split("drawn at ")[1].split("%")[0])
+    assert 70 <= pct < 100 and len(labels(res)) == 1
+
+
+def test_text_too_tall_even_at_70_percent_goes_on_cut_at_a_blank_line_as_a_note():
+    turned = "\n".join(f"line {i}" for i in range(30)) + " {rotate=180}"  # a turned block: 30 lines, ~900 dots
+    res = build(cols(turned, "x"))
+    (n,) = [n for n in res.nudges if n.code == "L112" and ", cut " in n.message]
+    assert n.severity == "note" and "between its lines" in n.message and "70%" in n.message
+    assert len(labels(res)) >= 2
+
+
+def test_a_box_too_tall_even_at_70_percent_goes_on_cut_across_it_as_a_warning():
+    box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"  # its sides leave no blank row
+    res = build(cols(box, "x"))
+    (n,) = [n for n in res.nudges if n.code == "L112" and ", cut " in n.message]
+    assert n.severity == "warning" and "nothing is lost" in n.message
+    first = labels(res)[0]
+    assert ink(first.image, (0, 0, W, 23 * CW))[2] - ink(first.image, (0, 0, W, 23 * CW))[0] <= W
+
+
+def test_a_default_gap_with_no_room_is_said_as_the_default_never_none():
+    from bobina.layout import Layout
+    from bobina.model import Attrs
+    from bobina.nudges import Nudges
+
+    res = build("x\n")
+    lay = Layout(res.profile, res.doc, None, Nudges())
+    lay.said_widths([None, None, None], 4, 1, Attrs(), 1, "row")
+    (msg,) = [n.message for n in lay.n]
+    assert "the gap (1 letter, the default)" in msg and "None" not in msg
+
+
+def standing(*bodies: str, opts: str = "", each: tuple = ()) -> str:
+    return cols(*bodies, opts=opts, each=each).replace(" orientation=vertical", "", 1)
+
+
+def test_wrap_judges_with_the_gap_asked_and_moves_a_column():
+    res = build(standing("a", "b", "c", opts="wrap=wrap gap=15ch"))
+    assert len([r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "columns"]) == 2
+    assert said(res, "L110") and not any("no room for it" in m for m in said(res, "M101"))
+
+
+def test_length_auto_past_300_mm_blames_the_content():
+    line = "x" * 150
+    res = build(cols(line, line, opts="length=auto"))
+    (msg,) = [m for m in said(res, "M101") if "300 mm" in m]
+    assert "the columns' content needs 301 letters, more than the 300 mm" in msg and "width" not in msg
+
+
+def test_standing_wrap_never_draws_its_trials(monkeypatch):
+    from bobina.layout import Layout
+
+    calls = []
+    real = Layout.laid_column
+
+    def spy(self, col, letters, tall=None, pictures=True):
+        calls.append(pictures)
+        return real(self, col, letters, tall, pictures)
+
+    monkeypatch.setattr(Layout, "laid_column", spy)
+    build(standing("short", "Pneumoultramicroscopico", opts="wrap=wrap", each=("width=60%",)))
+    assert calls.count(True) == 2 and calls.count(False) >= 2  # the trials are laid out, only what prints is drawn
+    assert not hasattr(Layout, "column_at")
+
+
+def test_the_lengths_in_dots_said_are_the_ones_printed():
+    from pathlib import Path
+
+    from bobina.layout import LENGTH_HINT
+
+    guide = (Path(__file__).resolve().parents[1] / "docs" / "guides" / "layout-columns-turned.md").read_text()
+    assert "575" in LENGTH_HINT and "`575` dots" in guide and "576" not in LENGTH_HINT + guide
+    assert labels(build(cols("a", opts="length=575")))[0].image.height == MM72

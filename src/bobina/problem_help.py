@@ -79,10 +79,13 @@ FIX = {
         "some room. Without it, what they hold prints plainly, one block under the other."
     ),
     "L112": (
-        "Turned columns are as tall as the paper is wide. Too tall: give the label more length (length=, or "
-        "length=auto), use less text or smaller sizes, or wrap=wrap to move a column to a label of its own; a block "
-        "drawn smaller: give it a smaller width= or size=. rotate=90 on columns turns their picture: for a label "
-        "read sideways write orientation=vertical instead (72 mm long unless length= says)."
+        "Turned columns are as tall as the paper is wide. Give the label more length (length=, or length=auto), use "
+        "less text or smaller sizes, or wrap=wrap to move a column to a label of its own. A block drawn smaller or "
+        "cut between two labels: give it a smaller width= or size=, or take it out of the turned columns."
+    ),
+    "L113": (
+        "Nothing to fix if you want the picture turned. For a label read sideways, write orientation=vertical on "
+        "the columns instead of rotate=: they are laid out along the roll, length= long (72 mm by default)."
     ),
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",

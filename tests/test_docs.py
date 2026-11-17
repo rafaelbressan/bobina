@@ -58,3 +58,9 @@ def test_every_problem_code_written_in_the_source_is_in_the_catalog():
                 if isinstance(v, str) and code_re.match(v) and v not in CATALOG:
                     unknown.append(f"{path.name}:{node.lineno} {v}")
     assert not unknown, f"problem codes used in the source but not in nudges.CATALOG: {unknown}"
+
+
+def test_the_templates_guide_says_how_a_template_is_found_as_the_engine_does():
+    guide = (DOCS / "guides" / "templates.md").read_text(encoding="utf-8")
+    assert "looked for first" not in guide  # a path and a name are different values, not an order
+    assert "`.md` or with a `/` is a path" in guide and "# required or # optional" in guide
