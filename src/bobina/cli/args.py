@@ -66,6 +66,7 @@ VARIABLES (Jinja, sandboxed; comments are <# … #>)
   {{ now | date("full") }}  {{ now | date("dd/MM HH:mm") }}  {{ now | add(days=7) | date("short") }}
   {{ 1234.5 | currency("BRL") }}  {{ 0.25 | percent }}  {{ seq.ticket }}  {% for n in seq.ticket.take(10) %}
   Values from --set/--data are printed literally; {{ value | markdown }} opts in (raw blocks removed).
+  Allowed: {% if %} {% for %} {% set x = … %} {% with %} and {{ }}; macro, call, filter, set blocks: refused
 """
 
 

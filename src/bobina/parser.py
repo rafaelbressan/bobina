@@ -420,11 +420,9 @@ ATTR_GUARD = "\ue004"  # a { of data while its Markdown is read: never a {…} a
 class _Splice:
     """Values rendered as Markdown that are not the author's own ({{ value | markdown }} on data, a computed string,
     a number…: templating.MdData): placeholders in the document, as every value is, filled in once the document is
-    parsed. Only where | markdown is written in the document itself: a placeholder alone in its paragraph (with the
-    author's {…} after it or not) becomes the value's blocks; one inside a paragraph, a heading, a list item or a
-    table cell, its text with its emphasis and line breaks. In a code span, a code block or an attribute it stays the
-    plain value (resolved later, as {{ d }}); inside a {% set %} block or a macro's output, its plain text
-    (Rendered.resolve), with a note."""
+    parsed. A placeholder alone in its paragraph (with the author's {…} after it or not) becomes the value's blocks;
+    one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line breaks. In a
+    code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
 
     def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=()):
         self.values, self.nudges, self.off = values or [], nudges, off
@@ -437,10 +435,6 @@ class _Splice:
                 for m in PH_RE.finditer(text):
                     self.at.setdefault(int(m.group(1)), k + 1 + off)
         self.direct = {i for i in self.at if self.markdown(i)}  # the ones to splice: written in the document
-        held = {i for i, v in enumerate(self.values) if v.markdown} - self.direct
-        if held and nudges is not None:
-            nudges.add("M120", "a value rendered as Markdown inside a {% set %} block or a macro prints as plain text",
-                       None, "write | markdown where the value is printed in the document")  # fmt: skip
 
     def value(self, i: int):
         return self.values[i] if 0 <= i < len(self.values) else None
@@ -564,11 +558,6 @@ def data_blocks(text: str) -> tuple[list[Block], list[tuple[str, str]]]:
     for r in _all_runs(kept):
         r.text = r.text.replace(ATTR_GUARD, "{")
     return kept, list(dict.fromkeys(refused))
-
-
-def data_plain(text: str) -> str:
-    """A value that is not the author's own, as plain text: what data_blocks keeps, its markup gone."""
-    return "".join(r.text for r in _flat(data_blocks(text)[0]))
 
 
 def _all_blocks(blocks):

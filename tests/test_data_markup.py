@@ -94,14 +94,12 @@ def test_line_breaks_of_any_kind(crlf):
         assert not raws(res) and len(said(res, "M121")) == 1
 
 
-def test_loops_set_blocks_macros_and_caller_keep_data_data(photo):
+def test_loops_and_namespaces_keep_data_data(photo):
     for src in (
-        "{% for c in d %}{{ c | markdown }}{% endfor %}\nend\n",
-        "{% for x in [d, 'ok'] %}{{ x | markdown }}{% endfor %}\nend\n",
-        "{% set x %}{{ d }}{% endset %}{{ x | markdown }}\n",
-        "{% set x %}{{ d | markdown }}{% endset %}{{ x | replace(x[0], '') | markdown }}\n",
-        "{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) | markdown }}\n",
-        "{% macro m() %}{{ caller() | markdown }}{% endmacro %}{% call m() %}{{ d | markdown }}{% endcall %}\n",
+        "{% for c in d %}{{ c | markdown }}{% endfor %}\n",
+        "{% for x in [d, 'ok'] %}{{ x | markdown }}{% endfor %}\n",
+        "{% set ns = namespace(x=d) %}{{ ns.x | markdown }}\n",
+        "{% set x = d %}{{ x | replace(x[0], x[0]) | markdown }}\n",
     ):
         for value in (RAW, f"![x]({photo})"):
             res = md(src, d=value)
@@ -322,20 +320,11 @@ def test_values_inside_containers_and_computed_strings_are_never_the_authors(src
             assert not any(b.attrs.classes for b in walk(res.doc.blocks)), (src, value)
 
 
-def test_an_image_path_from_data_is_refused_through_nested_set_blocks():
-    src = "{% set a %}{{ d }}{% endset %}{% set b %}{{ a }}{% endset %}{% set c %}{{ b }}{% endset %}![x]({{ c }})\n"
-    with pytest.raises(SecurityError):
+def test_an_image_path_from_data_is_refused_through_assignments():
+    src = "{% set a = d %}{% set b = [a] %}{% set c = b | first %}![x]({{ c }})\n"
+    with pytest.raises(SecurityError) as err:
         md(src, d="/etc/secret.png")
-
-
-def test_markdown_held_in_a_macro_or_a_set_block_prints_as_plain_text_with_a_note():
-    for src in ("{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) }}\n",
-                "{% set x %}A {{ d | markdown }}{% endset %}{{ x }}\n",
-                "{% set x %}{{ d | markdown }}{% endset %}{{ x ~ e }}\n"):  # fmt: skip
-        res = md(src, d="**B** :heart: ![i](p.png)", e=" {.invert size=3}")
-        text = printed(res)
-        assert "B" in text and "**" not in text and not any(b.attrs.classes for b in res.doc.blocks), src
-        assert "M120" in codes(res) and not images(res), src
+    assert err.value.nudge.code == "M312"
 
 
 def test_the_authors_front_matter_may_name_a_code_blocks_kind():
@@ -400,24 +389,6 @@ def test_an_operation_on_the_authors_text_is_not_the_authors():
     assert not images(res) and "M122" in codes(res)
 
 
-@pytest.mark.parametrize("f, lead", [(8, ""), (3, "{% set ns.x %}{{ 1 | markdown }}{% endset %}")])
-def test_nested_set_blocks_build_in_well_under_a_second(f, lead):
-    src = ("{% set ns = namespace(x='') %}" + lead + "{% for i in range(8) %}{% set ns.x %}"
-           "{% for j in range(" + str(f) + ") %}{{ ns.x }}{% endfor %}{% endset %}{% endfor %}{{ ns.x }}\n")  # fmt: skip
-    start = time.perf_counter()
-    build(src)
-    assert time.perf_counter() - start < 1
-
-
-def test_data_after_a_set_block_brings_no_attributes_and_no_icons():
-    icon = chr(0x10F000)
-    for d2 in (" {.invert size=3}", "\n{.invert}", icon):
-        res = md("{% set x %}{{ d | markdown }}{% endset %}{{ x ~ d2 }} tail\n", d="**hello**", d2=d2)
-        assert not any(b.attrs.classes or b.attrs.kv for b in res.doc.blocks)
-        text = printed(res)
-        assert "hello" in text and "**" not in text and icon not in text
-
-
 @pytest.mark.parametrize("expr", ["d | striptags", "(d ~ '') | striptags", "d | replace('&', '&') | striptags"])
 def test_entities_in_data_never_become_a_placeholder(expr):
     res = md("{{ a | markdown }}\n\n{{ " + expr + " }}\n", a="SECRET", d="&#57344;0&#57345; {.invert size=4}")
@@ -478,31 +449,90 @@ def test_numbers_never_make_a_placeholder(index):
     assert len(said(res, "M124")) == 1
 
 
-@pytest.mark.parametrize(
-    "src, shown",
-    [
-        ("{% set x %}[{{ a }}]{% endset %}{{ x[1:] }}\n", "SECRET]"),
-        ("{% set x %}[{{ a }}]{% endset %}{{ (x ~ a)[0:100] }}\n", "[SECRET]SECRET"),
-        ("{% macro m(v) %}<{{ v }}>{% endmacro %}{{ m(a)[1:] }}\n", "SECRET>"),
-        ("{% macro m(v) %}<{{ v }}>{% endmacro %}{{ m(a) | reverse }}\n", ">TERCES<"),
-        ("{% macro m(v) %}{{ v }}{% endmacro %}{% set ns = namespace(s='') %}{% for c in m(a) %}"
-         "{% set ns.s = ns.s ~ c %}{% endfor %}{{ ns.s }}\n", "SECRET"),
-        ("{% set x0 %}{{ a }}{% endset %}{% set x1 %}[{{ x0 }}]{% endset %}{% set x2 %}[{{ x1 }}]{% endset %}"
-         "{% set x3 %}[{{ x2 }}]{% endset %}{% set x4 %}[{{ x3 }}]{% endset %}{{ x4 }}\n", "[[[[SECRET]]]]"),
-    ],
-)  # fmt: skip
-def test_operations_on_set_blocks_and_macros_see_their_text(src, shown):
-    res = md(src, a="SECRET")
-    assert shown in printed(res) and "M124" not in codes(res)
-
-
-def test_markdown_of_a_set_block_holding_markdown_is_plain_text():
-    res = md("{% set x %}{{ d | markdown }}{% endset %}{{ x | markdown }}\n", d="**B** ![i](p.png)")
-    assert "B" in printed(res) and "**" not in printed(res) and not images(res)
-
-
 def test_the_authors_value_through_an_identity_filter_keeps_all_of_markdown(tmp_path):
     logo = tmp_path / "logo.png"
     Image.new("L", (40, 20), 0).save(logo)
     res = build(f"---\nlogo: '![i]({logo})'\n---\n{{{{ logo | default('') | markdown }}}}\n")
     assert images(res) and "M122" not in codes(res)
+
+
+# --- what a template may be made of ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src, code, said",
+    [
+        ("{% macro m(v) %}{{ v }}{% endmacro %}{{ m(d) }}", "M311", "{% macro %} is not allowed"),
+        ("{% macro m() %}{{ caller() }}{% endmacro %}{% call m() %}{{ d }}{% endcall %}", "M311", "{% macro %}"),
+        ("{% call(x) range(1) %}{{ d }}{% endcall %}", "M311", "{% call %} is not allowed"),
+        ("{% filter upper %}{{ d }}{% endfilter %}", "M311", "{% filter %} is not allowed"),
+        ("{% set x %}{{ d }}{% endset %}{{ x }}", "M311", "{% set x %}…{% endset %} is not allowed"),
+        ("{% block b %}x{% endblock %}", "M311", "{% block %} is not allowed"),
+        ("{% extends 'x' %}", "M311", "{% extends %} is not allowed"),
+        ("{% autoescape true %}{{ d }}{% endautoescape %}", "M311", "{% autoescape %} is not allowed"),
+        ("{% include 'x' %}", "M310", "templates cannot read files"),
+        ("{% import 'x' as y %}", "M310", "templates cannot read files"),
+        ("{% from 'x' import y %}", "M310", "templates cannot read files"),
+    ],
+)
+def test_a_construct_outside_the_allowlist_is_refused_before_it_runs(src, code, said):
+    with pytest.raises(SecurityError) as err:
+        md(src + "\n", d="```raw\n1b 40\n```")
+    assert err.value.nudge.code == code and said in err.value.nudge.message
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["```raw\n1b 40\n```", "```qr\nhttps://evil.example\n```", "::: {.box title=HACK}\ny\n:::", "x {.invert}",
+     "![x](/etc/secret.png)"],
+)  # fmt: skip
+def test_call_blocks_cannot_write_data_into_the_document(payload):
+    src = "{% macro m() %}{{ caller() }}{% endmacro %}{% call m() %}{{ d }}{% endcall %}\n"
+    with pytest.raises(SecurityError) as err:
+        md(src, d=payload)
+    assert err.value.nudge.code == "M311"
+
+
+def test_the_allowed_constructs_work():
+    src = ("{% set ns = namespace(n=0) %}{% for x in [1, 2, 3] if x > 1 %}{% set ns.n = ns.n + x %}"
+           "{% else %}none{% endfor %}{% with y = ns.n * 2 %}{% if y > 5 and not false %}{{ y }}"
+           "{% elif y %}{{ -y }}{% endif %}{% endwith %} {{ {'a': (1, 2)}['a'][0:1] | first }} "
+           "{{ 'a' ~ ('b' if true else 'c') }} {{ 7 // 2 }}{{ 7 % 4 }}{{ 2 ** 3 }}")  # fmt: skip
+    res = build(src + "\n")
+    assert res.rendered.resolve(res.rendered.text).strip() == "10 1 ab 338"
+
+
+def test_a_field_default_keeps_the_authors_markdown_and_its_data_stays_data():
+    src = '---\nfields:\n  v: {default: "**{{ d }}** _x_"}\n---\n{{ v }}\n'
+    res = md(src, d="Ana {.invert} ![i](p.png)")
+    runs = res.doc.blocks[0].runs
+    assert any(r.bold for r in runs) and any(r.italic for r in runs)
+    assert "Ana {.invert} ![i](p.png)" in printed(res) and not images(res)
+    assert not res.doc.blocks[0].attrs.classes
+
+
+@pytest.mark.parametrize("expr", ["ns.x", "row.values() | first", "row.items() | list | first | last"])
+def test_defaults_built_from_hidden_data_stay_data(expr):
+    src = ('---\nfields:\n  v: {default: "{{ ' + expr + ' }}"}\n---\n{% set ns = namespace(x=row["k"]) %}'
+           "{{ v | markdown }}\n")  # fmt: skip
+    res = build(src, fields={"row": {"k": T("```raw\n1b 40\n```")}})
+    assert not raws(res) and not fences(res)
+
+
+def test_a_huge_value_is_refused_without_taking_memory():
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(SecurityError):
+            build('{% set b = "x" * 1900000 %}{% for i in range(1500) %}{{ b }}{% endfor %}')
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 64 * 2**20
+
+
+def test_two_thousand_distinct_values_as_markdown_build_in_time():
+    start = time.perf_counter()
+    res = md("{% for i in range(1999) %}{{ (d ~ i) | markdown }}\n\n{% endfor %}", d="**x** ")
+    assert time.perf_counter() - start < 10 and len(res.doc.blocks) == 1999

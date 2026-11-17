@@ -75,7 +75,7 @@ def test_numbers_taken_once_are_free_once():
     ],
 )
 def test_macros_cannot_run_forever(src):
-    refused(src)
+    assert "{% macro %} is not allowed" in refused(src, "M311")  # refused before anything runs
 
 
 @pytest.mark.parametrize(
@@ -95,15 +95,12 @@ def test_macros_cannot_run_forever(src):
         '{{ "{:{}}".format(1, 10000000000) }}',
         '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = n.s ~ n.s %}{% endfor %}',
         '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = n.s + n.s %}{% endfor %}',
-        '{% macro d(s, n) %}{% if n %}{{ d(s ~ s, n - 1) }}{% endif %}{% endmacro %}{{ d("ab", 40) }}',
         '{{ ("a" * 1000).join(("b" * 1000000) | list) }}',
         '{{ ("b" * 1000000) | list | join("a" * 1000) }}',
         '{{ "ab" | replace("a", "a" * 10000) | replace("a", "a" * 10000) }}',
-        # ~ and set, block assignments, macro bodies
+        # ~ and set
         '{% set b = "x" * 1900000 %}{{ (b ~ b) | length }}',
         '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = [n.s, n.s] | join %}{% endfor %}',
-        '{% set b = "x" * 1900000 %}{% set s %}{{ b }}{{ b }}{% endset %}{{ s }}',
-        '{% set b = "x" * 1900000 %}{% macro m() %}{{ b }}{{ b }}{% endmacro %}{{ m() }}',
         '{% set b = "x" * 1900000 %}{% for i in range(1500) %}{{ b }}{% endfor %}',  # 2.8 GB once resolved
         # numbers
         "{% set n = namespace(x=3) %}{% for i in range(40) %}{% set n.x = n.x * n.x %}{% endfor %}",
@@ -161,7 +158,7 @@ def test_taking_no_numbers_or_fewer_is_an_error_and_gives_no_loop_steps_back(n):
 
 def test_the_new_checks_leave_usual_templates_alone():
     res = build(
-        "{{ 'a' ~ 1 ~ 'b' }} {% set s %}hi {{ 2 }}{% endset %}{{ s }} {{ 'aaa bbb' | wordwrap(4) }} "
+        "{{ 'a' ~ 1 ~ 'b' }} {% set s = 'hi ' ~ 2 %}{{ s }} {{ 'aaa bbb' | wordwrap(4) }} "
         "{{ 'a\\nb' | indent(2, true) }} {{ [1, 2, 3] | batch(2, 0) | list }} {{ [1, 2, 3] | slice(2) | list }} "
         "{{ ['a', 'b'] | map('upper') | join(',') }} {{ 'x'.replace('x', 'yy') }} {{ 12 * 3 - 1 }} {{ 7 // 2 }} "
         "{{ '%5.1f' % 2.25 }} {{ '{:>4}'.format('a') }}"

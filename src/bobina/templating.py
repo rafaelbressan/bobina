@@ -11,6 +11,7 @@ from __future__ import annotations
 import calendar
 import contextlib
 import contextvars
+import decimal
 import functools
 import math
 import re
@@ -129,7 +130,7 @@ def _scrubbed(value):
         flag = _SCRUBBED.get(None)
         if flag is not None:
             flag.append(True)
-        out = RESERVED_CHARS.sub("", str.__str__(value))
+        out = RESERVED_CHARS.sub("", PH_RE.sub("", str.__str__(value)))  # a placeholder whole, never its number
         return type(value)(out) if isinstance(value, (Tainted, Trusted)) else out
     if isinstance(value, (list, tuple)):
         return type(value)(_scrubbed(v) for v in value)
@@ -157,14 +158,20 @@ def carry(result, inputs) -> object:
     return taint(result) if any(_has_taint(x) for x in inputs) else result
 
 
+PLAIN_TYPES = (str, bytes, int, float, complex, bool, type(None), Undefined, date, timedelta, decimal.Decimal, range)
+
+
 def _has_taint(x) -> bool:
+    """Data, or something that may hold data: fails closed. A string, a number, a date and lists, tuples, sets and
+    dicts of them (keys too) are looked into; anything else (a dict view, a namespace, a generator, an object) is
+    counted as data, so what the template makes from it is data too."""
     if isinstance(x, Tainted):
         return True
-    if isinstance(x, (list, tuple)):
+    if isinstance(x, (list, tuple, set, frozenset)):
         return any(_has_taint(v) for v in x)
     if isinstance(x, dict):
-        return any(_has_taint(v) for v in x.values())
-    return False
+        return any(_has_taint(k) or _has_taint(v) for k, v in x.items())
+    return not (isinstance(x, (PLAIN_TYPES, Sandbox)) or callable(x))
 
 
 def _data_texts(x) -> list[str]:
@@ -274,28 +281,18 @@ class Rendered:
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
 
     def resolve(self, s: str) -> str:
-        """`s` with its placeholders as their values' text. A value holds no placeholder (a block's output is
-        opened as it is made: Sandbox.bobina_concat), but this resolves until none is left all the same; one that
-        is no value (out of range) is dropped."""
+        """`s` with its placeholders as their values' text (a value holds none: finalize scrubs it); one that is no
+        value (out of range) is dropped, and no reserved character is left."""
         from . import icons
 
         def value(m):  # a value never brings an icon, even typed in
             i = int(m.group(1))
             return icons.strip(self.values[i].text) if i < len(self.values) else ""
 
-        for _ in range(len(self.values) + 1):
-            if PH_OPEN not in s:
-                break
-            s = PH_RE.sub(value, s)
-        return RESERVED_CHARS.sub("", s)
+        return RESERVED_CHARS.sub("", PH_RE.sub(value, s)) if PH_OPEN in s else s
 
     def tainted_in(self, s: str) -> bool:
-        seen, todo = set(), list(PH_RE.findall(s))
-        while todo:  # every placeholder, however deep ({% set %} blocks inside {% set %} blocks)
-            i = todo.pop()
-            if i not in seen and int(i) < len(self.values):
-                seen.add(i)
-                todo += PH_RE.findall(self.values[int(i)].text)
+        seen = {i for i in PH_RE.findall(s) if int(i) < len(self.values)}
         if any(self.values[int(i)].tainted for i in seen):
             return True
         # last line of defence: a data value that reached the text some other way ('img/' ~ p joins plain strings)
@@ -722,14 +719,50 @@ def _lines(s) -> int:
     return str(s).count("\n") + 1
 
 
+ALLOWED_NODES = frozenset({  # what a template may be made of: anything else is refused before it runs
+    "Template", "Output", "TemplateData", "If", "For", "Assign", "With", "Name", "NSRef", "Const", "Tuple", "List",
+    "Dict", "Pair", "Keyword", "CondExpr", "Filter", "Test", "Call", "Getitem", "Getattr", "Slice", "Concat",
+    "Compare", "Operand", "Add", "Sub", "Mul", "Div", "FloorDiv", "Mod", "Pow", "And", "Or", "Not", "Neg", "Pos",
+})  # fmt: skip
+REFUSED_HELP = {  # node -> (what it is written as, what to write instead)
+    "Macro": ("{% macro %}", "write the text where it goes, or loop over a list with {% for %}"),
+    "CallBlock": ("{% call %}", "write the text where it goes, or loop over a list with {% for %}"),
+    "FilterBlock": ("{% filter %}", "use the filter inside {{ }}: {{ text | upper }}"),
+    "AssignBlock": ("{% set x %}…{% endset %}", "{% set x = … %} with an expression"),
+    "Block": ("{% block %}", "template: in the front matter fills a template (FORMAT §8)"),
+    "Extends": ("{% extends %}", "template: in the front matter fills a template (FORMAT §8)"),
+    "Scope": ("{% autoescape %}", "nothing: values are always printed as text"),
+    "EvalContextModifier": ("{% autoescape %}", "nothing: values are always printed as text"),
+    "ScopedEvalContextModifier": ("{% autoescape %}", "nothing: values are always printed as text"),
+    "ExprStmt": ("{% do %}", "{% set x = … %}"),
+    "Break": ("{% break %}", "an {% if %} inside the loop"),
+    "Continue": ("{% continue %}", "an {% if %} inside the loop"),
+}
+FILE_NODES = frozenset({"Include", "Import", "FromImport"})
+
+
+def allowed(node) -> None:
+    """Every construct of a parsed template (the document's, its template's, a field's default) is in
+    ALLOWED_NODES, or it is refused before anything runs: M310 for reading files, M311 for the rest. Fails closed:
+    a construct a future Jinja adds is refused until it is allowed here."""
+    for n in (node, *node.find_all(nodes.Node)):
+        kind = type(n).__name__
+        if kind in ALLOWED_NODES:
+            continue
+        line = getattr(n, "lineno", None)
+        if kind in FILE_NODES:
+            raise SecurityError("M310", "templates cannot read files (include/import are disabled)", line)
+        what, instead = REFUSED_HELP.get(kind, (kind, "if, for, set x = …, with and {{ }} expressions"))
+        raise SecurityError("M311", f"{what} is not allowed in templates: {instead}", line)
+
+
 class _CountingCodeGenerator(CodeGenerator):
     """Compiles templates so that no work escapes bobina's limits: every {% for x in it %} becomes
     {% for x in environment.bobina_loop(it) %}, every `a ~ b` environment.bobina_join((a, b)), and every
     {% set x = v %} checks the size of v. A template cannot reach these names."""
 
     def visit_Template(self, node, frame=None):
-        if any(True for _ in node.find_all(nodes.FilterBlock)):  # its output reaches the source as written
-            raise JinjaSecurityError("{% filter %} blocks are not allowed: use the filter inside {{ }}")
+        allowed(node)
 
         def call(name, arg, lineno):
             return nodes.Call(nodes.EnvironmentAttribute(name), [arg], [], None, None, lineno=lineno)
@@ -800,10 +833,6 @@ class Sandbox(ImmutableSandboxedEnvironment):
             self.loops.spend()
             yield x
 
-    def bobina_open(self, text: str) -> str:
-        """Set by render: a block's output with its placeholders replaced by their values' text."""
-        return text
-
     def bobina_value(self, value):
         """{% set x = value %}: reached through call(), which ticks the deadline and checks the size."""
         return value
@@ -821,8 +850,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
             size += len(chunk)
             check_estimate(size)
             out.append(chunk)
-        joined = "".join(out)
-        return self.bobina_open(joined) if PH_OPEN in joined else joined  # {% set %}, macros, caller()
+        return "".join(out)
 
     def call_binop(self, context, operator, left, right):
         self.loops.tick()
@@ -1285,8 +1313,9 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     def f_markdown(_context, v):
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
         # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
-        text = LINE_BREAK.sub("\n", _scrubbed(str(v)))
-        if isinstance(v, (Trusted, MdSafe)):  # proven to be the author's own: all of Markdown but raw blocks
+        author = isinstance(v, (Trusted, MdSafe))
+        text = LINE_BREAK.sub("\n", str(v) if author else _scrubbed(str(v)))
+        if author:  # proven to be the author's own: all of Markdown but raw blocks
             cleaned = RAW_FENCE.sub("", text)
             if cleaned != text:
                 nudges.add("M121", "a raw block inside a variable was removed")
@@ -1460,8 +1489,8 @@ def render(
         return n
 
     def finalize(v):  # what is data stays marked as data in a block's output ({% set x %}…{% endset %}, macros)
-        if isinstance(v, MdSafe):
-            return _scrubbed(str(v))
+        if isinstance(v, MdSafe):  # the author's (a default's placeholders are real ones)
+            return str(v)
         if isinstance(v, Undefined):
             str(v)
             return ""
@@ -1488,33 +1517,6 @@ def render(
     env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
     scrubbed: list = []
     _SCRUBBED.set(scrubbed)
-    plains: dict[str, str] = {}
-
-    def bobina_open(text: str) -> str:
-        """A {% set %} block's, a macro's or caller()'s output with its placeholders opened: their values' text
-        (a value rendered as Markdown that is not the author's own: plain text), data if one was data. So what
-        the template does with it next (slice, wordwrap, | markdown) sees the text, never an index."""
-        held = False
-
-        def opened(m):
-            nonlocal held
-            i = int(m.group(1))
-            if i >= len(values):
-                return ""
-            v = values[i]
-            held = held or v.tainted
-            if v.markdown:
-                if v.text not in plains:
-                    from .parser import data_plain
-
-                    plains[v.text] = data_plain(v.text)
-                return plains[v.text]
-            return v.text
-
-        out = check_size(PH_RE.sub(opened, text))  # a block that repeats itself grows: within MAX_OUTPUT
-        return Tainted(out) if held else out
-
-    env.bobina_open = bobina_open
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
         if name != "markdown":  # markdown marks data itself (TaintedMd, checked by the parser)
             f = keep_taint(f)
@@ -1540,11 +1542,8 @@ def render(
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                if "{{" in str(d):  # its values opened (bobina_concat): the author's Markdown unless data is in it
-                    made = env.from_string(str(d)).render(ctx)
-                    ctx[k] = made if _has_taint(made) else MdSafe(made)
-                else:
-                    ctx[k] = trust(d)
+                # the author's text, its values placeholders: `**{{ name }}**` stays bold, name stays data
+                ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
             except SecurityError:
                 raise
             except Exception as e:  # noqa: BLE001

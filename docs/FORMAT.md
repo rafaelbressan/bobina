@@ -293,8 +293,8 @@ Shapes.
 
 ## 7. Variables (Jinja) ✓
 
-The body is a **Jinja** template (the subset implemented by minijinja, so other languages can implement `bob/1`),
-evaluated once in a **sandbox**: no files, no network, no imports. Comments are `<# … #>` (so `{#id}` stays a
+The body is a **Jinja** template, evaluated once in a **sandbox**: `if`, `for`, `set x = …`, `with` and `{{ }}` only
+(others: `M311`), no files, no network. Comments are `<# … #>` (so `{#id}` stays a
 Pandoc attribute).
 
 Available: front-matter variables, template fields, `now` and `today` (time zone aware), `seq` (§7.3), `range`,
