@@ -340,7 +340,7 @@ def test_markdown_held_in_a_macro_or_a_set_block_prints_as_plain_text_with_a_not
 
 def test_the_authors_front_matter_may_name_a_code_blocks_kind():
     res = build("---\nk: python\n---\n```{{ k }}\nx = 1\n```\n")
-    assert "M102" in codes(res) and "M123" not in codes(res)  # as before: an unknown kind, printed as text
+    assert "M102" in codes(res) and "M123" not in codes(res)  # an unknown kind, printed as text
 
 
 def test_refusals_are_said_at_the_line_the_value_is_written_on():
@@ -400,7 +400,7 @@ def test_an_operation_on_the_authors_text_is_not_the_authors():
     assert not images(res) and "M122" in codes(res)
 
 
-@pytest.mark.parametrize("f, lead", [(8, ""), (5, "{% set ns.x %}{{ 1 | markdown }}{% endset %}")])
+@pytest.mark.parametrize("f, lead", [(8, ""), (3, "{% set ns.x %}{{ 1 | markdown }}{% endset %}")])
 def test_nested_set_blocks_build_in_well_under_a_second(f, lead):
     src = ("{% set ns = namespace(x='') %}" + lead + "{% for i in range(8) %}{% set ns.x %}"
            "{% for j in range(" + str(f) + ") %}{{ ns.x }}{% endfor %}{% endset %}{% endfor %}{{ ns.x }}\n")  # fmt: skip
@@ -425,11 +425,28 @@ def test_entities_in_data_never_become_a_placeholder(expr):
     assert not any(b.attrs.classes for b in res.doc.blocks)
 
 
-def test_a_literal_kind_is_the_same_as_a_set_one():
-    folded = build("```{{ 'qr' }}\nhi\n```\n")
-    named = build("{% set k = 'qr' %}```{{ k }}\nhi\n```\n")
-    assert codes(folded) == codes(named) and "M123" not in codes(folded)
-    assert [type(b) for b in folded.doc.blocks] == [type(b) for b in named.doc.blocks]
+@pytest.mark.parametrize(
+    "src",
+    [
+        "```{{ 'qr' }}\nhi\n```\n",
+        "{% set k = 'qr' %}```{{ k }}\nhi\n```\n",
+        "---\nkind: qr\n---\n```{{ kind }}\nhi\n```\n",
+        "---\nkind: qr\n---\n```{{ kind | default('text') }}\nhi\n```\n",
+        "---\nkinds: [qr]\n---\n```{{ kinds | first }}\nhi\n```\n",
+        "---\nkinds: [qr]\n---\n```{{ kinds[0] }}\nhi\n```\n",
+    ],
+)
+def test_the_authors_own_value_names_a_code_blocks_kind(src):
+    res = build(src)
+    (fence,) = fences(res)
+    assert fence.kind == "qr" and [r for r in res.rows if isinstance(r, (QRRow, BitmapRow))]
+    assert not codes(res) & {"M102", "M123"}
+
+
+def test_an_unknown_kind_from_the_author_is_said_without_private_characters():
+    res = build("---\nk: python\n---\n```{{ k }}\nx = 1\n```\n")
+    (note,) = said(res, "M102")
+    assert "python" in note.message and not any("\ue000" <= c <= "\ue004" for c in note.message)
 
 
 def test_a_refusal_is_said_once_per_value_even_in_a_loop():
@@ -441,3 +458,51 @@ def test_the_refusals_say_the_value_is_not_the_authors_own():
     res = build("{% set p = 'p.png' %}{{ ('![i](' ~ p ~ ')') | markdown }}\n")  # computed: no --data in sight
     (refusal,) = said(res, "M122")
     assert "not the author's own" in refusal.message and "--data" not in refusal.message
+
+
+# --- the review after it -----------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["# Head {.invert}", "```raw\n1b 40\n```", "::: {.box title=HACK}\ny\n:::"])
+def test_filter_blocks_are_refused(value):
+    with pytest.raises(SecurityError) as err:
+        md("{% filter replace('X', d) %}X{% endfilter %}\n", d=value)
+    assert err.value.nudge.code == "M311"
+
+
+@pytest.mark.parametrize("index", ["0", "9"])
+def test_numbers_never_make_a_placeholder(index):
+    fields = {"o": T("57344"), "c": T("57345"), "a": T("SECRET")}
+    res = build("{{ a }}\n\n{{ '%c" + index + "%c' % (o|int, c|int) }}\n", fields=fields)
+    assert printed(res).count("SECRET") == 1 and "M124" in codes(res)
+    assert len(said(res, "M124")) == 1
+
+
+@pytest.mark.parametrize(
+    "src, shown",
+    [
+        ("{% set x %}[{{ a }}]{% endset %}{{ x[1:] }}\n", "SECRET]"),
+        ("{% set x %}[{{ a }}]{% endset %}{{ (x ~ a)[0:100] }}\n", "[SECRET]SECRET"),
+        ("{% macro m(v) %}<{{ v }}>{% endmacro %}{{ m(a)[1:] }}\n", "SECRET>"),
+        ("{% macro m(v) %}<{{ v }}>{% endmacro %}{{ m(a) | reverse }}\n", ">TERCES<"),
+        ("{% macro m(v) %}{{ v }}{% endmacro %}{% set ns = namespace(s='') %}{% for c in m(a) %}"
+         "{% set ns.s = ns.s ~ c %}{% endfor %}{{ ns.s }}\n", "SECRET"),
+        ("{% set x0 %}{{ a }}{% endset %}{% set x1 %}[{{ x0 }}]{% endset %}{% set x2 %}[{{ x1 }}]{% endset %}"
+         "{% set x3 %}[{{ x2 }}]{% endset %}{% set x4 %}[{{ x3 }}]{% endset %}{{ x4 }}\n", "[[[[SECRET]]]]"),
+    ],
+)  # fmt: skip
+def test_operations_on_set_blocks_and_macros_see_their_text(src, shown):
+    res = md(src, a="SECRET")
+    assert shown in printed(res) and "M124" not in codes(res)
+
+
+def test_markdown_of_a_set_block_holding_markdown_is_plain_text():
+    res = md("{% set x %}{{ d | markdown }}{% endset %}{{ x | markdown }}\n", d="**B** ![i](p.png)")
+    assert "B" in printed(res) and "**" not in printed(res) and not images(res)
+
+
+def test_the_authors_value_through_an_identity_filter_keeps_all_of_markdown(tmp_path):
+    logo = tmp_path / "logo.png"
+    Image.new("L", (40, 20), 0).save(logo)
+    res = build(f"---\nlogo: '![i]({logo})'\n---\n{{{{ logo | default('') | markdown }}}}\n")
+    assert images(res) and "M122" not in codes(res)

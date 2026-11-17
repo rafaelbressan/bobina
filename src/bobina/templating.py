@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import calendar
 import contextlib
+import contextvars
 import functools
 import math
 import re
@@ -35,6 +36,8 @@ from .nudges import Nudges, SecurityError
 
 PH_OPEN, PH_CLOSE = "", ""
 PH_RE = re.compile(PH_OPEN + r"(\d+)" + PH_CLOSE)
+PH_SPLIT = re.compile(PH_OPEN + r"(\d*)" + PH_CLOSE)  # a placeholder, or the shell of one (no number)
+PH_KEEP = re.compile("(" + PH_OPEN + r"\d+" + PH_CLOSE + ")")
 MAX_ITER = 2000  # loop steps: every {% for %} step, recursive loop() item, range() step, number taken
 MAX_OUTPUT = 2_000_000  # characters
 MAX_CALLS = 10_000  # macro calls (a recursive macro that branches is exponential)
@@ -114,53 +117,44 @@ def taint(value):
     return value
 
 
-class Captured(Tainted):
-    """The output of a {% set %}…{% endset %} block or a macro that holds values: the template's own text and
-    placeholders, never data's text (a value is always a placeholder there). Its placeholders are real ones, so they
-    are kept where the reserved characters of every other value from data are removed (carry, finalize)."""
+_SCRUBBED: contextvars.ContextVar[list] = contextvars.ContextVar("bobina_scrubbed")  # the render's: M124
 
 
-def _kept(x) -> frozenset:
-    """The real placeholders a value carries: all of a block's (Captured, or a plain string: a {% set %} block's or a
-    macro's output, the template's own), and those a value made with one keeps."""
-    if isinstance(x, Captured) or (isinstance(x, str) and not isinstance(x, Tainted)):
-        return frozenset(m.group(0) for m in PH_RE.finditer(x))
-    if isinstance(x, Tainted):
-        return getattr(x, "kept", frozenset())
-    if isinstance(x, (list, tuple)):
-        return frozenset().union(*(_kept(v) for v in x))
-    return frozenset()
-
-
-def _scrubbed(value, keep: frozenset = frozenset()):
-    """A value from data without bobina's reserved characters (|striptags or |unescape can make them from an
-    entity, after clean_data read the value), but for the real placeholders in `keep`."""
+def _scrubbed(value):
+    """A string without bobina's reserved characters: only finalize makes placeholders, so none an expression gives
+    is real (|striptags of an entity, '%c' % 57344…). Said once per job (M124)."""
     if isinstance(value, str):
         if not RESERVED_CHARS.search(value):
             return value
-        parts = re.split(f"({PH_OPEN}\\d+{PH_CLOSE})", str.__str__(value))
-        return "".join(x if k % 2 and x in keep else RESERVED_CHARS.sub("", x) for k, x in enumerate(parts))
+        flag = _SCRUBBED.get(None)
+        if flag is not None:
+            flag.append(True)
+        out = RESERVED_CHARS.sub("", str.__str__(value))
+        return type(value)(out) if isinstance(value, (Tainted, Trusted)) else out
     if isinstance(value, (list, tuple)):
-        return type(value)(_scrubbed(v, keep) for v in value)
+        return type(value)(_scrubbed(v) for v in value)
     return value
 
 
+def _same(result, inputs) -> bool:
+    """The result is one of the inputs, or an item of one, unchanged (default, first, last, x[0])."""
+    for x in inputs:
+        if result is x:
+            return True
+        items = x if isinstance(x, (list, tuple)) else x.values() if isinstance(x, dict) else ()
+        if any(result is y for y in items):
+            return True
+    return False
+
+
 def carry(result, inputs) -> object:
-    """What an operation on values gives: the author's own text never stays Trusted (trust is given, never
-    carried); a result from data is data (Tainted), without reserved characters but for the real placeholders of
-    {% set %} blocks it was made with; from {% set %} blocks only, Captured."""
-    if isinstance(result, Trusted):
+    """What an operation on values gives: never a reserved character; the author's own text stays Trusted only
+    when it comes out unchanged (|default, |first), never when an operation made a new string ('{}'.format(…));
+    a result from data is data (Tainted)."""
+    if isinstance(result, Trusted) and not _same(result, inputs):
         result = str.__str__(result)  # '{}'.format(literal): Jinja gives back the type of the format string
-    tainted = [x for x in inputs if _has_taint(x)]
-    if not tainted:
-        return result
-    if isinstance(result, str) and all(isinstance(x, Captured) for x in tainted):
-        return Captured(result)
-    keep = frozenset().union(*(_kept(x) for x in inputs))
-    out = taint(_scrubbed(result, keep))
-    if keep and isinstance(out, Tainted):
-        out.kept = keep
-    return out
+    result = _scrubbed(result)
+    return taint(result) if any(_has_taint(x) for x in inputs) else result
 
 
 def _has_taint(x) -> bool:
@@ -278,29 +272,22 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
-    plains: dict[int, str] = field(default_factory=dict, repr=False)  # Markdown values held in set blocks: text
 
     def resolve(self, s: str) -> str:
+        """`s` with its placeholders as their values' text. A value holds no placeholder (a block's output is
+        opened as it is made: Sandbox.bobina_concat), but this resolves until none is left all the same; one that
+        is no value (out of range) is dropped."""
         from . import icons
 
-        def value(m, held: bool):  # a value never brings an icon, even typed in
-            v = self.values[int(m.group(1))]
-            return icons.strip(self.plain(int(m.group(1))) if held and v.markdown else v.text)
+        def value(m):  # a value never brings an icon, even typed in
+            i = int(m.group(1))
+            return icons.strip(self.values[i].text) if i < len(self.values) else ""
 
-        for k in range(4):  # defaults may nest placeholders once
+        for _ in range(len(self.values) + 1):
             if PH_OPEN not in s:
                 break
-            s = PH_RE.sub(lambda m, held=k > 0: value(m, held), s)
-        return s
-
-    def plain(self, i: int) -> str:
-        """The text of a value rendered as Markdown that a {% set %} block or a macro holds: its words without
-        markup (it is spliced only where | markdown is written in the document)."""
-        if i not in self.plains:
-            from .parser import data_plain
-
-            self.plains[i] = data_plain(self.values[i].text)
-        return self.plains[i]
+            s = PH_RE.sub(value, s)
+        return RESERVED_CHARS.sub("", s)
 
     def tainted_in(self, s: str) -> bool:
         seen, todo = set(), list(PH_RE.findall(s))
@@ -741,6 +728,9 @@ class _CountingCodeGenerator(CodeGenerator):
     {% set x = v %} checks the size of v. A template cannot reach these names."""
 
     def visit_Template(self, node, frame=None):
+        if any(True for _ in node.find_all(nodes.FilterBlock)):  # its output reaches the source as written
+            raise JinjaSecurityError("{% filter %} blocks are not allowed: use the filter inside {{ }}")
+
         def call(name, arg, lineno):
             return nodes.Call(nodes.EnvironmentAttribute(name), [arg], [], None, None, lineno=lineno)
 
@@ -810,6 +800,10 @@ class Sandbox(ImmutableSandboxedEnvironment):
             self.loops.spend()
             yield x
 
+    def bobina_open(self, text: str) -> str:
+        """Set by render: a block's output with its placeholders replaced by their values' text."""
+        return text
+
     def bobina_value(self, value):
         """{% set x = value %}: reached through call(), which ticks the deadline and checks the size."""
         return value
@@ -828,7 +822,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
             check_estimate(size)
             out.append(chunk)
         joined = "".join(out)
-        return Captured(joined) if any(_has_taint(c) for c in out) else joined  # placeholders, never data's text
+        return self.bobina_open(joined) if PH_OPEN in joined else joined  # {% set %}, macros, caller()
 
     def call_binop(self, context, operator, left, right):
         self.loops.tick()
@@ -883,8 +877,6 @@ class Sandbox(ImmutableSandboxedEnvironment):
         result = check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
         if getattr(__obj, "__func__", None) is Sandbox.bobina_value:  # {% set k = v %}: k is v, as it was
             return result
-        if isinstance(__obj, Macro):  # its output is the template's text and placeholders, never data's text
-            return Captured(result) if isinstance(result, str) and _has_taint((*args, *kwargs.values())) else result
         return carry(result, (owner, *args, *kwargs.values()))  # '{}'.format(d): what it makes is data
 
     def materialized(self, items, sep=None):
@@ -1293,8 +1285,7 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     def f_markdown(_context, v):
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
         # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
-        text = str(v) if isinstance(v, Captured) or not _has_taint(v) else _scrubbed(str(v), _kept(v))
-        text = LINE_BREAK.sub("\n", text)
+        text = LINE_BREAK.sub("\n", _scrubbed(str(v)))
         if isinstance(v, (Trusted, MdSafe)):  # proven to be the author's own: all of Markdown but raw blocks
             cleaned = RAW_FENCE.sub("", text)
             if cleaned != text:
@@ -1470,13 +1461,13 @@ def render(
 
     def finalize(v):  # what is data stays marked as data in a block's output ({% set x %}…{% endset %}, macros)
         if isinstance(v, MdSafe):
-            return str(v)
+            return _scrubbed(str(v))
         if isinstance(v, Undefined):
             str(v)
             return ""
         if v is None:
             return ""
-        text = str(v) if isinstance(v, Captured) or not _has_taint(v) else str(_scrubbed(str(v), _kept(v)))
+        text = _scrubbed(str(v))
         lengths.append(resolved_len(text))
         values.append(Value(text, _has_taint(v), isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
@@ -1495,6 +1486,35 @@ def render(
         comment_end_string="#>",  # `{#id}` stays a Pandoc attribute
     )
     env.filters.update(make_filters(loc, tz, nudges, choice.explicit))
+    scrubbed: list = []
+    _SCRUBBED.set(scrubbed)
+    plains: dict[str, str] = {}
+
+    def bobina_open(text: str) -> str:
+        """A {% set %} block's, a macro's or caller()'s output with its placeholders opened: their values' text
+        (a value rendered as Markdown that is not the author's own: plain text), data if one was data. So what
+        the template does with it next (slice, wordwrap, | markdown) sees the text, never an index."""
+        held = False
+
+        def opened(m):
+            nonlocal held
+            i = int(m.group(1))
+            if i >= len(values):
+                return ""
+            v = values[i]
+            held = held or v.tainted
+            if v.markdown:
+                if v.text not in plains:
+                    from .parser import data_plain
+
+                    plains[v.text] = data_plain(v.text)
+                return plains[v.text]
+            return v.text
+
+        out = check_size(PH_RE.sub(opened, text))  # a block that repeats itself grows: within MAX_OUTPUT
+        return Tainted(out) if held else out
+
+    env.bobina_open = bobina_open
     for name, f in list(env.filters.items()):  # built-in and ours: a filter never turns data into document
         if name != "markdown":  # markdown marks data itself (TaintedMd, checked by the parser)
             f = keep_taint(f)
@@ -1520,7 +1540,11 @@ def render(
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
+                if "{{" in str(d):  # its values opened (bobina_concat): the author's Markdown unless data is in it
+                    made = env.from_string(str(d)).render(ctx)
+                    ctx[k] = made if _has_taint(made) else MdSafe(made)
+                else:
+                    ctx[k] = trust(d)
             except SecurityError:
                 raise
             except Exception as e:  # noqa: BLE001
@@ -1562,4 +1586,14 @@ def render(
         if given:
             hint += "; the data and --set give: " + ", ".join(given[:12]) + (" …" if len(given) > 12 else "")
         nudges.add("M130", f"variable '{name}' is not defined", suggestion=hint)
-    return Rendered(LINE_BREAK.sub("\n", "".join(out)), values, store, _data_texts(fields))
+    text = PH_SPLIT.sub(lambda m: m.group(0) if m.group(1) and int(m.group(1)) < len(values) else "", "".join(out))
+    if RESERVED_CHARS.search(PH_RE.sub("", text)):  # one typed in the template, or no value: never printed
+        scrubbed.append(True)
+        text = "".join(x if k % 2 else RESERVED_CHARS.sub("", x) for k, x in enumerate(PH_KEEP.split(text)))
+    if scrubbed:
+        nudges.add(
+            "M124",
+            "characters bobina reserves for its own marks were removed",
+            suggestion="nothing to fix: they are private-use characters (U+E000 to U+E004) no text needs",
+        )
+    return Rendered(LINE_BREAK.sub("\n", text), values, store, _data_texts(fields))

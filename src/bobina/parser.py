@@ -500,10 +500,18 @@ class _Splice:
                                mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
         return out
 
-    def chose_kind(self, info: str) -> bool:
-        """A fence's kind word holds a value that is not the author's own (data does not choose what a block is)."""
-        word = (info.split("{", 1)[0].split() or [""])[0]
-        return any(not (v := self.value(int(m.group(1)))) or not v.trusted for m in PH_RE.finditer(word))
+    def kind(self, info: str) -> tuple[str, bool]:
+        """A fence's info string with the author's own values in its kind word opened (```{{ 'qr' }}, ```{{ k }}
+        with k from the front matter: a QR), and whether a value that is not the author's own is there instead
+        (data does not choose what a block is)."""
+        head = info.split("{", 1)[0].split()
+        if not head or PH_OPEN not in head[0]:
+            return info, False
+        found = [self.value(int(m.group(1))) for m in PH_RE.finditer(head[0])]
+        if not found or not all(v and v.trusted for v in found):
+            return info, True
+        word = PH_RE.sub(lambda m: self.values[int(m.group(1))].text, head[0])
+        return info.replace(head[0], word, 1), False
 
 
 _SPLICE: contextvars.ContextVar[_Splice] = contextvars.ContextVar("bobina_splice")  # per thread (the chat's too)
@@ -876,7 +884,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
         elif t == "hr":
             out.append(Divider(line=ln))
         elif t in ("fence", "code_block"):
-            info = (n.info or "").strip()
+            info, chosen = _splice().kind((n.info or "").strip())
             kind, a, arg = info, Attrs(), ""
             m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
             if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
@@ -889,7 +897,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 arg = rest[: attrs.start()].strip() if attrs else rest.strip()
                 a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
-            if _splice().chose_kind(info):  # ```{{ lang }}: only the author chooses what a block is
+            if chosen:  # ```{{ lang }}: only the author chooses what a block is
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
                 kind, k, a, arg = "text", "text", Attrs(), ""
             check_attrs(
