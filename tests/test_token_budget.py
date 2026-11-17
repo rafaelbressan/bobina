@@ -23,12 +23,23 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/table-cells.md": 1200,  # set on 16/11, cells, rows and span= split from tables.md (not in llms-full)
     "docs/guides/layout.md": 1150,  # set on 16/11, with boxes (::: {.box}); not in llms-full.txt (FORMAT links it)
     "docs/guides/layout-columns.md": 1250,  # set on 17/11, with columns (:::: {.columns}); not in llms-full.txt
+    "docs/guides/receipts-supermarket.md": 385,  # set on 17/11, split from receipts.md (not in llms-full.txt)
+    "docs/guides/counters.md": 260,  # set on 17/11, when a number is taken: split from FORMAT §7.3 (not in llms-full)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,
     "docs/INSTALL.md": 1100,  # set on 10/11, as above
     "docs/printers/mtp-ii-58.md": 3000,
-    "docs/problems/README.md": 2500,
+    "docs/problems/README.md": 2500,  # the index: since 17/11 the categories, each code's meaning on their pages
+    # one page per category of problem codes (generated; set on 17/11 about 25% above the size then)
+    "docs/problems/drawing.md": 110,
+    "docs/problems/fonts.md": 355,
+    "docs/problems/codes.md": 390,
+    "docs/problems/layout.md": 305,
+    "docs/problems/images.md": 335,
+    "docs/problems/errors.md": 700,
+    "docs/problems/printer-and-paper.md": 465,
+    "docs/problems/markup-and-data.md": 965,
     "llms-full.txt": 25000,
 }
 
@@ -44,7 +55,7 @@ def test_page_within_its_token_budget(page):
 
 
 def test_each_problem_page_is_short():
-    pages = [p for p in (ROOT / "docs" / "problems").glob("*.md") if p.name != "README.md"]
+    pages = [p for p in (ROOT / "docs" / "problems").glob("*.md") if p.stem[1:].isdigit()]  # a code's page
     assert pages and max(tokens(p.read_text(encoding="utf-8")) for p in pages) <= 300
 
 

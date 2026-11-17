@@ -49,7 +49,12 @@ def test_the_problem_index_is_current_and_no_page_is_stale():
     spec.loader.exec_module(gen)
     folder = ROOT / "docs" / "problems"
     assert (folder / "README.md").read_text(encoding="utf-8") == gen.index()
-    assert {p.stem for p in folder.glob("*.md")} - {"README"} == set(CATALOG)
+    pages = {slug for slug, _, _ in gen.categories()}
+    for slug in pages:
+        assert (folder / f"{slug}.md").read_text(encoding="utf-8") == gen.category_page(slug), slug
+    assert {p.stem for p in folder.glob("*.md")} - {"README"} - pages == set(CATALOG)
+    every = "".join((folder / f"{slug}.md").read_text(encoding="utf-8") for slug in pages)
+    assert all(f"[{code}]({code}.md)" in every for code in CATALOG)  # each code's meaning is on a category page
 
 
 def test_every_topic_answers_json_with_its_shape(capsys):

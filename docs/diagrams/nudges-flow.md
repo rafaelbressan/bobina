@@ -198,7 +198,7 @@ from this list.
 | `F301` | note | glyph not in the printer font: line printed as an image | N5 |
 | `F302` | warning | glyph missing in every available font |  |
 | `F303` | note | size not supported natively, nearest native size used | N1 |
-| `F304` | note | font for another script downloaded (once, then used offline) |  |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |  |
 | `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |  |
 | `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |  |
 | `F201` | warning | font below its tested minimum size | F1, F2 |
@@ -236,8 +236,8 @@ from this list.
 | `Q108` | warning | barcode module too thin to scan | N6 |
 | `Q109` | warning | invalid barcode content |  |
 | `Q110` | warning | barcode turned vertical to fit the paper |  |
-| `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |  |
-| `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |  |
+| `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9) |  |
+| `Q112` | warning | contact code not built: the network or its value is wrong (left out, the rest prints, exit 9) |  |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |  |
 
 ### Images
@@ -252,7 +252,7 @@ from this list.
 | `I107` | warning | image path with a space must be written between < > |  |
 | `I106` | warning | network source refused (private address, redirect, type or size) |  |
 | `I108` | warning | image outside the document folder and image_dirs (--sandbox, MCP) |  |
-| `I109` | note | how an image was printed (drawing or photo); the other look is one class away |  |
+| `I109` | note | what an image looks like (drawing or photo) and how it was printed; the other look is one class away |  |
 | `I110` | note | a turned image prints smaller: its corners need room on the paper |  |
 
 ### Drawing

@@ -64,8 +64,9 @@ WRAPS = ("nowrap", "wrap", "wrap-reverse")  # wrap= on columns: CSS flex-wrap's 
 VALIGNS = {"top": "top", "middle": "middle", "center": "middle", "bottom": "bottom"}  # center (CSS's word): middle
 GAP_HINT = "1ch (letters: the default), 0, 2ch, 3mm or dots"
 # what a column's content says when it is squeezed below its minimum (a word cut, a QR below the module that scans,
-# a table narrowed or turned, a box title cut, …): wrap=wrap moves a column that would say one of them
-SQUEEZED = frozenset({"L101", "L103", "L106", "L107", "L109", "Q101", "Q104", "Q108", "Q110", "I102"})
+# a table narrowed or turned, a box title cut, a turned block cropped, …): wrap=wrap moves a column that would say
+# one of them
+SQUEEZED = frozenset({"L101", "L103", "L104", "L106", "L107", "L109", "Q101", "Q104", "Q108", "Q110", "I102"})
 BOX_ROOM = 10  # dots of paper between a box's frame and what it holds, above and below (at least: ink is measured)
 BOX_MIN_SIDE = 6  # … and beside it: the frame and this room take whole letters, so the text keeps the paper's grid
 COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
@@ -238,6 +239,7 @@ class Layout:
         self.scripts = scriptfonts.Resolver(nudges, lang)  # fonts for other scripts, downloaded once
         self.bars: tuple[int, ...] = ()  # the column (at 1x) of the bar of each quote being laid out, outermost first
         self.within = ""  # "column": laid out in a column of :::: {.columns} (narrow)
+        self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -1168,6 +1170,8 @@ class Layout:
         if not cols:
             return []
         if room < 1:
+            self.n.add("M101", "no room for columns here (not a letter left): what they hold prints one under the "
+                       "other", line, "fewer quotes, lists or boxes around the columns")  # fmt: skip
             return self.blocks([b for c in cols for b in c.children], indent)
         wrap = a.kv.get("wrap", "nowrap")
         if wrap not in WRAPS:
@@ -1181,15 +1185,19 @@ class Layout:
             self.idle(c.attrs, c.line, COLUMN_TAKES, "on a column", COLUMN_HINT)
         asked = [self.column_width(c) for c in cols]
         aligns = [self.valign(c.attrs, c.line, valign) for c in cols]
-        rows = self.column_rows(cols, asked, room, gap, wrap, line)
-        if wrap == "wrap-reverse":
-            rows.reverse()
-        out: list = []
-        for row in rows:
-            if out:
-                out.append(FeedRow(int(self.p.get("margins.block_gap_dots", 12))))
-            out += self.column_row([cols[i] for i in row], [asked[i] for i in row], [aligns[i] for i in row],
-                                   indent, room, gap, a, line)  # fmt: skip
+        outer, self.wrapping = self.wrapping, wrap != "nowrap"
+        try:
+            rows = self.column_rows(cols, asked, room, gap, wrap, line)
+            if wrap == "wrap-reverse":
+                rows.reverse()
+            out: list = []
+            for row in rows:
+                if out:
+                    out.append(FeedRow(int(self.p.get("margins.block_gap_dots", 12))))
+                out += self.column_row([cols[i] for i in row], [asked[i] for i in row], [aligns[i] for i in row],
+                                       indent, room, gap, a, line)  # fmt: skip
+        finally:
+            self.wrapping = outer
         return out
 
     def valign(self, a: Attrs, line: int, default: str) -> str:
@@ -1285,14 +1293,16 @@ class Layout:
         if need + g * (len(idx) - 1) > room:
             return f"the widths ask for {need + g * (len(idx) - 1)} of the {room} letters"
         for i, w in zip(idx, widths, strict=True):
-            if not self.content_fits(cols[i], w, room):
+            alone = self.row_widths([asked[i]], room, gap)[0][0]  # what it gets on a row of its own
+            if not self.content_fits(cols[i], w, alone):
                 return f"{'its' if i == idx[-1] else f'column {i + 1}'} content does not fit in {w} letters"
         return ""
 
-    def content_fits(self, col: Div, w: int, room: int) -> bool:
+    def content_fits(self, col: Div, w: int, alone: int) -> bool:
         """Whether a column's content fits w letters: laid out at that width it has no problem of being squeezed
         (SQUEEZED: its longest word cut, a QR below the smallest module that scans, a table narrowed, an image
-        given in mm or dots made smaller, …) that it does not have across the whole room as well."""
+        given in mm or dots made smaller, a turned block cropped, …) that it does not have at `alone`, the width it
+        would get on a row of its own, as well: a column squeezed even there gains nothing by moving, so it stays."""
         cache = self.__dict__.setdefault("_fits", {})
 
         def squeezed(letters: int) -> set:
@@ -1302,7 +1312,7 @@ class Layout:
                 cache[key] = {x.code for x in [*said, *said.check_only]} & SQUEEZED
             return cache[key]
 
-        return squeezed(w) <= squeezed(room)
+        return squeezed(w) <= squeezed(alone)
 
     def probe(self, build) -> tuple:
         """trial(), and what it judged (a font's size, said once) forgotten: the layout that prints says it."""
@@ -1553,7 +1563,9 @@ class Layout:
         less = f"less data or ecc=L (module {lo} would not fit the paper)"
         if self.within:  # squeezed in a column: the room is the column's
             need = -(-units * lo // self.p.cell[0])
-            less = f"a wider {self.within}: module {lo} needs {need} letters; or wrap=wrap, less data"
+            less = f"a wider {self.within}: module {lo} needs {need} letters; or " + (
+                "less data" if self.wrapping else "wrap=wrap, less data"
+            )
         mod = self.fit_module(target, units, mod, 16 if render == "native" else 64)
         if mod < lo:
             what = f"width={kv['width']} gives module {mod}" if target else f"QR module {mod}"

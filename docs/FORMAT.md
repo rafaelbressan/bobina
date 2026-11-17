@@ -1,7 +1,8 @@
 # The `.bob.md` format — `bob/1` (draft v0.4)
 
-Status: **draft**, `bob/1` once frozen. Features are **✓ implemented** (covered by tests) or **◇ planned**
-(using one gives the note `M103` or `M102`, never an error).
+Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
+**✓ implemented** (covered by tests) or **◇ planned** (part of the format, not implemented yet;
+using it gives the note `M103` or `M102`, never an error).
 
 A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
 or Obsidian) and maps predictably onto narrow, low-resolution printers.
@@ -108,7 +109,8 @@ Three levels, from general to specific:
 2. **Aliases** — any other name in `fonts:` (`hand: Z003`), used with `{font=hand}` on a block or a span.
 3. **Family names** — `{font="Atkinson Hyperlegible"}`.
 
-`native` (the default for `body` and `title`) is the printer's own font: fastest and sharpest. Any other font makes that block raster. A native block with a raster span becomes raster too, drawn
+`native` (the default for `body` and `title`) is the printer's internal font: fastest, sharpest, lightest on the
+battery. Any other font makes that block raster. A native block with a raster span becomes raster too, drawn
 with the printer-font look.
 
 Fonts are looked up among the **bundled** fonts first (same result on every machine: Atkinson Hyperlegible,
@@ -217,8 +219,8 @@ types it.
 | `other` (WeChat Pay, Alipay, DuitNow, Yape, QRIS…) | — the payload read from the app's own QR, in the block body | ⚠ reprinted unchecked |
 
 A missing or invalid attribute (an IBAN with a wrong check digit, a UPI ID without `@`, more decimals than the
-currency has) gives `Q111` with a working example and the code is left out: the rest prints, and the command exits
-with 9 (`--allow Q111`: 0). A scheme nobody has scanned with its
+currency has) gives `Q111` with a working example, and the code is not printed: the rest of the document is, and
+the command exits with 9 so a script or agent knows (`--allow Q111` for 0). A scheme nobody has scanned with its
 real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). No brand logos (they need
 a licence). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
 [pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
@@ -355,12 +357,10 @@ counters:
 | `{% for n in seq.ticket.take(10) %}` | ten new values in one print |
 | `{% for n in range(1, 11) %}` | a local loop, not persisted |
 
-Previews, `check` and `--dry-run` only show the next values. A print **reserves** its values when it is built, so
-the confirmation shows the numbers it prints and two prints at once never share one. If it is then not printed (you
-quit, the printer is unreachable), the values go back, unless another print took numbers after them (then skipped). A number is never printed
-twice; a cancelled job may leave a gap (one stopped halfway keeps the numbers of the labels that printed). The CLI
-adds `--repeat N` (N renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets
-them, and `bobina seq set NAME N` starts one at N, even before its first print.
+Previews, `check` and `--dry-run` only show the next values; a number is never printed twice. When a print takes
+its numbers, gives them back or skips them: [guides/counters.md](guides/counters.md). The CLI adds `--repeat N` (N
+renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them, and
+`bobina seq set NAME N` starts one at N, even before its first print.
 
 ### 7.4 Data is literal
 
@@ -461,7 +461,7 @@ Nudges:
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
-| `F304` | note | font for another script downloaded (once, then used offline) |
+| `F304` | note | font for another script downloaded (once; used offline from then on) |
 | `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
 | `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |

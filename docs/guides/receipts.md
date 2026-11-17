@@ -1,12 +1,15 @@
 # Receipts: whole recipes
 
-Copy one, change the items, run `bobina check FILE` (it says the width each column got), then print. Tables:
-[tables guide](tables.md), `bobina help table`; whole files: [examples/tables](../../examples/tables/).
+Copy one, change the items, run `bobina check FILE` (it says the width each column got), then print. Every table
+feature used here is explained in the [tables guide](tables.md) and in `bobina help table`. Whole files with their
+images: [examples/tables](../../examples/tables/) (a table bill, a bar check, a supermarket receipt). A
+supermarket receipt, seven columns on 58 mm: [receipts-supermarket.md](receipts-supermarket.md).
 
 ## Totals
 
 A table whose title cells are empty prints no title and no rule: label on the left, value on the right. A
-`prefix=` in an empty title cell puts the currency before each value of its column.
+`prefix=` in the empty title cell of a column puts the currency before each value, and the row still counts as
+empty.
 
 ```markdown
 | | {prefix="R$ "} |
@@ -38,35 +41,9 @@ after a row's closing pipe styles the row: [table-cells.md](table-cells.md)).
 | TOTAL | 93,50 | {.invert .bold}
 ```
 
-## A supermarket receipt
-
-Seven columns on 58 mm: a smaller font, the narrow columns given a width, the description taking the rest.
-
-```markdown
-## MERCADO EXEMPLO {.center}
-
-| IT {width=3ch} | CÓD {width=7ch} | DESCRIÇÃO | QTD {width=5ch} | UN {width=2ch} | UNIT {width=5ch} | TOTAL {width=6ch} |
-|---|---|---|--:|---|--:|--:|
-| 001 | 2000000010014 | ARROZ BRANCO TIPO 1 5KG | 1 | un | 24,90 | 24,90 |
-| 003 | 2000000010038 | BANANA PRATA | 1.635 | kg | 9,99 | 16,33 |
-| | | Desconto no item 3 - 3,27 {span=all} |
-{style=receipt font=Terminus size=16px}
-
-| | {prefix="R$ "} |
-|---|--:|
-| SUBTOTAL | 41,23 |
-| DESCONTOS | -3,27 |
-| **VALOR TOTAL** | **37,96** |
-{font=Terminus size=16px}
-```
-
-`bobina check` says `… DESCRIÇÃO 14 … (+6 gaps = 48 of 48)`. Each 13-digit code prints on two lines without a
-warning: you gave its column 7. The discount line starts under DESCRIÇÃO (one empty cell for each column before
-it). On 80 mm DESCRIÇÃO takes 24 more.
-
 ## An NFC-e footer
 
-The QR code on the left, three lines beside it, in the middle ([columns](layout-columns.md)):
+The QR code on the left, three lines beside it, in the middle of its height ([columns](layout-columns.md)):
 
 ````markdown
 :::: {.columns valign=middle}

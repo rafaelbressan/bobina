@@ -42,7 +42,7 @@ Receipt 276712 · Series 4
 ## How much fits
 
 Across the paper there are 32 letters of the printer font on 58 mm and 48 on 80 mm; columns take whole letters.
-Two columns on 58 mm with one letter between them share 31: 15 and 16.
+Two columns on 58 mm with one letter between them share 31: 16 and 15 (the first gets the odd letter).
 
 With `wrap=nowrap` nothing moves: text wraps inside its column, QR codes and images shrink to fit it. A QR code
 squeezed below the size a phone reads still prints, with `Q101` (it may not scan).
