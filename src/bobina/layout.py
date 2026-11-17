@@ -16,7 +16,7 @@ from .emulator import CHECKBOX, Emulator
 from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
 from .nudges import Nudges, SecurityError
-from .rows import BarcodeRow, BitmapRow, Boxed, Cell, FeedRow, QRRow, RawRow, TextRow, columns
+from .rows import BarcodeRow, BitmapRow, Boxed, Cell, Column, Columned, FeedRow, QRRow, RawRow, TextRow, columns
 from .templating import PH_RE, RESERVED_CHARS, Rendered
 
 NO_CAPTION = {"", "auto", "none", "no", "false", "off"}  # caption= words that print no caption on a plain QR
@@ -55,6 +55,17 @@ BOX_HINT = (
     ".right .shade (docs/guides/layout.md)"
 )
 BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
+COLUMNS_TAKES = (frozenset({"columns", "flip"}), frozenset({"wrap", "valign", "gap", "rotate", "id"}))
+COLUMN_TAKES = (frozenset({"column"}), frozenset({"width", "valign", "id"}))
+COLUMNS_HINT = (":::: {.columns wrap=nowrap|wrap|wrap-reverse valign=top|middle|bottom gap=1ch} holds the columns "
+                "(docs/guides/layout-columns.md)")  # fmt: skip
+COLUMN_HINT = "a column takes width=auto|40%|30mm|12ch and valign=top|middle|bottom (docs/guides/layout-columns.md)"
+WRAPS = ("nowrap", "wrap", "wrap-reverse")  # wrap= on columns: CSS flex-wrap's names
+VALIGNS = {"top": "top", "middle": "middle", "center": "middle", "bottom": "bottom"}  # center (CSS's word): middle
+GAP_HINT = "1ch (letters: the default), 0, 2ch, 3mm or dots"
+# what a column's content says when it is squeezed below its minimum (a word cut, a QR below the module that scans,
+# a table narrowed or turned, a box title cut, …): wrap=wrap moves a column that would say one of them
+SQUEEZED = frozenset({"L101", "L103", "L106", "L107", "L109", "Q101", "Q104", "Q108", "Q110", "I102"})
 BOX_ROOM = 10  # dots of paper between a box's frame and what it holds, above and below (at least: ink is measured)
 BOX_MIN_SIDE = 6  # … and beside it: the frame and this room take whole letters, so the text keeps the paper's grid
 COLUMN_CH_RE = re.compile(r"(\d+(?:\.\d+)?)ch")  # width=7ch at the end of a title cell; other units: object_width
@@ -226,6 +237,7 @@ class Layout:
         lang = str(meta.get("locale") or meta.get("lang") or "")
         self.scripts = scriptfonts.Resolver(nudges, lang)  # fonts for other scripts, downloaded once
         self.bars: tuple[int, ...] = ()  # the column (at 1x) of the bar of each quote being laid out, outermost first
+        self.within = ""  # "column": laid out in a column of :::: {.columns} (narrow)
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -782,17 +794,18 @@ class Layout:
         return rows
 
     @contextlib.contextmanager
-    def narrow(self, width: int):
-        """Lays out as if the paper were `width` dots wide (inside a box): text wraps, objects fit and % sizes are
-        of that width. A QR code there is part of the box's image, so it is sized as an image (qr.native off)."""
-        saved = self.p, self.W, self.cols, self.bars
+    def narrow(self, width: int, within: str = ""):
+        """Lays out as if the paper were `width` dots wide (inside a box or a column): text wraps, objects fit and %
+        sizes are of that width. A QR code there is part of the box's image, so it is sized as an image (qr.native
+        off). within: "column" when a wider room is the fix a problem suggests (a QR squeezed in a column)."""
+        saved = self.p, self.W, self.cols, self.bars, self.within
         qr = {**(self.p.get("qr") or {}), "native": False}
         self.p = replace(self.p, width_dots=width, data={**self.p.data, "qr": qr})
-        self.W, self.cols, self.bars = width, self.p.columns, ()
+        self.W, self.cols, self.bars, self.within = width, self.p.columns, (), within
         try:
             yield
         finally:
-            self.p, self.W, self.cols, self.bars = saved
+            self.p, self.W, self.cols, self.bars, self.within = saved
 
     def block(self, b, indent: int) -> list:
         rows = self._block(b, indent)
@@ -901,9 +914,16 @@ class Layout:
         if isinstance(b, Table):
             return self.table(b, indent)
         if isinstance(b, Div):
+            if b.attrs.has("columns"):
+                return self.columns(b, indent)
             if b.attrs.has("box"):
                 return self.box(b, indent)
-            self.idle(b.attrs, b.line, BLOCK_TAKES, "on a ::: block without .box",
+            takes = BLOCK_TAKES
+            if b.attrs.has("column"):  # a column outside columns: what it holds, one block under the other
+                self.n.add("M101", "::: {.column} outside :::: {.columns}: its blocks print one under the other",
+                           b.line, "put the columns in :::: {.columns} … ::::")  # fmt: skip
+                takes = (takes[0] | COLUMN_TAKES[0], takes[1] | COLUMN_TAKES[1])  # said once, by the line above
+            self.idle(b.attrs, b.line, takes, "on a ::: block without .box",
                       "::: {.box} draws a frame around blocks (docs/guides/layout.md)")  # fmt: skip
             return self.blocks(b.children, indent)  # a ::: block bobina does not draw: what it holds, as it is
         return []
@@ -1130,6 +1150,220 @@ class Layout:
         im.paste(0, (x, y), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
         return title
 
+    # ------------------------------------------------------------ columns (:::: {.columns})
+    def columns(self, d: Div, indent: int) -> list:
+        """Columns side by side (:::: {.columns}; each ::: {.column} in it is one, left to right). Each column is laid
+        out at its width by the usual engine, then a row of columns is drawn side by side as one image (the text in
+        them in the printer font's look, as in a box). Widths are whole letters, so the text keeps the paper's grid:
+        width=40% is of the text room (the room less the gaps: 40% and 60% fill it), 12ch letters, 30mm and dots as
+        many letters as fit, auto (the default) shares what is left; never wider than the room. wrap=nowrap (the
+        default) keeps one row and squeezes the content (text wraps, codes and images shrink: Q101 when a QR gets
+        too small to scan); wrap=wrap starts a new row with a column that does not fit (column_rows), wrap-reverse
+        puts each new row above the one before (L110 says when a column moves)."""
+        a, line = d.attrs, d.line
+        self.idle(a, line, COLUMNS_TAKES, "on :::: {.columns}", COLUMNS_HINT)
+        cols = [c for c in d.children if isinstance(c, Div)]  # the parser made each child a column
+        cw = self.p.cell[0]
+        room = (self.W - indent * cw) // cw
+        if not cols:
+            return []
+        if room < 1:
+            return self.blocks([b for c in cols for b in c.children], indent)
+        wrap = a.kv.get("wrap", "nowrap")
+        if wrap not in WRAPS:
+            self.n.add(
+                "M101", f"wrap={wrap}", line, "nowrap (squeezed side by side: the default), wrap or wrap-reverse"
+            )
+            wrap = "nowrap"
+        valign = self.valign(a, line, "top")
+        gap = self.column_gap(a, line)
+        for c in cols:
+            self.idle(c.attrs, c.line, COLUMN_TAKES, "on a column", COLUMN_HINT)
+        asked = [self.column_width(c) for c in cols]
+        aligns = [self.valign(c.attrs, c.line, valign) for c in cols]
+        rows = self.column_rows(cols, asked, room, gap, wrap, line)
+        if wrap == "wrap-reverse":
+            rows.reverse()
+        out: list = []
+        for row in rows:
+            if out:
+                out.append(FeedRow(int(self.p.get("margins.block_gap_dots", 12))))
+            out += self.column_row([cols[i] for i in row], [asked[i] for i in row], [aligns[i] for i in row],
+                                   indent, room, gap, a, line)  # fmt: skip
+        return out
+
+    def valign(self, a: Attrs, line: int, default: str) -> str:
+        """valign=top|middle|bottom (center is middle, as CSS says it), or `default`."""
+        given = a.kv.get("valign")
+        if given is None:
+            return default
+        if given in VALIGNS:
+            return VALIGNS[given]
+        self.n.add("M101", f"valign={given}", line, "top, middle or bottom")
+        return default
+
+    def column_gap(self, a: Attrs, line: int) -> int:
+        """gap= on columns, in whole letters: 1ch (the default), 0, 2ch; 3mm, a % of the paper and dots as the
+        nearest whole letters."""
+        given = a.kv.get("gap")
+        if given is None:
+            return 1
+        text = str(given).strip().lower().replace(",", ".")
+        if m := COLUMN_CH_RE.fullmatch(text):
+            return math.floor(float(m.group(1)))
+        if re.fullmatch(r"0+(?:\.0*)?(?:mm|px|dots|%)?", text):
+            return 0
+        dots, _ = self.trial(lambda: self.object_width(given, line, GAP_HINT))  # said below, as gap=
+        if dots is None:
+            self.n.add("M101", f"gap={given}", line, GAP_HINT)
+            return 1
+        return round(dots / self.p.cell[0])
+
+    def column_width(self, c: Div) -> int | float | None:
+        """A column's width=: letters (12ch; 30mm and dots as many as fit), a share of the text room (40%, half), or
+        None: auto (absent, auto, or unreadable: M101)."""
+        given = c.attrs.kv.get("width")
+        if given is None or given == "auto":
+            return None
+        if given != given.lower():
+            self.n.add("M101", f"width={given}: values are lowercase", c.line,
+                       f"write width={given.lower()} (the column shares what is left until then)")  # fmt: skip
+            return None
+        return self.column_units(given, _NativeInk(self), c.line)
+
+    def row_widths(self, asked: list, room: int, gap: int) -> tuple[list[int], int, int]:
+        """The letters each column of a row gets: (widths, the gap used, the letters the widths ask for). A share is
+        of the text room (column_shares: 40% and 60% fill it exactly), letters as asked, and the auto columns share
+        what is left (the first ones get a letter more). Asked for more than there is, the widths shrink in
+        proportion, each auto column keeping a letter. A gap too wide for one letter per column gets narrower."""
+        n = len(asked)
+        g = gap if n == 1 else min(gap, max(0, (room - n) // (n - 1)))
+        text = max(n, room - g * (n - 1))
+        got = self.column_shares(list(asked), text)
+        fixed = [k for k, w in enumerate(got) if w is not None]
+        autos = [k for k, w in enumerate(got) if w is None]
+        need = sum(got[k] for k in fixed) + len(autos)
+        if need > text:
+            for k, w in zip(fixed, _shrink([got[k] for k in fixed], text - len(autos)), strict=True):
+                got[k] = w
+        left = text - sum(got[k] for k in fixed)
+        for j, k in enumerate(autos):
+            got[k] = left // len(autos) + (1 if j < left % len(autos) else 0)
+        return [max(1, w) for w in got], g, need
+
+    def column_rows(self, cols: list[Div], asked: list, room: int, gap: int, wrap: str, line: int) -> list[list[int]]:
+        """Which columns go on each row, top to bottom: all on one row (wrap=nowrap), or, with wrap=wrap, a new row
+        from the first column that does not fit beside the ones before it: their widths ask for more letters than
+        there are, or a column's content does not fit the width it would get (content_fits). L110 says each new
+        row. More columns than letters (1 each and the gaps) never stand side by side: the rest go on new rows."""
+        n = len(cols)
+        most = max(1, (room + gap) // (1 + gap))
+        if wrap == "nowrap":
+            rows = [list(range(i, min(n, i + most))) for i in range(0, n, most)]
+            if len(rows) > 1:
+                self.n.add("L110", f"{n} columns do not fit across {room} letters, even of one letter each: the ones "
+                           f"after column {most} print on new rows", line, "fewer columns, or gap=0")  # fmt: skip
+            return rows
+        rows, cur = [], []
+        for i in range(n):
+            why = self.row_misfit(cols, asked, [*cur, i], room, gap) if cur else ""
+            if not why:
+                cur.append(i)
+                continue
+            rows.append(cur)
+            cur = [i]
+            where = "under" if wrap == "wrap" else "above"
+            self.n.add("L110", f"column {i + 1} does not fit beside column {i} ({why}): it starts a new row of "
+                       f"columns, {where} them", cols[i].line, "wrap=nowrap keeps the columns side by side, "
+                       "squeezed; smaller widths keep them on one row")  # fmt: skip
+        rows.append(cur)
+        return rows
+
+    def row_misfit(self, cols: list[Div], asked: list, idx: list[int], room: int, gap: int) -> str:
+        """Why these columns do not fit side by side in `room` letters ("" when they do)."""
+        widths, g, need = self.row_widths([asked[i] for i in idx], room, gap)
+        if need + g * (len(idx) - 1) > room:
+            return f"the widths ask for {need + g * (len(idx) - 1)} of the {room} letters"
+        for i, w in zip(idx, widths, strict=True):
+            if not self.content_fits(cols[i], w, room):
+                return f"{'its' if i == idx[-1] else f'column {i + 1}'} content does not fit in {w} letters"
+        return ""
+
+    def content_fits(self, col: Div, w: int, room: int) -> bool:
+        """Whether a column's content fits w letters: laid out at that width it has no problem of being squeezed
+        (SQUEEZED: its longest word cut, a QR below the smallest module that scans, a table narrowed, an image
+        given in mm or dots made smaller, …) that it does not have across the whole room as well."""
+        cache = self.__dict__.setdefault("_fits", {})
+
+        def squeezed(letters: int) -> set:
+            key = (id(col), letters)
+            if key not in cache:
+                _, said = self.probe(lambda: self.column_at(col, letters * self.p.cell[0]))
+                cache[key] = {x.code for x in [*said, *said.check_only]} & SQUEEZED
+            return cache[key]
+
+        return squeezed(w) <= squeezed(room)
+
+    def probe(self, build) -> tuple:
+        """trial(), and what it judged (a font's size, said once) forgotten: the layout that prints says it."""
+        judged = set(self._judged)
+        try:
+            return self.trial(build)
+        finally:
+            self._judged = judged
+
+    def column_at(self, col: Div, dots: int) -> list:
+        with self.narrow(dots, "column"):
+            return self.blocks(col.children, 0)
+
+    def column_row(self, cols: list[Div], asked: list, aligns: list[str], indent: int, room: int, gap: int,
+                   a: Attrs, line: int) -> list:  # fmt: skip
+        """One row of columns as one image across the paper: each column laid out at its width, placed by valign=
+        (by its ink: middle centres it on the tallest column's ink), the quote bars beside them."""
+        cw = self.p.cell[0]
+        widths, g, need = self.row_widths(asked, room, gap)
+        n = len(cols)
+        if g < gap:
+            self.n.add("M101", f"gap={a.kv.get('gap')}: no room for it between {n} columns in {room} letters, {g} "
+                       "used", line, "a smaller gap=, or fewer columns")  # fmt: skip
+        if need + g * (n - 1) > room and any(w is not None for w in asked):
+            self.n.add("M101", f"the columns' widths ask for {need + g * (n - 1)} of the {room} letters: each "
+                       f"narrowed to {' + '.join(map(str, widths))}", line,
+                       "smaller width=, or wrap=wrap to move a column that does not fit to a new row")  # fmt: skip
+        parts, raws = [], []
+        for c, w in zip(cols, widths, strict=True):
+            with self.narrow(w * cw, "column"):
+                rows = self.blocks(c.children, 0)
+                raws += [r for r in rows if isinstance(r, RawRow)]
+                rows = [r for r in rows if not isinstance(r, RawRow)]
+                im = self.compose(rows) if any(not isinstance(r, FeedRow) for r in rows) else None
+            lead, trail = _blank_edges(im) if im is not None else (0, 0)
+            parts.append((rows, im, lead, 0 if im is None else im.height - lead - trail))
+        if raws:
+            self.n.add("M101", "a ```raw block cannot go inside a column: its bytes are sent after the columns",
+                       raws[0].line, "put the raw block after the line of colons that closes the columns")  # fmt: skip
+        inked = [(lead, h) for _, _, lead, h in parts if h > 0]
+        if not inked:
+            return raws
+        top, tall = min(lead for lead, _ in inked), max(h for _, h in inked)
+        ys = []
+        for (_, _, lead, h), va in zip(parts, aligns, strict=True):
+            at = top + {"top": 0, "middle": (tall - h) // 2, "bottom": tall - h}[va]
+            ys.append(at - lead if h else 0)  # only the white above a column's ink goes past the top
+        height = max(top + tall, *(y + im.height for (_, im, _, h), y in zip(parts, ys, strict=True) if h))
+        full = Image.new("L", (self.W, height), 255)
+        x, views = indent * cw, []
+        for (rows, im, _, h), w, y in zip(parts, widths, ys, strict=True):
+            if h:
+                full.paste(im, (x, y))
+            views.append(Column(rows, w * cw, x // cw, max(0, y)))
+            x += (w + g) * cw
+        full = self.draw_bars(full, indent, 0)
+        marks = {u for rows, *_ in parts for r in rows if isinstance(r, BitmapRow) for u in r.untested} | {"columns"}
+        lead = "".join(c.ch for c in self.lead(indent))
+        view = Columned(views, lead)
+        return [BitmapRow(_bw(full), line, "columns", untested=tuple(sorted(marks)), columns=view), *raws]
+
     def fence(self, f: Fence, indent: int) -> list:
         kind = f.kind
         if kind in OBJECTS:  # an image says it in image(), for both ![](…) and ```image
@@ -1317,6 +1551,9 @@ class Layout:
         lo = int(self.p.get(f"qr.min_module_{render}", 4))
         cannot = units * lo > self.W  # even the smallest module that scans would not fit the paper
         less = f"less data or ecc=L (module {lo} would not fit the paper)"
+        if self.within:  # squeezed in a column: the room is the column's
+            need = -(-units * lo // self.p.cell[0])
+            less = f"a wider {self.within}: module {lo} needs {need} letters; or wrap=wrap, less data"
         mod = self.fit_module(target, units, mod, 16 if render == "native" else 64)
         if mod < lo:
             what = f"width={kv['width']} gives module {mod}" if target else f"QR module {mod}"
@@ -1325,7 +1562,12 @@ class Layout:
                        less if cannot else hint)  # fmt: skip
         while units * mod > self.W and mod > 1:
             mod -= 1
-            self.n.add("Q103", f"QR does not fit: module reduced to {mod}", f.line, "shorten the content")
+            self.n.add(
+                "Q103",
+                f"QR does not fit: module reduced to {mod}",
+                f.line,
+                less if self.within else "shorten the content",
+            )
             if mod < lo:  # the paper took it below what scans: say so, never as if fine
                 self.n.add("Q101", f"QR module {mod} in {render} mode: it may not scan", f.line, less)
         if render == "native":

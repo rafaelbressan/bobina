@@ -1,14 +1,12 @@
 # Receipts: whole recipes
 
-Copy one, change the items, run `bobina check FILE` (it says the width each column got), then print. Every table
-feature used here is explained in the [tables guide](tables.md) and in `bobina help table`. Whole files with their
-images: [examples/tables](../../examples/tables/) (a table bill, a bar check, a supermarket receipt).
+Copy one, change the items, run `bobina check FILE` (it says the width each column got), then print. Tables:
+[tables guide](tables.md), `bobina help table`; whole files: [examples/tables](../../examples/tables/).
 
 ## Totals
 
 A table whose title cells are empty prints no title and no rule: label on the left, value on the right. A
-`prefix=` in the empty title cell of a column puts the currency before each value, and the row still counts as
-empty.
+`prefix=` in an empty title cell puts the currency before each value of its column.
 
 ```markdown
 | | {prefix="R$ "} |
@@ -62,7 +60,25 @@ Seven columns on 58 mm: a smaller font, the narrow columns given a width, the de
 {font=Terminus size=16px}
 ```
 
-`bobina check` says `column widths in Terminus 16px columns: IT 3 · CÓD 7 · DESCRIÇÃO 14 · QTD 5 · UN 2 · UNIT 5 ·
-TOTAL 6 (+6 gaps = 48 of 48)`. Each 13-digit code prints on two lines, of 7 and 6 digits, without a warning: you
-gave its column 7. The discount line starts under DESCRIÇÃO (one empty cell for each column before it) and
-takes the rest of the row. On 80 mm the same table has 72 columns, and DESCRIÇÃO takes the 24 more.
+`bobina check` says `… DESCRIÇÃO 14 … (+6 gaps = 48 of 48)`. Each 13-digit code prints on two lines without a
+warning: you gave its column 7. The discount line starts under DESCRIÇÃO (one empty cell for each column before
+it). On 80 mm DESCRIÇÃO takes 24 more.
+
+## An NFC-e footer
+
+The QR code on the left, three lines beside it, in the middle ([columns](layout-columns.md)):
+
+````markdown
+:::: {.columns valign=middle}
+::: {.column width=40%}
+```qr
+https://example.com/nfce/276712
+```
+:::
+::: {.column}
+CONSUMIDOR NÃO IDENTIFICADO
+NFC-e nº 276712 · Série 4
+15/11/2026 11:33
+:::
+::::
+````

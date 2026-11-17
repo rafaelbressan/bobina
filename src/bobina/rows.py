@@ -57,6 +57,24 @@ class Boxed:
 
 
 @dataclass
+class Column:
+    """One column of a :::: {.columns} row, as the terminal views draw it."""
+
+    rows: list  # its content, laid out at its width
+    inner: int  # dots: the width it was laid out at
+    left: int  # columns from the paper's edge to the column (quote bars and list indents included)
+    top: int = 0  # dots from the top of the row to the top of the column's content (valign=)
+
+
+@dataclass
+class Columned:
+    """A row of :::: {.columns} side by side: what the terminal views need to draw it as a map of the paper."""
+
+    columns: list  # Column, left to right
+    lead: str = ""  # what the view shows before the columns: the bars of the quotes they are in
+
+
+@dataclass
 class BitmapRow:
     image: Image.Image  # mode "1", full paper width
     line: int = 0
@@ -66,6 +84,7 @@ class BitmapRow:
     wide_view: bool = False  # a table in a smaller font whose text rows need more columns than the paper: the
     # terminal views widen their frame to hold them (view.width)
     box: Boxed | None = None  # a ::: box: the views draw its frame and its content (view.box_lines)
+    columns: Columned | None = None  # a row of :::: {.columns}: the views draw them side by side (view.columns_lines)
 
 
 @dataclass

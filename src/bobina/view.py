@@ -107,6 +107,7 @@ def width(rows, profile) -> int:
     than the paper has (BitmapRow.wide_view): the frame grows to its widest line, so every cell shows whole."""
     wide = [tr.columns() for r in rows if isinstance(r, BitmapRow) and r.wide_view for tr in r.text_rows or []]
     wide += [r.box.left + 2 + _box_view(r.box, profile)[2] for r in rows if isinstance(r, BitmapRow) and r.box]
+    wide += [_columns_view(r.columns, profile)[1] for r in rows if isinstance(r, BitmapRow) and r.columns]
     return max([profile.columns, *wide])
 
 
@@ -151,6 +152,9 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
         elif isinstance(r, BitmapRow) and r.box is not None:
             used = r.box.left + 2 + _box_view(r.box, profile)[2]
             out += [ln + " " * max(0, frame - used) for ln in box_lines(r.box, profile, color)]
+        elif isinstance(r, BitmapRow) and r.columns is not None:
+            used = _columns_view(r.columns, profile)[1]
+            out += [ln + " " * max(0, frame - used) for ln in columns_lines(r.columns, profile, color)]
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
             out.append(TURNED_TABLE.center(frame, "┄")[:frame])
             for tr in r.text_rows:
@@ -207,6 +211,41 @@ def box_lines(b, profile, color: bool = False) -> list[str]:
     for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
         out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
     return [*out, lead + bl + h * room + br]
+
+
+def _columns_view(cv, profile):
+    """Where each column of a row is drawn: ([(its profile at its width, the column it starts at, its width in the
+    view)], the columns the row takes). A column whose text needs more letters than its paper columns (a table or a
+    paragraph in a smaller font) is drawn wider, the columns after it moved right: the frame widens, nothing is cut."""
+    from dataclasses import replace
+
+    out, shift = [], 0
+    for c in cv.columns:
+        sub = replace(profile, width_dots=c.inner)
+        drawn = [tr.columns() * tr.scale[0] for r in c.rows if isinstance(r, BitmapRow) and r.text_rows
+                 and r.kind != "table" for tr in r.text_rows]  # fmt: skip
+        w = max([width(c.rows, sub), *drawn])
+        out.append((sub, c.left + shift, w))
+        shift += w - sub.columns
+    return out, max([0, *(x + w for _, x, w in out)])
+
+
+def columns_lines(cv, profile, color: bool = False) -> list[str]:
+    """A row of :::: {.columns} as a map of the paper: each column's own rows (drawn by lines() at its width: a box
+    or columns in it too) at its place on the paper, side by side, moved down as valign= placed it."""
+    placed, used = _columns_view(cv, profile)
+    cols = []
+    for c, (sub, x, w) in zip(cv.columns, placed, strict=True):
+        ls = lines(c.rows, sub, color, max_feed_lines=0, frame=w)
+        cols.append((x, w, [" " * w] * round(c.top / profile.cell[1]) + ls))
+    out = []
+    for y in range(max(len(ls) for _, _, ls in cols)):
+        line, at = cv.lead, len(cv.lead)
+        for x, w, ls in cols:
+            line += " " * (x - at) + (ls[y] if y < len(ls) else " " * w)
+            at = x + w
+        out.append(line + " " * (used - at))
+    return out
 
 
 def boxed(body: list[str], cols: int, title: str, color: bool = False) -> str:

@@ -2,7 +2,7 @@
 
 A **box** draws a frame around blocks. It opens with a line of three colons (`:::`) and its settings in braces,
 and closes with a line of colons only. Inside, write any Markdown: text, lists, headings, QR codes, images,
-tables, other boxes.
+tables, other boxes, [columns](layout-columns.md) (blocks side by side, `:::: {.columns}`).
 
 ```markdown
 ::: {.box title="TABLE"}

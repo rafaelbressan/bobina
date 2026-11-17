@@ -68,7 +68,8 @@ class Quote(Block):
 
 @dataclass
 class Div(Block):
-    """A ::: block: a box (.box), or only a group of blocks (an unknown class: its content prints as it is)."""
+    """A ::: block: a box (.box), columns side by side (.columns: each child is a column, a Div), or only a group of
+    blocks (an unknown class: its content prints as it is)."""
 
     children: list[Block] = field(default_factory=list)
     fence: str = ""  # the line that opened it, as written (::: {.box title=MESA}): problems name it

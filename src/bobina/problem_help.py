@@ -69,6 +69,10 @@ FIX = {
     ),
     "L108": "Nothing to fix: change a column's width= at the end of its title cell, then check again.",
     "L109": "Shorten the title, or use title-style=band or title-style=inside: they wrap a long title into lines.",
+    "L110": (
+        "Nothing to fix if that is what you want. To keep the columns on one row, give them smaller width= or use "
+        "wrap=nowrap: their content squeezes (text wraps, QR codes and images shrink)."
+    ),
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",

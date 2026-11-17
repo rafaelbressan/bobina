@@ -46,6 +46,7 @@ TEXT
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
   ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade} … ::: (docs/guides/layout.md)
+  :::: {.columns wrap=wrap valign=middle} ::: {.column width=40%} … ::: ::: {.column} … ::: ::::  (bobina help layout)
 
 OBJECTS (fenced blocks)
   ```qr {module=4 ecc=M width=full|half|30mm caption="Menu" .left|.right}
@@ -67,6 +68,39 @@ VARIABLES (Jinja, sandboxed; comments are <# … #>)
   {{ 1234.5 | currency("BRL") }}  {{ 0.25 | percent }}  {{ seq.ticket }}  {% for n in seq.ticket.take(10) %}
   Values from --set/--data are printed literally; {{ value | markdown }} opts in (raw blocks removed).
   Allowed: {% if %} {% for %} {% set x = … %} {% with %} and {{ }}; macro, call, filter, set blocks, .format(): refused
+"""
+
+
+HELP_LAYOUT = """\
+bobina help layout — boxes and columns (docs/guides/layout.md, docs/guides/layout-columns.md)
+
+A line of three or more colons and {…} opens a block; a line of colons only closes the innermost one. Give the
+outer block more colons (::::) so the file reads well. Values need quotes only when they have a space.
+
+BOX: a frame around blocks
+  ::: {.box title="TABLE" title-style=border|inside|band .dashed|.dotted|.double width=half .center .shade}
+  # 109 {.center size=huge}
+  :::
+
+COLUMNS: blocks side by side, left to right; every column opens with ::: {.column}
+  :::: {.columns valign=middle}
+  ::: {.column width=40%}
+  ```qr
+  https://example.com/receipt/276712
+  ```
+  :::
+  ::: {.column}
+  Text beside the QR code
+  :::
+  ::::
+  on a column   width=40% (of the text room: the line less the gaps; 40% + 60% fill it) 12ch 30mm auto (the
+                default: shares what is left) · valign=top|middle|bottom (that column)
+  on .columns   valign=top|middle|bottom (all) · gap=1ch (letters between columns)
+                wrap=nowrap (the default: one row, the content squeezes; a QR too small to scan: Q101)
+                wrap=wrap (a column that does not fit starts a new row under: L110) · wrap=wrap-reverse (above)
+  Across the paper: 32 letters on 58 mm, 48 on 80 mm. A column does not fit when the widths ask for more letters
+  than there are, or when its content needs more than it gets: its longest word, a QR code at the smallest size
+  that scans, an image's width in mm.
 """
 
 
@@ -155,7 +189,7 @@ def _help_code(code: str, as_json: bool) -> int:
     return OK
 
 
-TOPICS = ("commands", "format", "table", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
+TOPICS = ("commands", "format", "table", "layout", "data", "pay", "contact", "icons", "nudges", "problems", "aliases")
 NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pix, bobina help contact x
 # Topics that are other names, so bobina help does not list them again: "commands" is what bobina help prints
 # without a topic, and "problems" is the docs' name for nudges.
@@ -195,6 +229,8 @@ def _help_text(topic: str, name: str | None = None) -> str:
         return HELP_FORMAT
     if topic == "data":
         return HELP_DATA
+    if topic == "layout":
+        return HELP_LAYOUT
     if topic == "table":
         from ..table_help import help_text as table_help
 

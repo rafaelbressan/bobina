@@ -14,7 +14,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "F301": ("note", "glyph not in the printer font: line printed as an image", "N5"),
     "F302": ("warning", "glyph missing in every available font", ""),
     "F303": ("note", "size not supported natively, nearest native size used", "N1"),
-    "F304": ("note", "font for another script downloaded (once; used offline from then on)", ""),
+    "F304": ("note", "font for another script downloaded (once, then used offline)", ""),
     "F305": ("warning", "font for this script not downloaded (off, or no network): letters print as boxes", ""),
     "F306": ("note", "no font for the locale's script (none, or downloads off): English words, its formats", ""),
     "F201": ("warning", "font below its tested minimum size", "F1, F2"),
@@ -35,12 +35,12 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "Q110": ("warning", "barcode turned vertical to fit the paper", ""),
     "Q111": (
         "warning",
-        "payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9)",
+        "payment code not built: an attribute is missing or invalid (left out, exit 9)",
         "",
     ),
     "Q112": (
         "warning",
-        "contact code not built: the network or its value is wrong (left out, the rest prints, exit 9)",
+        "contact code not built: the network or its value is wrong (left out, exit 9)",
         "",
     ),
     "Q113": (
@@ -58,6 +58,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L107": ("warning", "table columns narrowed to fit the paper (widths scaled down, or too many columns)", ""),
     "L108": ("note", "the width each table column got (said by bobina check only)", ""),
     "L109": ("warning", "box title cut (…)", ""),
+    "L110": ("note", "a column that did not fit moved to a new row", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),
@@ -69,7 +70,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "I108": ("warning", "image outside the document folder and image_dirs (--sandbox, MCP)", ""),
     "I109": (
         "note",
-        "what an image looks like (drawing or photo) and how it was printed; the other look is one class away",
+        "how an image was printed (drawing or photo); the other look is one class away",
         "",
     ),
     "I110": ("note", "a turned image prints smaller: its corners need room on the paper", ""),

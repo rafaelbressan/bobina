@@ -667,6 +667,11 @@ class _DivGroup:
         self.opener, self.children, self.closed = opener, [], closed
         self.map = opener.map
 
+    @property
+    def columns(self) -> bool:
+        """It opens :::: {.columns} (or ::: columns)."""
+        return bool(COLUMNS_INFO.search(_div_info(self.opener)))
+
 
 def _div_info(node) -> str:
     """What follows the colons, without the colons a fence may end with (::: {.box} :::)."""
@@ -680,17 +685,28 @@ def _divs(nodes, nudges: Nudges, off: int, src=None) -> list:
     if not any(n.type == "fenced_div" for n in nodes):
         return list(nodes)
     stack = [_DivGroup(nodes[0])]  # the container itself
+    last = None  # the block closed last: columns closed by a line meant to open the next column are said
     for n in nodes:
         if n.type != "fenced_div":
             stack[-1].children.append(n)
         elif _div_info(n):
             stack.append(_DivGroup(n))
         elif len(stack) > 1:
-            done = stack.pop()
+            done = last = stack.pop()
             stack[-1].children.append(done)
+            kids = done.children
+            outer = done.opener.markup
+            if done.columns and len(n.markup) < len(outer) and (not kids or isinstance(kids[-1], _DivGroup)):
+                where = ", right after a column" if kids else ", before any column"  # meant to open one
+                nudges.add("M101", f"this {n.markup} closes the {outer} {{.columns}} of line {_line(done.opener, off)}"
+                           + where, _line(n, off),
+                           f"to open {'another' if kids else 'a'} column write ::: {{.column}}; {outer} closes the "
+                           "columns")  # fmt: skip
         else:
-            nudges.add("M101", f"a line of {n.markup} with no ::: block open: ignored", _line(n, off),
-                       "a line of colons only closes the ::: {…} above it; remove this one")  # fmt: skip
+            hint = "a line of colons only closes the ::: {…} above it; remove this one"
+            if last is not None and last.columns:  # the columns closed early: this line was meant for a column
+                hint = "to open another column inside the columns write ::: {.column}; " + hint
+            nudges.add("M101", f"a line of {n.markup} with no ::: block open: ignored", _line(n, off), hint)
     while len(stack) > 1:
         done = stack.pop()
         done.closed = False
@@ -736,8 +752,9 @@ def div_attrs(info: str, line: int, nudges: Nudges) -> Attrs:
     return a
 
 
-DIV_KEYS = frozenset({"title", "title-style"})  # a box's own keys and classes; the rest of a ::: {…}: check_attrs
-DIV_CLASSES = frozenset({"box", "shade"})
+DIV_KEYS = frozenset({"title", "title-style", "wrap", "valign", "gap"})  # boxes' and columns' own keys and classes;
+DIV_CLASSES = frozenset({"box", "shade", "columns", "column"})  # the rest of a ::: {…}: check_attrs
+COLUMNS_INFO = re.compile(r"^columns$|(?:^|[\s{])\.columns(?=[\s}]|$)")  # what opens :::: {.columns}
 
 
 def _what(b: Block) -> str:
@@ -777,7 +794,44 @@ def _div(g: _DivGroup, nudges: Nudges, off: int, src: list[str]) -> Div:
         inside = f": {_trapped(kids)} inside it" if kids else ", and nothing follows it"
         nudges.add("M105", f"{fence[:40]} at line {ln} is never closed{inside}", ln,
                    "add a line of ::: where it should end")  # fmt: skip
+    if a.has("columns"):
+        kids = _columns(kids, nudges)
     return Div(line=ln, attrs=a, children=kids, fence=fence, closed=g.closed)
+
+
+COLUMN_OWN = ("width", "valign")  # what a box right inside :::: {.columns} gives the column it is
+
+
+def _columns(kids: list[Block], nudges: Nudges) -> list[Block]:
+    """The blocks of a :::: {.columns} as its columns, left to right: each ::: {…} in it is one (::: {.column}, or
+    any other; a box is a column drawn as a box, its width= and valign= are the column's; columns right inside
+    columns are a column holding them). Blocks outside any column become a column of their own, said (M101)."""
+    out: list[Block] = []
+    loose: list[Block] = []
+
+    def flush() -> None:
+        if loose:
+            first = loose[0]
+            what = _what(first).replace(f" at line {first.line}", "")  # the line is said with the problem
+            nudges.add("M101", f"{what} is inside :::: {{.columns}} but outside any column: printed as a column of its "
+                       "own", first.line, "open each column with ::: {.column} and close it with :::")  # fmt: skip
+            out.append(Div(line=first.line, attrs=Attrs({"column"}), children=list(loose), fence="::: {.column}"))
+            loose.clear()
+
+    for b in kids:
+        if not isinstance(b, Div):
+            loose.append(b)
+            continue
+        flush()
+        if b.attrs.has("columns"):
+            out.append(Div(line=b.line, attrs=Attrs({"column"}), children=[b], fence=b.fence))
+        elif b.attrs.has("box"):
+            own = {k: b.attrs.kv.pop(k) for k in COLUMN_OWN if k in b.attrs.kv}
+            out.append(Div(line=b.line, attrs=Attrs({"column"}, own), children=[b], fence=b.fence))
+        else:
+            out.append(b)
+    flush()
+    return out
 
 
 def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
