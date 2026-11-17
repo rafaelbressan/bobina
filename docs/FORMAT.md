@@ -375,7 +375,7 @@ them, and `bobina seq set NAME N` starts one at N, even before its first print.
   control characters (removed from all text and barcode data before encoding).
 
 `| markdown`: the author's values (front matter, literals) get all but `raw` (`M121`); others get
-text markup only, after parsing (no `{…}`; images `M122`; code blocks, `:::`, link definitions `M123`). Template violations are **errors**: files (`M310`), unsafe attributes (`M311`), more than 2000 loop
+text markup only, after parsing (no `{…}`; images `M122`; code blocks, `:::`, link definitions `M123`). Template violations are **errors**: files (`M310`), unsafe attributes and `.format()` (`M311`), more than 2000 loop
 iterations or 2 MB of output (`M313`), template paths outside the document folder and
 `~/.config/bobina/templates` (`M315`). See `docs/SECURITY.md`.
 

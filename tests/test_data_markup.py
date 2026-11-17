@@ -74,7 +74,8 @@ def photo(tmp_path):
 
 
 EXPRS = [
-    "d", "(d ~ '')", "('' ~ d)", "('%s' % d)", "('%.400s' % d)", "('{}'.format(d))", "('%s' | format(d))",
+    "d", "(d ~ '')", "('' ~ d)", "('%s' % d)", "('%.400s' % d)", "('%s' | format(d))",
+    "('%(a)s' | format(a=d))",
     "(d * 1)", "d[0:]", "d | upper | lower", "d.replace('Q', 'Q')", "d | trim", "[d] | join", "d | list | join",
     "{'k': d}.k", "d | replace('Q', 'Q')", "d | map('lower') | join",
 ]  # fmt: skip
@@ -89,7 +90,7 @@ def test_whatever_the_template_does_with_data_it_brings_no_raw_image_or_box(expr
 
 @pytest.mark.parametrize("crlf", ["\r\n", "\r"])
 def test_line_breaks_of_any_kind(crlf):
-    for expr in ("d", "('%s' % d)", "('{}'.format(d))"):
+    for expr in ("d", "('%s' % d)", "('%s' | format(d))"):
         res = md("{{ " + expr + " | markdown }}\n", d=RAW.replace("\n", crlf))
         assert not raws(res) and len(said(res, "M121")) == 1
 
@@ -373,7 +374,7 @@ def test_two_documents_built_at_once_keep_their_own_values():
 LETTERS = "'#*![]()abcdefghijklmnopqrstuvwxyz.:/ '"
 
 
-@pytest.mark.parametrize("step", ["'{}{}'.format(ns.s, a)", "ns.s ~ a", "'%s%s' % (ns.s, a)"])
+@pytest.mark.parametrize("step", ["'%s%s' | format(ns.s, a)", "ns.s ~ a", "'%s%s' % (ns.s, a)"])
 def test_data_rebuilt_from_the_templates_own_letters_is_not_the_authors(step):
     src = ("{% set ns = namespace(s='') %}{% for c in d %}{% for a in " + LETTERS + " %}{% if c == a %}"
            "{% set ns.s = " + step + " %}{% endif %}{% endfor %}{% endfor %}{{ ns.s | markdown }}\n")  # fmt: skip
@@ -385,7 +386,7 @@ def test_an_operation_on_the_authors_text_is_not_the_authors():
     from bobina.templating import Trusted, carry
 
     assert type(carry(Trusted("{}{}"), (Trusted("{}{}"), "x"))) is str
-    res = build("---\na: '**x**'\n---\n{{ '{}{}'.format(a, '![i](p.png)') | markdown }}\n")
+    res = build("---\na: '**x**'\n---\n{{ '%s%s' | format(a, '![i](p.png)') | markdown }}\n")
     assert not images(res) and "M122" in codes(res)
 
 
@@ -544,9 +545,9 @@ def test_two_thousand_distinct_values_as_markdown_build_in_time():
 @pytest.mark.parametrize(
     "src",
     [
-        "{% set t = '**{}**' | markdown %}{{ t.format(d) }}\n",
-        "{% set t = '{x}' | markdown %}{{ t.format_map({'x': d}) }}\n",
         "{% set t = '**%s**' | markdown %}{{ t | format(d) }}\n",
+        "{% set t = '**%(x)s**' | markdown %}{{ t | format(x=d) }}\n",
+        "{% set t = '**%s**' | markdown %}{{ t % d }}\n",
     ],
 )
 def test_formatting_the_authors_markdown_with_data_gives_data(src):
@@ -555,15 +556,17 @@ def test_formatting_the_authors_markdown_with_data_gives_data(src):
         assert not raws(res) and not divs(res) and not fences(res), (src, value)
 
 
-def test_no_wrapper_hides_str_format_from_the_sandbox():
-    from jinja2.sandbox import SandboxedEnvironment
+def test_no_kind_of_text_lets_str_format_through():
+    from bobina.templating import Budget, MdData, MdSafe, Sandbox, Trusted
 
-    from bobina.templating import MdData, MdSafe, Trusted
-
-    jinja = SandboxedEnvironment()  # it wraps a bound str.format/format_map it can see: none may be hidden from it
-    for kind in (T, Trusted, MdSafe, MdData):
+    env = Sandbox(Budget())  # Jinja's getattr and getitem would hand out its own formatter before any other check
+    for kind in (str, T, Trusted, MdSafe, MdData):
         for name in ("format", "format_map"):
-            assert jinja.wrap_str_format(getattr(kind("{}"), name)) is not None, (kind, name)
+            for reach in (env.getattr, env.getitem):
+                with pytest.raises(SecurityError, match="str.format is not allowed"):
+                    reach(kind("{}"), name)
+            with pytest.raises(SecurityError, match="str.format is not allowed"):
+                env.is_safe_attribute(kind("{}"), name, getattr(kind("{}"), name))
 
 
 def test_a_default_with_data_is_its_text_in_expressions_and_the_authors_markdown_in_the_document():
@@ -613,7 +616,7 @@ def test_a_refused_construct_is_said_at_its_document_line_or_in_its_field_or_tem
     "payload", ["::: {.box title=HACK}\nyo\n:::\n", "```qr\nHACKED\n```\n", "# **big** {.center}\n"]
 )
 def test_a_default_never_pastes_a_values_text_into_the_document(payload):
-    front = ("---\nfields:\n  k:\n    default: \"{% for c in d %}{% if loop.first %}{{ '{0.nextitem}'.format(loop) }}"
+    front = ("---\nfields:\n  k:\n    default: \"{% for c in d %}{% if loop.first %}{{ loop.nextitem }}"
              "{% endif %}{% endfor %}\"\n  j:\n    default: \"{{ x }}\"\n---\n")  # fmt: skip
     res = build(front + "{{ k }}\n\n{{ j }}\n", fields={"d": [T("a"), T(payload)], "x": payload})
     assert {type(b) for b in res.doc.blocks} == {Paragraph} and not fences(res) and not divs(res)
@@ -621,7 +624,7 @@ def test_a_default_never_pastes_a_values_text_into_the_document(payload):
 
 def test_a_loop_holds_data():
     for src in ("{% for c in p %}{% if loop.first %}![](/{{ loop | join }}){% endif %}{% endfor %}\n",
-                "{% for x in d %}{% if loop.first %}![]({{ '/{0.nextitem}'.format(loop) }}){% endif %}{% endfor %}\n"):  # fmt: skip
+                "{% for x in d %}{% if loop.first %}![]({{ '/%s' | format(loop.nextitem) }}){% endif %}{% endfor %}\n"):  # fmt: skip
         with pytest.raises(SecurityError) as err:
             build(src, fields={"p": T("X/etc/hostname"), "d": [T("a"), T("etc/hostname")]})
         assert err.value.nudge.code == "M312"
@@ -651,7 +654,7 @@ def test_the_authors_markdown_never_carries_a_raw_block(block):
 
 def test_formatting_a_default_keeps_its_text():
     front = "---\nfields:\n  k:\n    default: '{{ name }}!'\n---\n"
-    res = md(front + "[{{ k.format() }}]|[{{ k.format_map({}) }}]|[{{ k }}]\n", name="Bob")
+    res = md(front + "[{{ '%s' | format(k) }}]|[{{ k ~ '' }}]|[{{ k }}]\n", name="Bob")
     assert "[Bob!]|[Bob!]|[Bob!]" in printed(res)
     with pytest.raises(SecurityError) as err:  # its document form is private: the sandbox hides it
         md(front + "{{ k._source }}\n", name="Bob")

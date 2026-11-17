@@ -124,29 +124,47 @@ def test_filters_and_methods_cannot_launder_data_into_an_image_path(tmp_path):
     build("---\nlogo: ok.png\n---\n![]({{ logo }}) {{ p }}", fields={"p": Tainted("nada")}, base_dir=str(tmp_path))
 
 
-# A data value used as a format string (`{{ greeting.format(name) }}`) goes through the sandbox's own formatter: it
-# cannot walk attributes into Python's internals (environment variables, the data row), and its result stays data.
+# str.format walks attributes ('{0.__class__}', '{0.nextitem}') and builds text the taint cannot follow: it is
+# refused however it is reached. The |format filter (printf style, no attributes) is what templates format with.
 @pytest.mark.parametrize(
-    "fmt",
+    "src",
     [
-        "{0.__class__.__getitem__.__globals__[paths].os.environ[PROBE_SECRET]}",
-        "{0.__class__}",
-        "{0.upper.__self__.__class__.__mro__}",
+        "Hello {{ g.format(n) }}\n",
+        "{{ 'Oi, {0}!'.format(n) }}\n",
+        "{{ '{x}'.format_map({'x': n}) }}\n",
+        "{{ '{0.__class__}'.format(n) }}\n",
+        "{{ (g | attr('format'))(n) }}\n",
+        "{{ (g | attr('format_map'))({}) }}\n",
+        "{{ g['format'](n) }}\n",
+        "{% set f = g.format %}{{ f(n) }}\n",
+        "{{ [g] | map(attribute='format') | list }}\n",
+        "{% for f in [g] | map(attribute='format_map') %}{{ f({}) }}{% endfor %}\n",
+        "{{ n.format }}\n",
     ],
 )
-def test_data_as_a_format_string_cannot_reach_python_internals(fmt, monkeypatch):
+def test_str_format_is_refused_however_it_is_reached(src, monkeypatch):
     monkeypatch.setenv("PROBE_SECRET", "s3cr3t-value")
-    try:
-        res = build("Hello {{ g.format(n) }}\n", fields={"g": Tainted(fmt), "n": Tainted("Bob")})
-    except Exception as e:  # a refusal is fine
-        assert "s3cr3t-value" not in str(e)
-        return
-    text = "".join(c.ch for r in res.rows for c in getattr(r, "cells", []))
-    assert "s3cr3t-value" not in text and "class" not in text
+    with pytest.raises(SecurityError) as err:
+        build(src, fields={"g": Tainted("{0.__class__.__getitem__.__globals__}"), "n": Tainted("Bob")})
+    assert err.value.nudge.code == "M311" and "str.format is not allowed" in err.value.nudge.message, src
+    assert "|format" in err.value.nudge.message and "s3cr3t-value" not in str(err.value)
 
 
-def test_a_format_string_from_data_still_formats_and_stays_data():
-    res = build("{{ g.format(n) }}\n", fields={"g": Tainted("Oi, {0}!"), "n": Tainted("Bob")})
-    assert "Oi, Bob!" in "".join(c.ch for r in res.rows for c in getattr(r, "cells", []))
-    with pytest.raises(Exception, match="image path"):
-        build("![]({{ g.format(n) }})\n", fields={"g": Tainted("/etc/{0}"), "n": Tainted("hostname")})
+def test_a_path_rebuilt_one_character_at_a_time_with_str_format_is_refused():
+    src = ("{% set ns = namespace(s='') %}{% for c in p %}{% set ns.s = ns.s ~ '{0.nextitem}'.format(loop) %}"
+           "{% endfor %}![](/{{ ns.s }})\n")  # fmt: skip
+    with pytest.raises(SecurityError) as err:
+        build(src, fields={"p": Tainted("Xusr/share/pixmaps/debian-logo.png")})
+    assert err.value.nudge.code == "M311"
+
+
+def test_the_format_filter_formats_and_keeps_data_data():
+    res = build("{{ 'Oi, %s!' | format(n) }} {{ '%(a)s' | format(a=n) }}\n", fields={"n": Tainted("Bob")})
+    assert "Oi, Bob! Bob" in "".join(c.ch for r in res.rows for c in getattr(r, "cells", []))
+    for src in ("![]({{ '/etc/%s' | format(n) }})\n", "![]({{ g | format('x') }})\n",
+                "![]({{ '/%s/%s' | format('etc', n) }})\n", "![]({{ '/etc/%(a)s' | format(a=n) }})\n"):  # fmt: skip
+        with pytest.raises(SecurityError) as err:
+            build(src, fields={"n": Tainted("hostname"), "g": Tainted("/etc/hostname%.0s")})
+        assert err.value.nudge.code == "M312", src
+    with pytest.raises(ValueError, match="mapping"):  # printf names a key, never an attribute: nothing to walk
+        build("{{ '%(__class__)s' | format(n) }}\n", fields={"n": Tainted("Bob")})

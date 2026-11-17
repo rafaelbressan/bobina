@@ -29,7 +29,7 @@ from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, Undefined
 from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
 from jinja2.runtime import LoopContext
-from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedFormatter
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 from jinja2.utils import Namespace
 from markupsafe import Markup
 
@@ -683,17 +683,14 @@ def _strlen(v) -> int:
 
 _WIDTH_METHODS = {"center", "ljust", "rjust", "zfill"}
 _PRINTF_SIZES = re.compile(r"%(?:\([^)]*\))?[-+ #0]*(\d+|\*)?(?:\.(\d+|\*))?")
-_FORMAT_SPECS = re.compile(r"\{[^{}]*:([^{}]*)\}")
-_NESTED_SPEC = re.compile(r"\{[^{}]*:[^{}]*\{")
 
 
 def check_format(fmt: str, args=(), kwargs=None) -> None:
-    """A format string cannot ask for a field wider than the output may be: '%100000000d', '%*d' % (10**9, 1),
-    '{:>100000000}', '{:{w}}'.format(1, w=10**9), format_map({'w': 10**9})."""
+    """A printf format (% and |format) cannot ask for a field wider than the output may be: '%100000000d',
+    '%*d' % (10**9, 1)."""
     sizes = [n for w, p in _PRINTF_SIZES.findall(fmt) for n in (w, p) if n]
     nums = [int(n) for n in sizes if n != "*"]
-    nums += [int(n) for spec in _FORMAT_SPECS.findall(fmt) for n in re.findall(r"\d+", spec)]
-    if "*" in sizes or _NESTED_SPEC.search(fmt):  # the width comes from the arguments
+    if "*" in sizes:  # the width comes from the arguments
         nums += _ints((*args, *(kwargs or {}).values()))
     if any(n > MAX_OUTPUT for n in nums):
         raise SecurityError("M313", f"a format asks for a field wider than {MAX_OUTPUT // 1_000_000} MB")
@@ -747,16 +744,6 @@ def expandtabs_size(s: str, tabsize=8) -> int:
     return len(s) + s.count("\t") * tab
 
 
-class _BoundedFormatter(SandboxedFormatter):
-    """str.format and format_map in templates: each field's spec is checked after Python put the nested
-    arguments into it ('{:{w}}' with w = '999999999', 9.9e8, row['w']), so no width comes from anywhere unseen."""
-
-    def format_field(self, value, format_spec):
-        if any(int(n) > MAX_OUTPUT for n in re.findall(r"\d+", format_spec)):
-            raise SecurityError("M313", f"a format asks for a field wider than {MAX_OUTPUT // 1_000_000} MB")
-        return check_size(super().format_field(value, format_spec))
-
-
 def _lines(s) -> int:
     return str(s).count("\n") + 1
 
@@ -781,6 +768,8 @@ REFUSED_HELP = {  # node -> (what it is written as, what to write instead)
     "Continue": ("{% continue %}", "an {% if %} inside the loop"),
 }
 FILE_NODES = frozenset({"Include", "Import", "FromImport"})
+FORMAT_METHODS = frozenset({"format", "format_map"})  # str.format walks attributes ('{0.__class__}'): refused
+FORMAT_REFUSED = "str.format is not allowed in templates: use the |format filter (printf style) or ~"
 
 
 def allowed(node) -> None:
@@ -790,6 +779,8 @@ def allowed(node) -> None:
     for n in (node, *node.find_all(nodes.Node)):
         kind = type(n).__name__
         line = getattr(n, "lineno", None)
+        if kind == "Call" and isinstance(n.node, nodes.Getattr) and n.node.attr in FORMAT_METHODS:
+            raise SecurityError("M311", FORMAT_REFUSED, line)
         if kind == "For" and n.recursive:
             raise SecurityError("M311", "recursive loops are not supported yet: loop over each level with {% for %}",
                                 line)  # fmt: skip
@@ -859,10 +850,20 @@ class Sandbox(ImmutableSandboxedEnvironment):
         return Trusted(text)
 
     def is_safe_attribute(self, obj, attr, value):
-        """As Jinja's, and no bytes: d.encode().decode() would give back data without its mark (M311)."""
+        """As Jinja's; no bytes (d.encode().decode() would give back data without its mark) and no str.format or
+        format_map, however they are reached (x.format, x | attr('format'), map(attribute='format')): M311."""
+        if attr in FORMAT_METHODS and isinstance(obj, str):
+            raise SecurityError("M311", FORMAT_REFUSED)
         if attr in ("encode", "decode") and isinstance(obj, (str, bytes, bytearray)):
             return False
         return super().is_safe_attribute(obj, attr, value)
+
+    def wrap_str_format(self, value):
+        """Jinja's getattr and getitem hand every attribute here before is_safe_attribute, and would return its own
+        formatter for a str.format or format_map: refused instead (M311), whatever kind of str it is bound to."""
+        if getattr(value, "__name__", None) in FORMAT_METHODS and isinstance(getattr(value, "__self__", None), str):
+            raise SecurityError("M311", FORMAT_REFUSED)
+        return None
 
     def bobina_loop(self, iterable):
         """Wraps the iterable of every {% for %} (see _CountingCodeGenerator)."""
@@ -925,15 +926,11 @@ class Sandbox(ImmutableSandboxedEnvironment):
         __self.loops.tick()
         for a in (*args, *kwargs.values()):
             check_size(a)
-        method = getattr(__obj, "__wrapped__", __obj)  # the sandbox wraps str.format
+        method = __obj
         owner, name = getattr(method, "__self__", None), getattr(method, "__name__", "")
         if isinstance(owner, str):
             if name in _WIDTH_METHODS:
                 check_widths((*args, *kwargs.values()))
-            elif name == "format":
-                check_format(owner, args, kwargs)
-            elif name == "format_map" and args and isinstance(args[0], dict):
-                check_format(owner, (), args[0])
             elif name == "join" and args:
                 args = (__self.materialized(args[0], owner), *args[1:])
                 check_estimate(join_size(owner, args[0]))
@@ -946,7 +943,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
         result = check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
         if getattr(__obj, "__func__", None) is Sandbox.bobina_value:  # {% set k = v %}: k is v, as it was
             return result
-        return carry(result, (owner, *args, *kwargs.values()))  # '{}'.format(d): what it makes is data
+        return carry(result, (owner, *args, *kwargs.values()))  # a method called with data: what it makes is data
 
     def materialized(self, items, sep=None):
         """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
@@ -964,30 +961,6 @@ class Sandbox(ImmutableSandboxedEnvironment):
             check_estimate(total)
             out.append(x)
         return out
-
-    def wrap_str_format(self, value):
-        """As Jinja's, with a formatter that checks each field's final spec (_BoundedFormatter)."""
-        import types
-        from functools import update_wrapper
-
-        if not isinstance(value, (types.MethodType, types.BuiltinMethodType)) or value.__name__ not in (
-            "format",
-            "format_map",
-        ):
-            return None
-        owner = value.__self__
-        if not isinstance(owner, str) or isinstance(owner, Markup):
-            return super().wrap_str_format(value)
-        formatter, is_map = _BoundedFormatter(self), value.__name__ == "format_map"
-
-        def wrapper(*args, **kwargs):
-            if is_map:
-                if kwargs or len(args) != 1:
-                    raise TypeError("format_map() takes a single mapping")
-                args, kwargs = (), args[0]
-            return type(owner)(formatter.vformat(owner, args, kwargs))
-
-        return update_wrapper(wrapper, value)
 
     def _bounded(self, result):
         """A lazy result (a generator from map, batch, slice …) is drawn with the deadline ticking and stops at

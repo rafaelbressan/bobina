@@ -95,8 +95,6 @@ def test_macros_cannot_run_forever(src):
         '{{ "1".zfill(10000000000) }}',
         '{{ "%10000000000d" | format(1) }}',
         '{{ "%.10000000000f" % 1 }}',
-        '{{ "{:>10000000000}".format(1) }}',
-        '{{ "{:{}}".format(1, 10000000000) }}',
         '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = n.s ~ n.s %}{% endfor %}',
         '{% set n = namespace(s="ab") %}{% for i in range(40) %}{% set n.s = n.s + n.s %}{% endfor %}',
         '{{ ("a" * 1000).join(("b" * 1000000) | list) }}',
@@ -119,16 +117,10 @@ def test_macros_cannot_run_forever(src):
         # widths from the arguments
         '{{ "%*d" % (10000000000, 1) }}',
         '{{ "%.*f" % (10000000000, 1.0) }}',
-        '{{ "{:{w}}".format(1, w=10000000000) }}',
-        '{{ "{:{w}}".format_map({"w": 10000000000}) }}',
         # review round 3: lazy joins, widths from strings, floats, items and rows, translate, expandtabs, replace
         '{{ ("b" * 1000000) | map("upper") | join("a" * 1000) }}',
         '{{ ("a" * 1000).join(("b" * 1000000) | map("upper")) }}',
         '{{ ("a" * 1000).join(("b" * 1000000) | select) }}',
-        '{{ "{:{w}}".format(1, w="10000000000") }}',
-        '{{ "{:{w}}".format(1, w=10000000000.0) }}',
-        '{{ "{0:{1[0]}}".format(1, ["10000000000"]) }}',
-        '{{ "{a:{w}}".format_map({"a": 1, "w": "10000000000"}) }}',
         '{{ ("a" * 1000000).translate({97: "b" * 1000}) }}',
         '{{ ("\\t" * 1000000).expandtabs(1000) }}',
         '{{ (["a"] * 100000) | replace("a", "b" * 1000) }}',
@@ -138,6 +130,25 @@ def test_no_value_grows_beyond_the_output_limit(src):
     start = time.monotonic()
     refused(src)
     assert time.monotonic() - start < 5  # refused before the memory is taken, not after
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        '{{ "{:>10000000000}".format(1) }}',
+        '{{ "{:{}}".format(1, 10000000000) }}',
+        '{{ "{:{w}}".format(1, w=10000000000) }}',
+        '{{ "{:{w}}".format_map({"w": 10000000000}) }}',
+        '{{ "{0:{1[0]}}".format(1, ["10000000000"]) }}',
+    ],
+)
+def test_str_format_is_refused_before_any_width(src):
+    assert "str.format is not allowed" in refused(src, code="M311")
+
+
+def test_a_namespace_nested_too_deeply_says_so():
+    src = "{% set ns = namespace(x=1) %}{% for i in range(1500) %}{% set ns.x = namespace(y=ns.x) %}{% endfor %}"
+    assert refused(src + "{{ ns.x }}") == "the template nests too deeply"
 
 
 @pytest.mark.parametrize(
@@ -165,7 +176,7 @@ def test_the_new_checks_leave_usual_templates_alone():
         "{{ 'a' ~ 1 ~ 'b' }} {% set s = 'hi ' ~ 2 %}{{ s }} {{ 'aaa bbb' | wordwrap(4) }} "
         "{{ 'a\\nb' | indent(2, true) }} {{ [1, 2, 3] | batch(2, 0) | list }} {{ [1, 2, 3] | slice(2) | list }} "
         "{{ ['a', 'b'] | map('upper') | join(',') }} {{ 'x'.replace('x', 'yy') }} {{ 12 * 3 - 1 }} {{ 7 // 2 }} "
-        "{{ '%5.1f' % 2.25 }} {{ '{:>4}'.format('a') }}"
+        "{{ '%5.1f' % 2.25 }} {{ '%4s' | format('a') }}"
     )
     assert rendered(res) == "a1b hi 2 aaa\nbbb   a\n  b [[1, 2], [3, 0]] [[1, 2], [3]] A,B yy 35 3   2.2    a"
 
