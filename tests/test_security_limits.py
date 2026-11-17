@@ -38,12 +38,16 @@ def rendered(res):
         '{% for c in "a" * 3000 %}{% endfor %}',  # a loop over a string, not range()
         "{% for c in [1, 2, 3] * 1000 %}{% endfor %}",  # over a list
         '{% for a in "x" * 100 %}{% for b in "x" * 100 %}{% endfor %}{% endfor %}',  # nested: 10 100 steps
-        "{% for x in [[1]] recursive %}{{ loop([[1]]) }}{% endfor %}",  # a recursive loop that never ends
         "{{ range(10 ** 9) | list | length }}",  # every step of a range spends, wherever it is taken
     ],
 )
 def test_every_loop_spends_the_budget(src):
     assert "loop iterations" in refused(src) or "too deeply" in refused(src)
+
+
+def test_recursive_loops_are_refused_before_they_run():
+    assert "recursive loops are not supported" in refused("{% for x in [[1]] recursive %}{{ loop([[1]]) }}{% endfor %}",
+                                                          "M311")  # fmt: skip
 
 
 def test_loops_over_data_are_counted_too():

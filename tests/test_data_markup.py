@@ -536,3 +536,71 @@ def test_two_thousand_distinct_values_as_markdown_build_in_time():
     start = time.perf_counter()
     res = md("{% for i in range(1999) %}{{ (d ~ i) | markdown }}\n\n{% endfor %}", d="**x** ")
     assert time.perf_counter() - start < 10 and len(res.doc.blocks) == 1999
+
+
+# --- the review of the allowlist ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "{% set t = '**{}**' | markdown %}{{ t.format(d) }}\n",
+        "{% set t = '{x}' | markdown %}{{ t.format_map({'x': d}) }}\n",
+        "{% set t = '**%s**' | markdown %}{{ t | format(d) }}\n",
+    ],
+)
+def test_formatting_the_authors_markdown_with_data_gives_data(src):
+    for value in (RAW, "::: {.box title=HACK}\nyo\n:::"):
+        res = md(src, d=value)
+        assert not raws(res) and not divs(res) and not fences(res), (src, value)
+
+
+def test_no_wrapper_hides_str_format_from_the_sandbox():
+    from jinja2.sandbox import SandboxedEnvironment
+
+    from bobina.templating import MdData, MdSafe, Trusted
+
+    jinja = SandboxedEnvironment()  # it wraps a bound str.format/format_map it can see: none may be hidden from it
+    for kind in (T, Trusted, MdSafe, MdData):
+        for name in ("format", "format_map"):
+            assert jinja.wrap_str_format(getattr(kind("{}"), name)) is not None, (kind, name)
+
+
+def test_a_default_with_data_is_its_text_in_expressions_and_the_authors_markdown_in_the_document():
+    front = "---\nfields:\n  k:\n    default: '{{ name }}!'\n  b:\n    default: '**{{ name }}**'\n---\n"
+    res = md(front + "{{ k | upper }}|{{ k }}|{{ k | length }}|{% if k == 'Bob!' %}eq{% endif %}|{{ k[0:2] }}\n\n"
+             "{{ other | default(b) }}\n", name="Bob")  # fmt: skip
+    assert "BOB!|Bob!|4|eq|Bo" in printed(res) and not codes(res)
+    assert any(r.bold for r in res.doc.blocks[1].runs)  # the author's ** around the data, which prints as text
+
+
+def test_a_default_without_data_is_the_authors_markdown_in_both():
+    res = build("---\nfields:\n  k:\n    default: '**{{ 2 + 2 }}**'\n---\n{{ k }}\n\n{{ k | upper }}\n")
+    assert res.doc.blocks[0].runs[0].bold and "**4**" in printed(res)
+
+
+def test_a_raw_block_in_the_authors_default_never_reaches_the_printer():
+    res = md('---\nfields:\n  k:\n    default: "```raw\\n1b 40\\n```\\n{{ name }}"\n---\n{{ k }}\n', name="Bob")
+    assert not raws(res)
+
+
+def test_the_authors_own_objects_are_not_data(tmp_path):
+    res = build("![](img/{{ seq.n }}.png)\n", base_dir=str(tmp_path))
+    assert "I101" in codes(res)  # looked for, not refused as a path from data
+    res = build("---\nx:\n  a: '**b**'\n---\n{% for k, v in x.items() | list %}{{ v | markdown }}{% endfor %}\n")
+    assert res.doc.blocks[0].runs[0].bold and "M120" not in codes(res)
+    res = build("{% set ns = namespace(x='**a**') %}{{ ns.x | markdown }} {{ self }}\n")
+    assert "M120" not in codes(res)
+
+
+def test_a_refused_construct_is_said_at_its_document_line_or_in_its_field_or_template(tmp_path):
+    with pytest.raises(SecurityError) as err:
+        build("---\na: 1\nb: 2\nc: 3\n---\nline1\nline2\n{% macro m() %}x{% endmacro %}\n")
+    assert err.value.nudge.line == 8
+    with pytest.raises(SecurityError) as err:
+        build("---\nfields:\n  k:\n    default: '{% macro m() %}x{% endmacro %}{{ 1 }}'\n---\n{{ k }}\n")
+    assert "default of field 'k'" in err.value.nudge.message
+    (tmp_path / "t.bob.md").write_text("one\n{% filter upper %}x{% endfilter %}\n")
+    with pytest.raises(SecurityError) as err:
+        build("---\ntemplate: t.bob.md\n---\n", base_dir=str(tmp_path))
+    assert "template t.bob.md, line 2" in err.value.nudge.message and err.value.nudge.line is None

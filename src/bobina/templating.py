@@ -18,6 +18,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -27,7 +28,8 @@ from babel import numbers as bnumbers
 from jinja2 import ChainableUndefined, TemplateSyntaxError, Undefined, UndefinedError, nodes, pass_context
 from jinja2.compiler import CodeGenerator
 from jinja2.exceptions import SecurityError as JinjaSecurityError
-from jinja2.runtime import LoopContext, Macro
+from jinja2.nodes import EvalContext
+from jinja2.runtime import Context, LoopContext, TemplateReference
 from jinja2.sandbox import ImmutableSandboxedEnvironment, SandboxedFormatter
 from jinja2.utils import Namespace
 from markupsafe import Markup
@@ -39,9 +41,8 @@ PH_OPEN, PH_CLOSE = "", ""
 PH_RE = re.compile(PH_OPEN + r"(\d+)" + PH_CLOSE)
 PH_SPLIT = re.compile(PH_OPEN + r"(\d*)" + PH_CLOSE)  # a placeholder, or the shell of one (no number)
 PH_KEEP = re.compile("(" + PH_OPEN + r"\d+" + PH_CLOSE + ")")
-MAX_ITER = 2000  # loop steps: every {% for %} step, recursive loop() item, range() step, number taken
+MAX_ITER = 2000  # loop steps: every {% for %} step, range() step, number taken
 MAX_OUTPUT = 2_000_000  # characters
-MAX_CALLS = 10_000  # macro calls (a recursive macro that branches is exponential)
 MAX_SECONDS = 10  # one render (a label of a batch, a document): a usual one takes milliseconds
 RESERVED = {
     "bob",
@@ -108,8 +109,9 @@ _STR_METHODS = {
 
 
 def taint(value):
-    """Marks a result derived from data: strings become Tainted, lists/tuples element by element."""
-    if isinstance(value, (Tainted, MdSafe)):
+    """Marks a result derived from data: strings become Tainted (an MdSafe too: data in it is no longer the
+    author's Markdown), lists/tuples element by element."""
+    if isinstance(value, Tainted):
         return value
     if isinstance(value, str):
         return Tainted(value)
@@ -152,13 +154,15 @@ def carry(result, inputs) -> object:
     """What an operation on values gives: never a reserved character; the author's own text stays Trusted only
     when it comes out unchanged (|default, |first), never when an operation made a new string ('{}'.format(…));
     a result from data is data (Tainted)."""
-    if isinstance(result, Trusted) and not _same(result, inputs):
+    if isinstance(result, (Trusted, MdSafe)) and not _same(result, inputs):
         result = str.__str__(result)  # '{}'.format(literal): Jinja gives back the type of the format string
     result = _scrubbed(result)
     return taint(result) if any(_has_taint(x) for x in inputs) else result
 
 
-PLAIN_TYPES = (str, bytes, int, float, complex, bool, type(None), Undefined, date, timedelta, decimal.Decimal, range)
+PLAIN_TYPES = (str, bytes, int, float, complex, bool, type(None), Undefined, date, dtime, timedelta, decimal.Decimal,
+               range)  # fmt: skip
+VIEWS = (type({}.keys()), type({}.values()), type({}.items()))
 
 
 def _has_taint(x) -> bool:
@@ -167,11 +171,14 @@ def _has_taint(x) -> bool:
     counted as data, so what the template makes from it is data too."""
     if isinstance(x, Tainted):
         return True
-    if isinstance(x, (list, tuple, set, frozenset)):
+    if isinstance(x, (list, tuple, set, frozenset, *VIEWS)):
         return any(_has_taint(v) for v in x)
     if isinstance(x, dict):
         return any(_has_taint(k) or _has_taint(v) for k, v in x.items())
-    return not (isinstance(x, (PLAIN_TYPES, Sandbox)) or callable(x))
+    if isinstance(x, Namespace):  # namespace(): what it holds
+        return _has_taint(dict(x._Namespace__attrs))
+    own = (PLAIN_TYPES, Sandbox, EvalContext, Context, SafeRange, Seq, Counter, LoopContext, TemplateReference)
+    return not (isinstance(x, own) or callable(x))
 
 
 def _data_texts(x) -> list[str]:
@@ -203,6 +210,20 @@ class Trusted(str):
     """The author's own text: a front matter value (the document's or its template's), a template field's default,
     a label. Only these get all of Markdown from | markdown. Anything computed from them (~, a filter, a method) is a
     plain str again, so it is not: trust is never inferred, it is only given here (render)."""
+
+
+class Default(Tainted):
+    """A template field's default with {{ }} that has data in it: its text (values resolved) for expressions, so
+    `k | upper` and `k == 'Bob!'` work; .source, the author's text with the values as placeholders, for the
+    document (finalize)."""
+
+    source: str = ""
+
+
+def author_md(text: str) -> str:
+    """The author's Markdown on its way into the document: without raw blocks (M121 is said where they are
+    written as a value, f_markdown)."""
+    return RAW_FENCE.sub("", text) if "raw" in text else text
 
 
 class MdData(str):
@@ -539,7 +560,7 @@ class CounterStore:
 
 
 class Budget:
-    """n steps (loop iterations, macro calls) and, with seconds, a deadline for the whole render: a loop of
+    """n steps (loop iterations) and, with seconds, a deadline for the whole render: a loop of
     filters over long values spends few steps but can still take minutes."""
 
     def __init__(self, n=MAX_ITER, what="loop iterations", seconds: float | None = None):
@@ -747,9 +768,12 @@ def allowed(node) -> None:
     a construct a future Jinja adds is refused until it is allowed here."""
     for n in (node, *node.find_all(nodes.Node)):
         kind = type(n).__name__
+        line = getattr(n, "lineno", None)
+        if kind == "For" and n.recursive:
+            raise SecurityError("M311", "recursive loops are not supported yet: loop over each level with {% for %}",
+                                line)  # fmt: skip
         if kind in ALLOWED_NODES:
             continue
-        line = getattr(n, "lineno", None)
         if kind in FILE_NODES:
             raise SecurityError("M310", "templates cannot read files (include/import are disabled)", line)
         what, instead = REFUSED_HELP.get(kind, (kind, "if, for, set x = …, with and {{ }} expressions"))
@@ -796,18 +820,18 @@ class _CountingCodeGenerator(CodeGenerator):
 
 
 class Sandbox(ImmutableSandboxedEnvironment):
-    """Jinja's sandbox plus bobina's limits (FORMAT.md §7, SECURITY.md): every {% for %} step and every macro call
-    spends a budget, every operation ticks the render's deadline, and no operation may build a value longer than
-    the whole output may be. Without this a short template could loop forever over a string or allocate
+    """Jinja's sandbox plus bobina's limits (FORMAT.md §7, SECURITY.md): every {% for %} step spends a budget,
+    every operation ticks the render's deadline, and no operation may build a value longer than the whole output
+    may be. Without this a short template could loop forever over a string or allocate
     gigabytes ('a' * 10**10) before any output is counted."""
 
     intercepted_binops = frozenset({"+", "-", "*", "/", "//", "%", "**"})
 
-    def __init__(self, loops: Budget, calls: Budget, **kw):
+    def __init__(self, loops: Budget, **kw):
         super().__init__(**kw)
-        self.loops, self.calls = loops, calls
+        self.loops = loops
         self.code_generator_class = _CountingCodeGenerator
-        self.concat = self.bobina_concat  # {% set %}…{% endset %}, macro bodies, {% filter %} blocks
+        self.concat = self.bobina_concat  # Template.render of a field's default
 
     def bobina_literal(self, text: str) -> str:
         """A string literal of the template: the author's own text (| markdown gives it all of Markdown)."""
@@ -878,10 +902,6 @@ class Sandbox(ImmutableSandboxedEnvironment):
 
     def call(__self, __context, __obj, *args, **kwargs):  # noqa: N805 - Jinja's signature
         __self.loops.tick()
-        if isinstance(__obj, Macro):
-            __self.calls.spend()
-        elif isinstance(__obj, LoopContext) and args:  # loop(children) in a recursive loop
-            args = (__self._spending(args[0]), *args[1:])
         for a in (*args, *kwargs.values()):
             check_size(a)
         method = getattr(__obj, "__wrapped__", __obj)  # the sandbox wraps str.format
@@ -1477,34 +1497,32 @@ def render(
             undefined_names.append(f"{group}.{name}" if group else name)  # {{ a.nope }}: 'a.nope', not 'nope'
             return ""
 
-    lengths: list[int] = []  # of each value once its placeholders are resolved (they nest: {% set %} blocks)
-
     def resolved_len(text: str) -> int:
         """What text becomes in the document: a placeholder counts as its value, not as its few characters."""
         n = len(text)
         if PH_OPEN in text:
             for m in PH_RE.finditer(text):
                 i = int(m.group(1))
-                n += (lengths[i] if i < len(lengths) else 0) - len(m.group(0))
+                n += (len(values[i].text) if i < len(values) else 0) - len(m.group(0))
         return n
 
-    def finalize(v):  # what is data stays marked as data in a block's output ({% set x %}…{% endset %}, macros)
-        if isinstance(v, MdSafe):  # the author's (a default's placeholders are real ones)
-            return str(v)
+    def finalize(v):  # every {{ }}: a placeholder (the only place one is made), or the author's Markdown
+        if isinstance(v, Default):  # a field's default: the author's text, its values placeholders
+            return v.source
+        if isinstance(v, MdSafe):  # the author's Markdown: never a raw block, never a reserved character
+            return author_md(_scrubbed(str(v)))
         if isinstance(v, Undefined):
             str(v)
             return ""
         if v is None:
             return ""
         text = _scrubbed(str(v))
-        lengths.append(resolved_len(text))
         values.append(Value(text, _has_taint(v), isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
         return Tainted(ph) if _has_taint(v) else ph
 
     env = Sandbox(
         budget,
-        Budget(MAX_CALLS, "macro calls"),
         finalize=finalize,
         undefined=RecUndefined,
         autoescape=False,
@@ -1539,12 +1557,26 @@ def render(
         }
     )
     env.globals.clear()
+
+    def default_value(made: str):
+        """A field's default with {{ }}: expressions see its text (its values resolved); the document gets the
+        author's text with its values as placeholders (Default.source), so `**{{ name }}**` stays bold and name stays
+        data. With no data in it, it is the author's Markdown (MdSafe)."""
+        used = [values[int(i)] for i in PH_RE.findall(made) if int(i) < len(values)]
+        text = PH_RE.sub(lambda m: values[int(m.group(1))].text if int(m.group(1)) < len(values) else "", made)
+        if not any(v.tainted for v in used):
+            return MdSafe(text)
+        out = Default(_scrubbed(text))
+        out.source = author_md(made)
+        return out
+
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                # the author's text, its values placeholders: `**{{ name }}**` stays bold, name stays data
-                ctx[k] = MdSafe(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
-            except SecurityError:
+                ctx[k] = default_value(env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
+            except SecurityError as e:
+                e.nudge.message = f"default of field '{k}': {e.nudge.message}"
+                e.nudge.line = None
                 raise
             except Exception as e:  # noqa: BLE001
                 raise ValueError(f"default of field '{k}': {e}") from e
@@ -1561,8 +1593,12 @@ def render(
         raise ValueError(syntax_error(env, body, e, line_offset)) from e
     except JinjaSecurityError as e:
         raise SecurityError("M311", f"unsafe template operation: {e}") from e
+    except SecurityError as e:  # refused by the allowlist: the line in the document
+        if e.nudge.line and e.nudge.code in ("M310", "M311"):
+            e.nudge.line += line_offset
+        raise
     except RecursionError:
-        raise SecurityError("M313", "a macro or a recursive loop calls itself too deeply") from None
+        raise SecurityError("M313", "the template nests too deeply") from None
     except MemoryError:
         raise SecurityError("M313", "the template needs more memory than any document") from None
     except UndefinedError as e:  # {{ lipsum() }}: calling something that is not defined

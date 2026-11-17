@@ -12,7 +12,7 @@ from . import profile as profiles
 from .emulator import Emulator
 from .layout import Layout
 from .model import Document, Paragraph, Run
-from .nudges import Nudges
+from .nudges import Nudges, SecurityError
 from .parser import parse
 from .rows import BitmapRow, FeedRow, QRRow, TextRow
 
@@ -253,7 +253,8 @@ def build(
         schema = template_fields(meta)
         defaults = {k: v["default"] for k, v in schema.items() if "default" in v}
     doc_keys = set(meta)  # what the document itself set, before the template's front matter joins in
-    if meta.get("template") and not plain:
+    template_name = str(meta["template"]) if meta.get("template") and not plain else ""
+    if template_name:
         tmeta, body, fm_lines = templating.split_front_matter(load_template(str(meta["template"]), base_dir))
         schema = template_fields(tmeta)
         labels = tmeta.get("labels")
@@ -294,10 +295,17 @@ def build(
         choice = locales.choose(meta, locale)  # plain text has no dates or prices: it never needs one
         for code, msg, hint in choice.notes:
             nudges.add(code, msg, None, hint)
-        rendered = templating.render(
-            body, meta, nudges, fields=fields, line_offset=fm_lines, counters=counters, defaults=defaults,
-            labels=labels, quiet_names=frozenset(empty_required), locale=choice,
-        )  # fmt: skip
+        try:
+            rendered = templating.render(
+                body, meta, nudges, fields=fields, line_offset=fm_lines, counters=counters, defaults=defaults,
+                labels=labels, quiet_names=frozenset(empty_required), locale=choice,
+            )  # fmt: skip
+        except SecurityError as e:  # refused in the template file, not in the document: say which, and its line
+            if template_name and e.nudge.code in ("M310", "M311"):
+                where = f", line {e.nudge.line}" if e.nudge.line else ""
+                e.nudge.message = f"template {template_name}{where}: {e.nudge.message}"
+                e.nudge.line = None
+            raise
         doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, values=rendered.values)
         doc.meta_lines = templating.front_matter_lines(source)
     rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
