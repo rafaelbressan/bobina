@@ -77,25 +77,60 @@ def test_text_outside_a_column_becomes_a_column_of_its_own_and_is_said():
     assert len(rows_of_columns(res)[0].columns.columns) == 2
 
 
+SHORT_HINT = (
+    "to close the columns write :::: (as many colons as the opening); to open another column write ::: {.column}"
+)
+
+
+def short_closers(res) -> list:
+    return [n for n in res.nudges if n.code == "M101" and "closes the :::: {.columns}" in n.message]
+
+
 def test_a_bare_line_of_colons_after_a_column_closes_the_columns_and_says_how_to_open_one():
     src = ":::: {.columns}\n::: {width=40%}\n" + QR + ":::\n:::\nCUSTOMER\n:::\n::::\n"  # the study's mistake
     res = build(src)
-    stray = [n for n in res.nudges if n.code == "M101" and n.line == 9]  # the ::: after CUSTOMER: nothing open
-    assert len(stray) == 1 and "the :::: {.columns} of line 1 were closed at line 7" in stray[0].message
-    assert stray[0].suggestion == "to open another column write ::: {.column} at line 7"
-    assert not [n for n in res.nudges if n.code == "M101" and n.line == 7]  # the closing line itself is valid
+    (said_once,) = short_closers(res)
+    assert said_once.line == 7 and said_once.message == "this ::: closes the :::: {.columns} of line 1"
+    assert said_once.suggestion == SHORT_HINT
+    strays = [n for n in res.nudges if n.code == "M101" and "no ::: block open" in n.message]
+    assert len(strays) == 2 and all("column" not in n.suggestion for n in strays)  # generic, no column hint
     d, text = res.doc.blocks[:2]
     assert len(d.children) == 1 and isinstance(text, Paragraph)  # one column; the text prints under it
 
 
-def test_columns_closed_by_as_many_colons_as_they_opened_with_are_not_said():
-    res = build("::: {.columns}\n::: {}\nA\n:::\n::: {}\nB\n:::\n:::\n")
+@pytest.mark.parametrize(
+    "src",
+    [
+        "::: {.columns}\n::: {}\nA\n:::\n::: {}\nB\n:::\n:::\n",  # three colons opened them, three close them
+        ":::: {.columns}\n::: {}\nA\n:::\n::: {}\nB\n:::\n::::\n\nafter\n",
+        ":::: {.columns}\n::: {}\nA\n:::\n::::::\n",  # more colons close too
+    ],
+)
+def test_columns_closed_by_as_many_colons_or_more_are_never_said(src):
+    res = build(src)
     assert [c for c in codes(res) if c != "P301"] == []
 
 
-def test_a_plain_line_of_colons_closing_the_columns_after_their_last_column_is_valid():
-    res = build(":::: {.columns}\n::: {}\nA\n:::\n::: {}\nB\n:::\n:::\n\nafter\n")
-    assert [c for c in codes(res) if c != "P301"] == [] and len(res.doc.blocks[0].children) == 2
+@pytest.mark.parametrize(
+    "src, line",
+    [
+        (":::: {.columns}\n::: {}\nA\n:::\n::: {}\nB\n:::\n:::\n", 8),  # after the last column: still said
+        (":::: {.columns}\n:::\nRua Exemplo\n:::\n::::\n", 2),  # before any column
+        (":::: {.columns}\n::: {}\nA\n:::\n:::\n::: {.column}\nB\n:::\n::::\n", 5),  # one line too many, a column
+        ("::::: {.box}\n:::: {.columns}\n::: {}\nA\n:::\n:::\nB\n:::::\n", 6),  # inside a box
+    ],
+)
+def test_a_shorter_line_of_colons_closing_columns_is_said_once_at_that_line(src, line):
+    res = build(src)
+    (said_once,) = short_closers(res)
+    assert said_once.line == line and said_once.suggestion == SHORT_HINT
+
+
+def test_text_right_inside_columns_closed_short_is_said_twice_each_with_its_fix():
+    res = build(":::: {.columns}\ntext\n:::\n")
+    (short,) = short_closers(res)
+    (loose,) = [n for n in res.nudges if "outside any column" in n.message]
+    assert short.suggestion == SHORT_HINT and "open each column with ::: {.column}" in loose.suggestion
 
 
 def test_a_box_right_inside_columns_is_a_column_drawn_as_a_box():
@@ -356,14 +391,14 @@ def test_settings_from_data_stay_text(value):
     "src",
     [
         "::: {.columns}\n::: {}\nA\n:::\n:::\nB\n:::\n",  # the columns closed by as many colons as opened them
-        ":::: {.columns}\n::: {}\nA\n:::\n:::\nB\n\n::: {.box}\nx\n:::\n:::\n",  # another block came between
-        ":::: {.columns}\n::: {}\nA\n:::\n:::\n:::\n",  # no text between: one line of colons too many
+        ":::: {.columns}\n::: {}\nA\n:::\n::::\n::::\n",  # a stray ::::
+        ":::: {.columns}\n::: {}\nA\n:::\n::::\n\n# Far away\n\ntext\n\n:::\n",  # a stray ::: far from them
     ],
 )
-def test_a_stray_line_of_colons_far_from_columns_gets_no_column_hint(src):
+def test_a_stray_line_of_colons_gets_the_plain_hint(src):
     res = build(src)
-    stray = [n for n in res.nudges if n.code == "M101"]
-    assert len(stray) == 1 and "column" not in stray[0].suggestion and "closed at line" not in stray[0].message
+    (stray,) = [n for n in res.nudges if n.code == "M101"]
+    assert "no ::: block open" in stray.message and "column" not in stray.suggestion
 
 
 def test_more_columns_than_letters_never_stand_past_the_paper():
@@ -374,8 +409,23 @@ def test_more_columns_than_letters_never_stand_past_the_paper():
 
 def test_a_bare_line_of_colons_right_after_the_columns_open_says_how_to_open_a_column():
     res = build(":::: {.columns wrap=wrap}\n:::\nRua Exemplo\n:::\n::::\n")  # the study's other mistake
-    assert any("before any column" in m for m in said(res, "M101"))
-    assert any("to open a column write ::: {.column}" in n.suggestion for n in res.nudges)
+    (said_once,) = short_closers(res)
+    assert said_once.line == 2 and said_once.suggestion == SHORT_HINT
+
+
+def test_widths_too_wide_with_wrap_do_not_suggest_wrap():
+    res = build(cols("A", opts="wrap=wrap", each=("width=40ch",)))
+    (n,) = [n for n in res.nudges if "widths ask for" in n.message]
+    assert "wrap=wrap" not in n.suggestion
+    assert "wrap=wrap" in [n for n in build(cols("A", "B", each=("width=20ch", "width=20ch"))).nudges
+                           if "widths ask for" in n.message][0].suggestion  # fmt: skip
+
+
+def test_each_problem_page_links_its_category():
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "docs" / "problems" / "L110.md").read_text(encoding="utf-8")
+    assert "[layout](layout.md)" in page and "[index](README.md)" in page
 
 
 def test_a_column_written_as_a_box_says_nothing_about_column():
@@ -405,7 +455,7 @@ def test_wrap_moves_a_column_whose_turned_block_would_be_cropped():
 def test_no_room_for_columns_is_said():
     inner = "> :::: {.columns}\n> ::: {}\n> deep\n> :::\n> ::::"
     res = build(cols(inner, "right", each=("width=1ch",)))
-    assert any("no room for columns here" in m for m in said(res, "M101"))
+    assert any("no room for columns here" in m for m in said(res, "L111"))
 
 
 def test_the_fix_for_a_moved_column_covers_too_many_columns():

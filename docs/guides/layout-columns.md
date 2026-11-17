@@ -20,8 +20,8 @@ Receipt 276712 · Series 4
 ````
 
 - A line of colons only always closes the innermost open block. Give the columns four colons (`::::`) and each
-  column three, so the file reads well. To open the next column write `::: {.column}` again: a bare `:::` there
-  closes the columns (`M101` says so).
+  column three, and **always close the columns with as many colons as opened them** (`::::`). To open the next
+  column write `::: {.column}` again: a bare `:::` there closes the columns (`M101` says so).
 - Any `::: {…}` right inside the columns is a column too (`::: {}`); a `::: {.box}` there is a column drawn as a box.
   Text outside every column prints as a column of its own (`M101`).
 - Names and values are lowercase; a value needs quotes only when it has a space.
@@ -77,8 +77,9 @@ bobina prints anyway and says what to fix (`bobina check FILE` shows the list wi
 
 | Code | When | Example message |
 |---|---|---|
-| `M101` | a bare `:::` closed the columns | `this ::: closes the :::: {.columns} of line 1, right after a column` → `to open another column write ::: {.column}` |
+| `M101` | fewer colons closed the columns | `this ::: closes the :::: {.columns} of line 1` → `to close the columns write ::::; to open another column write ::: {.column}` |
 | `M101` | text outside every column | `the text is inside :::: {.columns} but outside any column` |
 | `M101` | widths too wide, `wrap=nowrap` | `the columns' widths ask for 41 of the 32 letters: each narrowed to 16 + 15` |
 | `L110` | `wrap=wrap` moved a column | `column 2 does not fit beside column 1 (the widths ask for 41 of the 32 letters)` |
 | `Q101` | a squeezed QR code | `QR module 2 in raster mode: it may not scan` |
+| `L111` | no letter left for them (deep in boxes, quotes, lists) | `no room for columns here: what they hold prints one under the other` |

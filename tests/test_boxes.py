@@ -332,7 +332,7 @@ def test_boxes_deep_in_boxes_keep_four_letters_inside_and_never_crash():
     closes = "".join(f"{':' * (6 + i)}\n" for i in range(5))
     res = build(opens + "hi\n" + closes)
     assert "no room for that line" in " ".join(said(res, "M101"))
-    assert "prints without its frame" in " ".join(said(res, "M101"))
+    assert "prints without its frame" in " ".join(said(res, "L111"))
 
     def walk(row):
         b = row.box

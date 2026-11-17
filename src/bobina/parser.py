@@ -685,40 +685,22 @@ def _divs(nodes, nudges: Nudges, off: int, src=None) -> list:
     if not any(n.type == "fenced_div" for n in nodes):
         return list(nodes)
     stack = [_DivGroup(nodes[0])]  # the container itself
-    # Columns closed by a line shorter than theirs right after a column: valid (a line of colons closes the innermost
-    # block), but when text follows and then a line of colons with nothing open, that line was meant to close a
-    # column, and the short one to open it: (the columns, the line that closed them, text seen since).
-    early: list | None = None
     for n in nodes:
         if n.type != "fenced_div":
             stack[-1].children.append(n)
-            if early:
-                early[2] = True
         elif _div_info(n):
             stack.append(_DivGroup(n))
-            early = None
         elif len(stack) > 1:
             done = stack.pop()
             stack[-1].children.append(done)
-            early = None
-            outer, opened = done.opener.markup, _line(done.opener, off)
-            if done.columns and len(n.markup) < len(outer):
-                if not any(isinstance(k, _DivGroup) for k in done.children):  # nothing to close: meant to open one
-                    nudges.add("M101", f"this {n.markup} closes the {outer} {{.columns}} of line {opened} before any "
-                               "column", _line(n, off),
-                               f"to open a column write ::: {{.column}}; {outer} closes the columns")  # fmt: skip
-                elif isinstance(done.children[-1], _DivGroup):
-                    early = [done, _line(n, off), False]
+            outer = done.opener.markup
+            if done.columns and len(n.markup) < len(outer):  # often a line meant to open the next column
+                nudges.add("M101", f"this {n.markup} closes the {outer} {{.columns}} of line {_line(done.opener, off)}",
+                           _line(n, off), f"to close the columns write {outer} (as many colons as the opening); to "
+                           "open another column write ::: {.column}")  # fmt: skip
         else:
-            hint = "a line of colons only closes the ::: {…} above it; remove this one"
-            msg = f"a line of {n.markup} with no ::: block open: ignored"
-            if early and early[2]:  # columns, a short line of colons, text, this line: the text was a column
-                cols, at = early[0], _line(early[0].opener, off)
-                msg += (f" (the {cols.opener.markup} {{.columns}} of line {at} were closed at line {early[1]}: the "
-                        "text between prints under them)")  # fmt: skip
-                hint = f"to open another column write ::: {{.column}} at line {early[1]}"
-            early = None
-            nudges.add("M101", msg, _line(n, off), hint)
+            nudges.add("M101", f"a line of {n.markup} with no ::: block open: ignored", _line(n, off),
+                       "a line of colons only closes the ::: {…} above it; remove this one")  # fmt: skip
     while len(stack) > 1:
         done = stack.pop()
         done.closed = False

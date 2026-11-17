@@ -75,7 +75,8 @@ HELP_LAYOUT = """\
 bobina help layout — boxes and columns (docs/guides/layout.md, docs/guides/layout-columns.md)
 
 A line of three or more colons and {…} opens a block; a line of colons only closes the innermost one. Give the
-outer block more colons (::::) so the file reads well. Values need quotes only when they have a space.
+outer block more colons (::::) so the file reads well, and close it with as many. Values need quotes only when
+they have a space.
 
 BOX: a frame around blocks
   ::: {.box title="TABLE" title-style=border|inside|band .dashed|.dotted|.double width=half .center .shade}

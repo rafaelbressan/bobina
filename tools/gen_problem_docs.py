@@ -57,7 +57,9 @@ def page(code: str) -> str:
     lines += ["## What to do", "", e["fix"], ""]
     if e["evidence"]:
         lines += [f"Evidence: printed test {e['evidence']} (docs/printers/mtp-ii-58.md).", ""]
-    lines += [f"In the terminal: `bobina help {code}`. All codes: [index](README.md).", ""]
+    cat = e["category"]
+    lines += [f"In the terminal: `bobina help {code}`. All {cat} codes and their meaning: "
+              f"[{cat}]({cat.replace(' ', '-')}.md); every category: [index](README.md).", ""]  # fmt: skip
     return "\n".join(lines)
 
 

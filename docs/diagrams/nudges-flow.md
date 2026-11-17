@@ -221,6 +221,7 @@ from this list.
 | `L108` | note | the width each table column got (said by bobina check only) |  |
 | `L109` | warning | box title cut (…) |  |
 | `L110` | note | a column that did not fit moved to a new row |  |
+| `L111` | warning | no room for a box or columns here: what they hold printed without them |  |
 
 ### Codes (QR, barcodes, Pix)
 

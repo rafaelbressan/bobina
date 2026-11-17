@@ -74,6 +74,10 @@ FIX = {
         "width= or use wrap=nowrap (their content squeezes: text wraps, QR codes and images shrink). More columns "
         "than the paper has letters for (one each, and the gaps): use fewer columns, or gap=0."
     ),
+    "L111": (
+        "Put fewer boxes, quotes or lists around it: each takes letters from the line, and a box or columns need "
+        "some room. Without it, what they hold prints plainly, one block under the other."
+    ),
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",

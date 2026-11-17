@@ -1013,7 +1013,7 @@ class Layout:
         room = self.W - indent * cw
         least = _box_least(cw)
         if room < least:
-            self.n.add("M101", f"no room for a box here ({room // cw} letters, a box needs {least // cw}): what it "
+            self.n.add("L111", f"no room for a box here ({room // cw} letters, a box needs {least // cw}): what it "
                        "holds prints without its frame", line, "fewer boxes inside each other here")  # fmt: skip
             head = [Paragraph(line=line, runs=[Run(raw, bold=True)])] if title else []
             return self.blocks([*head, *d.children], indent)
@@ -1170,7 +1170,7 @@ class Layout:
         if not cols:
             return []
         if room < 1:
-            self.n.add("M101", "no room for columns here (not a letter left): what they hold prints one under the "
+            self.n.add("L111", "no room for columns here (not a letter left): what they hold prints one under the "
                        "other", line, "fewer quotes, lists or boxes around the columns")  # fmt: skip
             return self.blocks([b for c in cols for b in c.children], indent)
         wrap = a.kv.get("wrap", "nowrap")
@@ -1337,9 +1337,9 @@ class Layout:
             self.n.add("M101", f"gap={a.kv.get('gap')}: no room for it between {n} columns in {room} letters, {g} "
                        "used", line, "a smaller gap=, or fewer columns")  # fmt: skip
         if need + g * (n - 1) > room and any(w is not None for w in asked):
+            move = "" if self.wrapping else ", or wrap=wrap to move a column that does not fit to a new row"
             self.n.add("M101", f"the columns' widths ask for {need + g * (n - 1)} of the {room} letters: each "
-                       f"narrowed to {' + '.join(map(str, widths))}", line,
-                       "smaller width=, or wrap=wrap to move a column that does not fit to a new row")  # fmt: skip
+                       f"narrowed to {' + '.join(map(str, widths))}", line, "smaller width=" + move)  # fmt: skip
         parts, raws = [], []
         for c, w in zip(cols, widths, strict=True):
             with self.narrow(w * cw, "column"):

@@ -59,6 +59,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L108": ("note", "the width each table column got (said by bobina check only)", ""),
     "L109": ("warning", "box title cut (…)", ""),
     "L110": ("note", "a column that did not fit moved to a new row", ""),
+    "L111": ("warning", "no room for a box or columns here: what they hold printed without them", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),
