@@ -38,6 +38,12 @@ FEATURES = {
         "tested_on_paper": False,
         "evidence": "",
     },
+    "turned-columns": {
+        "title": "turned columns (:::: {.columns orientation=vertical}): a label along the roll, read sideways",
+        "where": "documents with :::: {.columns orientation=vertical} (docs/guides/layout-columns-turned.md)",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",
         "where": "tables with style=zebra or .shade (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",

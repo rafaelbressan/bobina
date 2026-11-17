@@ -78,6 +78,12 @@ FIX = {
         "Put fewer boxes, quotes or lists around it: each takes letters from the line, and a box or columns need "
         "some room. Without it, what they hold prints plainly, one block under the other."
     ),
+    "L112": (
+        "Turned columns are as tall as the paper is wide. Too tall: give the label more length (length=, or "
+        "length=auto), use less text or smaller sizes, or wrap=wrap to move a column to a label of its own; a block "
+        "drawn smaller: give it a smaller width= or size=. rotate=90 on columns turns their picture: for a label "
+        "read sideways write orientation=vertical instead (72 mm long unless length= says)."
+    ),
     # I images
     "I101": "Check the path (relative to the document) and that it is an image.",
     "I102": "Nothing to fix; set width= on the image to choose its size.",

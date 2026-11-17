@@ -743,7 +743,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](docs/guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](docs/guides/table-cells.md); [receipts](docs/guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
-| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](docs/guides/layout.md)) ⚠ not tested on paper; blocks side by side ([layout-columns](docs/guides/layout-columns.md), `bobina help layout`) ⚠ not tested on paper |
+| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](docs/guides/layout.md)) ⚠ not tested on paper; blocks side by side ([layout-columns](docs/guides/layout-columns.md), `bobina help layout`) ⚠ not tested on paper; `orientation=vertical`: along the roll, a label read sideways ⚠ not tested on paper |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](docs/guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
@@ -1079,18 +1079,14 @@ labels:
 - `required: true` → empty gives `M131` (a warning in the confirmation screen); a `default:` may be an expression.
 - `was: [old_name]` → a document that still uses a renamed field gets `M101` naming the new one.
 - `labels` are picked by the document language (`{{ label.total }}`) and overridable with `labels:` in the document.
-- Using one: `template: receipt` in front matter, the other keys are the fields. Lookup: a `.bob.md` path inside the
-  document folder, `~/.config/bobina/templates/NAME.bob.md`, then the built-ins: `receipt` (items, total, optional
-  Pix), `label`, `todo`, `card`, `note` and a gallery of shop tags (`bobina template list`; recipes in
-  [guides/templates.md](docs/guides/templates.md)).
+- Using one (`template: NAME`), where bobina finds it, the built-in ones, `template show` and `template new`:
+  [guides/templates.md](docs/guides/templates.md).
 - `--ask` (on `print`, `check`, `preview`) asks the fields still missing on the terminal, in the order the
   template declares them, showing `help`, `example` and the default (`[automatic]` for expressions);
   `type: table` fields take one row per line (`item; qty; price`, empty line to finish). A document without
   `fields:` gets its undeclared `{{ variables }}` asked. Answers are data, exactly like `--set` (literal,
   never Markdown or template code); fields already set by the front matter, `--set` or `--data` columns are
   not asked; a required field left empty prints with `M131`. No terminal → usage error.
-- `bobina template show NAME` lists the fields; `bobina template new NAME FILE` writes a starter with every field
-  marked `# required` / `# optional`.
 
 ## 9. Rendering contract
 
@@ -1166,6 +1162,7 @@ Nudges:
 | `L109` | warning | box title cut (…) |
 | `L110` | note | a column that did not fit moved to a new row |
 | `L111` | warning | no room for a box or columns: printed without them |
+| `L112` | note | turned columns: too tall (more labels, or a block drawn smaller), or meant by `rotate=90` |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
@@ -1445,7 +1442,8 @@ bobina preview box.bob.md -o box.png          # look before printing
 bobina print box.bob.md                       # confirmation screen, then paper
 ```
 
-A document uses a template with `template: NAME` in its front matter; **the other keys are the fields**. A field
+Built in: `receipt` (items, total, optional Pix), `note`, the recipes and the gallery below. A document uses a
+template with `template: NAME` in its front matter; **the other keys are the fields**. A field
 can also come from `--set NAME=VALUE`, `--ask` (asked on the terminal) or a column of `--data` (one label per row,
 see [batch-printing.md](docs/guides/batch-printing.md)). `locale: pt-BR` switches the template's fixed words and the date
 format to Portuguese (without it: the machine's, `bobina config get locale`). The full rules are in [FORMAT.md §8](docs/FORMAT.md).
@@ -1535,8 +1533,8 @@ the printer. Copy one, change the values, print.
 ## Your own templates
 
 A template is a `.bob.md` with a `fields:` front matter (FORMAT.md §8). Put it in `~/.config/bobina/templates/`
-and `template: my-price` finds it; one with the same name as a built-in one wins over it. A `.bob.md` path next
-to the document works too (`template: tags/price.bob.md`). The built-in ones are in
+and `template: my-price` finds it; one with the same name as a built-in one wins over it. A `.bob.md` path in
+the document's folder works too (`template: tags/price.bob.md`), and is looked for first. The built-in ones are in
 [`src/bobina/templates/`](src/bobina/templates): copy one and change its layout. `bobina template list`
 shows only the built-in ones.
 

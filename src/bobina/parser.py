@@ -746,7 +746,8 @@ def div_attrs(info: str, line: int, nudges: Nudges) -> Attrs:
     return a
 
 
-DIV_KEYS = frozenset({"title", "title-style", "wrap", "valign", "gap"})  # boxes' and columns' own keys and classes;
+# boxes' and columns' own keys and classes;
+DIV_KEYS = frozenset({"title", "title-style", "wrap", "valign", "gap", "length"})
 DIV_CLASSES = frozenset({"box", "shade", "columns", "column"})  # the rest of a ::: {…}: check_attrs
 COLUMNS_INFO = re.compile(r"^columns$|(?:^|[\s{])\.columns(?=[\s}]|$)")  # what opens :::: {.columns}
 

@@ -38,6 +38,7 @@ Receipt 276712 · Series 4
 | the columns | `wrap=nowrap` | the default: one row; the content squeezes into the columns |
 | the columns | `wrap=wrap` | a column that does not fit starts a new row, under the others (`L110`) |
 | the columns | `wrap=wrap-reverse` | the same, the new row above |
+| the columns | `orientation=vertical` | along the roll, a label read sideways ([turned columns](#turned-columns)) |
 
 ## How much fits
 
@@ -64,6 +65,13 @@ Mon to Sat 7am–10pm
 ```
 
 20 + 1 + 20 = 41 letters: on 58 mm the hours print under the address (`L110`); on 80 mm, beside it.
+
+## Turned columns
+
+`orientation=vertical` lays the columns out along the roll: a label `length=` long (72 mm by default, or `auto`)
+and as tall as the paper is wide, printed turned like a [turned table](tables.md#turned-tables), its top on the
+right. The widths share the length; content too tall for the label goes on in another label, never cut
+(`L110`, `L112`). Example, settings and rules: [layout-columns-turned.md](layout-columns-turned.md).
 
 ## On paper
 

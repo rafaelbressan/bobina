@@ -27,6 +27,8 @@ BRAILLE = [
 
 TEAR_MARK = " ⟶ "
 TURNED_TABLE = " ↻ table printed turned, header on the right "  # the terminal shows its text standing
+TURNED_COLUMNS = (" ↻ columns printed turned, top on the right ", " ↻ turned, top on the right ", " ↻ turned ",
+                  "↻")  # over turned columns, standing: the longest mark that fits the label  # fmt: skip
 
 
 def colors_off(env=None, flag: bool = False) -> str:
@@ -232,7 +234,8 @@ def _columns_view(cv, profile):
 
 def columns_lines(cv, profile, color: bool = False) -> list[str]:
     """A row of :::: {.columns} as a map of the paper: each column's own rows (drawn by lines() at its width: a box
-    or columns in it too) at its place on the paper, side by side, moved down as valign= placed it."""
+    or columns in it too) at its place on the paper, side by side, moved down as valign= placed it. A label of
+    turned columns is drawn standing, as it is read, under a ↻ mark (as a turned table is)."""
     placed, used = _columns_view(cv, profile)
     cols = []
     for c, (sub, x, w) in zip(cv.columns, placed, strict=True):
@@ -245,6 +248,9 @@ def columns_lines(cv, profile, color: bool = False) -> list[str]:
             line += " " * (x - at) + (ls[y] if y < len(ls) else " " * w)
             at = x + w
         out.append(line + " " * (used - at))
+    if cv.turned:
+        mark = next(m for m in TURNED_COLUMNS if len(m) <= used or m == "↻")
+        out.insert(0, mark.center(used, "┄"))
     return out
 
 

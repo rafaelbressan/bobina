@@ -72,6 +72,7 @@ class Columned:
 
     columns: list  # Column, left to right
     lead: str = ""  # what the view shows before the columns: the bars of the quotes they are in
+    turned: bool = False  # a label of turned columns (orientation=vertical): the view shows it standing, under a mark
 
 
 @dataclass

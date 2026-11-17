@@ -99,6 +99,7 @@ COLUMNS: blocks side by side, left to right; every column opens with ::: {.colum
   on .columns   valign=top|middle|bottom (all) · gap=1ch (letters between columns)
                 wrap=nowrap (the default: one row, the content squeezes; a QR too small to scan: Q101)
                 wrap=wrap (a column that does not fit starts a new row under: L110) · wrap=wrap-reverse (above)
+                orientation=vertical (along the roll, a label read sideways: length=72mm|auto; layout-columns-turned.md)
   Across the paper: 32 letters on 58 mm, 48 on 80 mm. A column does not fit when the widths ask for more letters
   than there are, or when its content needs more than it gets: its longest word, a QR code at the smallest size
   that scans, an image's width in mm.

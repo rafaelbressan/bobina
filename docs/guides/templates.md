@@ -11,7 +11,8 @@ bobina preview box.bob.md -o box.png          # look before printing
 bobina print box.bob.md                       # confirmation screen, then paper
 ```
 
-A document uses a template with `template: NAME` in its front matter; **the other keys are the fields**. A field
+Built in: `receipt` (items, total, optional Pix), `note`, the recipes and the gallery below. A document uses a
+template with `template: NAME` in its front matter; **the other keys are the fields**. A field
 can also come from `--set NAME=VALUE`, `--ask` (asked on the terminal) or a column of `--data` (one label per row,
 see [batch-printing.md](batch-printing.md)). `locale: pt-BR` switches the template's fixed words and the date
 format to Portuguese (without it: the machine's, `bobina config get locale`). The full rules are in [FORMAT.md §8](../FORMAT.md).
@@ -101,7 +102,7 @@ the printer. Copy one, change the values, print.
 ## Your own templates
 
 A template is a `.bob.md` with a `fields:` front matter (FORMAT.md §8). Put it in `~/.config/bobina/templates/`
-and `template: my-price` finds it; one with the same name as a built-in one wins over it. A `.bob.md` path next
-to the document works too (`template: tags/price.bob.md`). The built-in ones are in
+and `template: my-price` finds it; one with the same name as a built-in one wins over it. A `.bob.md` path in
+the document's folder works too (`template: tags/price.bob.md`), and is looked for first. The built-in ones are in
 [`src/bobina/templates/`](../../src/bobina/templates/): copy one and change its layout. `bobina template list`
 shows only the built-in ones.

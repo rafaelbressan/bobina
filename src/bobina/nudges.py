@@ -60,6 +60,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "L109": ("warning", "box title cut (…)", ""),
     "L110": ("note", "a column that did not fit moved to a new row", ""),
     "L111": ("warning", "no room for a box or columns here: what they hold printed without them", ""),
+    "L112": ("note", "turned columns: too tall (more labels, or a block drawn smaller), or meant by rotate=90", ""),
     # I images
     "I101": ("warning", "image not found or unreadable", ""),
     "I102": ("note", "image downscaled to the paper width", ""),

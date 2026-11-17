@@ -21,6 +21,7 @@ there with the evidence (printer, date, what was printed), and the mark and the 
 | the light grey dots behind table text (style=zebra, .shade on a cell or row) | ✅ MTP-II, 16/11 (four patterns: 2-dot squares every 4 dots chosen; grid strokes of 2 dots) | tables with `style=zebra` or `.shade` ([guides/tables.md](guides/tables.md), [table-cells](guides/table-cells.md)) |
 | boxes (::: {.box}): a frame around blocks, its title and grey, printed as one image | ⚠ not tested on paper (its 2-dot line and its grey were, alone) | documents with `::: {.box}` ([guides/layout.md](guides/layout.md)) |
 | columns side by side (:::: {.columns}), each row of them printed as one image | ⚠ not tested on paper | documents with `:::: {.columns}` ([guides/layout-columns.md](guides/layout-columns.md)) |
+| turned columns (:::: {.columns orientation=vertical}): a label along the roll, read sideways | ⚠ not tested on paper | documents with `:::: {.columns orientation=vertical}` ([guides/layout-columns-turned.md](guides/layout-columns-turned.md)) |
 | Imported printer profiles as a whole | ⚠ not tested on paper (model facts only) | every profile with `measured = false` |
 
 Have one of these printers? Print `bobina calibrate tear`, `bobina calibrate feed` and a label with accents and a
