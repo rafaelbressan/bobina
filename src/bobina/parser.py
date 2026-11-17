@@ -242,8 +242,8 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
             t = c.type
             if t == "text" and PH_OPEN in c.content and (sp := _splice()).inline(c.content):  # Markdown values
                 text = ""
-                for k, part in enumerate(PH_SPLIT.split(sp.expand(c.content))):
-                    if k % 2 and sp.markdown(int(part[1:-1])):
+                for k, part in enumerate(PH_SPLIT.split(c.content)):
+                    if k % 2 and int(part[1:-1]) in sp.direct:
                         if text:
                             out.append(Run(**{**st.__dict__, "text": text}))
                         text = ""
@@ -401,31 +401,46 @@ BROKEN_IMAGE = re.compile(r"!\[([^\]]*)\]\(((?!<)[^)\n]*\s[^)\n]*)\)")
 
 
 FROM_DATA = {  # what data rendered as Markdown may not bring: (code, what the problem says)
-    "raw": ("M121", "a raw block in a --data/--set value was removed"),
-    "image": ("M122", "an image inside a --data/--set value was removed (data cannot choose files)"),
-    "block": ("M123", "a code block, ::: line or link definition in a --data/--set value was removed"),
-    "kind": ("M123", "a code block's kind cannot come from a value that is not the author's: printed as text"),
+    "raw": ("M121", "a raw block was removed from a value that is not the author's own (data or computed)"),
+    "image": ("M122", "an image was removed from a value that is not the author's own (data or computed)"),
+    "block": (
+        "M123",
+        "a code block, ::: line or link definition was removed from a value that is not the author's "
+        "own (data or computed)",
+    ),
+    "kind": ("M123", "a code block's kind cannot come from a value that is not the author's own: printed as text"),
 }
-DATA_HINT = "data brings text, lists, quotes, tables and headings; other markup belongs in the document"
+DATA_HINT = (
+    "such a value brings text, lists, quotes, tables and headings; other markup: in the document, or a value of its "
+    "front matter"
+)
 ATTR_GUARD = "\ue004"  # a { of data while its Markdown is read: never a {…} attribute (templating.RESERVED_CHARS)
 
 
 class _Splice:
     """Values rendered as Markdown that are not the author's own ({{ value | markdown }} on data, a computed string,
-    a literal…: templating.MdData): placeholders in the document, as every value is, filled in once the document is
-    parsed. A placeholder alone in its paragraph (with the author's {…} after it or not) becomes the value's blocks;
-    one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line breaks. In a
-    code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }}). A placeholder of
-    a {% set %} block or a macro holding one is opened first, so the one inside is spliced too."""
+    a number…: templating.MdData): placeholders in the document, as every value is, filled in once the document is
+    parsed. Only where | markdown is written in the document itself: a placeholder alone in its paragraph (with the
+    author's {…} after it or not) becomes the value's blocks; one inside a paragraph, a heading, a list item or a
+    table cell, its text with its emphasis and line breaks. In a code span, a code block or an attribute it stays the
+    plain value (resolved later, as {{ d }}); inside a {% set %} block or a macro's output, its plain text
+    (Rendered.resolve), with a note."""
 
     def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=()):
         self.values, self.nudges, self.off = values or [], nudges, off
         self.line = 0  # the document line (1-based, offset) of the block being read: refusals inside it go there
-        self.parsed: dict[int, tuple[list[Block], list[tuple[str, str]]]] = {}
+        self.parsed: dict[str, tuple[list[Block], list[tuple[str, str]]]] = {}
+        self.said: set[tuple[str, str]] = set()  # each refusal once per value (by its text: a loop repeats it)
         self.at: dict[int, int] = {}  # placeholder -> the document line it is written on
-        for k, text in enumerate(lines):
-            for m in PH_RE.finditer(text):
-                self.at.setdefault(int(m.group(1)), k + 1 + off)
+        if any(v.markdown for v in self.values):
+            for k, text in enumerate(lines):
+                for m in PH_RE.finditer(text):
+                    self.at.setdefault(int(m.group(1)), k + 1 + off)
+        self.direct = {i for i in self.at if self.markdown(i)}  # the ones to splice: written in the document
+        held = {i for i, v in enumerate(self.values) if v.markdown} - self.direct
+        if held and nudges is not None:
+            nudges.add("M120", "a value rendered as Markdown inside a {% set %} block or a macro prints as plain text",
+                       None, "write | markdown where the value is printed in the document")  # fmt: skip
 
     def value(self, i: int):
         return self.values[i] if 0 <= i < len(self.values) else None
@@ -434,46 +449,16 @@ class _Splice:
         v = self.value(i)
         return bool(v and v.markdown)
 
-    def holds(self, i: int, depth: int = 0) -> bool:
-        """The value at placeholder i is, or holds, one to splice."""
-        v = self.value(i)
-        if v is None or depth > 8:
-            return False
-        return v.markdown or any(self.holds(int(m.group(1)), depth + 1) for m in PH_RE.finditer(v.text))
-
-    def expand(self, text: str) -> str:
-        """`text` with the placeholders of {% set %} blocks and macros that hold one to splice opened (their text:
-        the template's own, and placeholders), so that one is found where it is."""
-        if not self.values or PH_OPEN not in text:
-            return text
-
-        def opened(m):
-            i = int(m.group(1))
-            if self.markdown(i) or not self.holds(i):
-                return m.group(0)
-            line = self.at.get(i)
-            for inner in PH_RE.finditer(self.values[i].text):
-                if line:
-                    self.at.setdefault(int(inner.group(1)), line)
-            return self.values[i].text
-
-        for _ in range(8):
-            done = PH_RE.sub(opened, text)
-            if done == text:
-                break
-            text = done
-        return text
-
     def inline(self, text: str) -> bool:
-        """`text` holds a placeholder to splice (directly, or in a {% set %} block's or a macro's)."""
-        return bool(self.values) and any(self.holds(int(m.group(1))) for m in PH_RE.finditer(text))
+        """`text` holds a placeholder to splice."""
+        return bool(self.direct) and any(int(m.group(1)) in self.direct for m in PH_RE.finditer(text))
 
     def block(self, content: str) -> tuple[int, Attrs] | None:
         """(the placeholder, the author's {…} on its line or the lines under it) when a paragraph is only one
-        placeholder to splice, else None."""
-        if not self.values:
+        placeholder to splice, else None. Read on the document's own text only."""
+        if not self.direct or PH_OPEN not in content:
             return None
-        lines = self.expand(content).split("\n")
+        lines = content.split("\n")
         a = Attrs()
         while len(lines) > 1 and (m := ATTRS_ONLY.fullmatch(lines[-1])) and (got := parse_attrs(m.group(1))):
             a = got.merged(a)
@@ -485,17 +470,19 @@ class _Splice:
         if tail and (got := parse_attrs(tail.group(1))) is not None:
             a, line = got.merged(a), line[: tail.start()]
         m = PH_RE.fullmatch(line.strip())
-        return (int(m.group(1)), a) if m and self.markdown(int(m.group(1))) else None
+        return (int(m.group(1)), a) if m and int(m.group(1)) in self.direct else None
 
     def blocks(self, i: int, line: int) -> list[Block]:
         """The value's blocks (copies), each at the document's `line`; its refusals said where it is written."""
         import copy
 
-        if i not in self.parsed:
-            self.parsed[i] = data_blocks(self.values[i].text)
-        kept, refused = self.parsed[i]
+        if self.values[i].text not in self.parsed:  # by text: a loop parses it once
+            self.parsed[self.values[i].text] = data_blocks(self.values[i].text)
+        kept, refused = self.parsed[self.values[i].text]
         for code, message in refused:
-            self.nudges.add(code, message, self.at.get(i, line), DATA_HINT)
+            if (self.values[i].text, code) not in self.said:  # once per value (a loop too), where first written
+                self.said.add((self.values[i].text, code))
+                self.nudges.add(code, message, self.at.get(i, line), DATA_HINT)
         out = copy.deepcopy(kept)
         for b in _all_blocks(out):
             b.line = line
@@ -569,6 +556,11 @@ def data_blocks(text: str) -> tuple[list[Block], list[tuple[str, str]]]:
     for r in _all_runs(kept):
         r.text = r.text.replace(ATTR_GUARD, "{")
     return kept, list(dict.fromkeys(refused))
+
+
+def data_plain(text: str) -> str:
+    """A value that is not the author's own, as plain text: what data_blocks keeps, its markup gone."""
+    return "".join(r.text for r in _flat(data_blocks(text)[0]))
 
 
 def _all_blocks(blocks):

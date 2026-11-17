@@ -148,12 +148,15 @@ FIX = {
         "colons always closes the innermost open block."
     ),
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
-    "M121": "Raw blocks cannot come from data: put them in the document.",
-    "M122": "Images cannot come from data values: put the image in the document.",
+    "M121": "Raw blocks cannot come from a value that is not the author's own: put them in the document.",
+    "M122": (
+        "Images cannot come from a value that is not the author's own (data, or computed in the template): put the "
+        "image in the document or in its front matter."
+    ),
     "M123": (
-        "Nothing to fix when the value is data: it brings text, lists, quotes, tables and headings only. Code "
-        "blocks, boxes and link definitions belong in the document: put the fences or ::: lines there, around "
-        "{{ value | markdown }}."
+        "A value that is not the author's own (data, or computed in the template) brings text, lists, quotes, tables "
+        "and headings only. Code blocks, boxes and link definitions belong in the document or its front matter: put "
+        "the fences or ::: lines around {{ value | markdown }}."
     ),
     "M124": "Nothing to fix: they are private-use characters bobina keeps for its own marks; no text needs them.",
     "M130": "Give the variable a value: front matter, --set NAME=VALUE or a data column (the message lists them).",

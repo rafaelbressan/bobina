@@ -1165,7 +1165,7 @@ Nudges:
 | `L106` | note | table turned vertical |
 | `L107` | warning | table columns narrowed to fit the paper |
 | `L108` | note | the width each table column got (`check` only) |
-| `L109` | warning | box border title cut (…) |
+| `L109` | warning | box title cut (…) |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
@@ -1197,9 +1197,9 @@ Nudges:
 | `M105` | warning | a `:::` block is never closed |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
-| `M122` | warning | image removed from a --data/--set value |
-| `M123` | warning | code block, `:::` or link definition removed from data |
-| `M124` | warning | reserved characters removed from data |
+| `M122` | warning | image removed (not the author's value) |
+| `M123` | warning | code block, `:::` or link definition removed (not the author's value) |
+| `M124` | warning | reserved characters removed |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |
@@ -1574,7 +1574,7 @@ with vendor commands), paper and battery, counters, and the history of the last 
 | Data evaluated as template (`{{ seq.x.take(500) }}`) | values are never re-evaluated | `test_data_is_never_evaluated_as_template` |
 | Data emits printer commands | no `raw` from data (`M314`, `RAW_FENCE` in `| markdown`); C0/C1 controls stripped from all text and barcode data | `test_no_path_lets_data_emit_raw_bytes`, `test_control_characters_never_reach_the_printer` |
 | Data chooses a file to print/preview | image paths with data are refused (`M312`); `| markdown` on data removes images and image fences (`M122`) | `test_data_cannot_*` |
-| Data rendered as Markdown (`| markdown`) makes markup | only the author's values (front matter, fields, labels, literals) get all of Markdown; any other is a placeholder, parsed alone and spliced in after parsing as text markup, never `{…}` (`M121`–`M123`). `~`, `%`, `*`, `format`, loops, filters, methods, `{% set %}`, macros, column names keep data data; no bytes (`M311`) | `test_data_markup.py` |
+| Data rendered as Markdown (`| markdown`) makes markup | only the author's values (front matter, fields, labels, literals) get all of Markdown; any other is a placeholder, spliced in where `| markdown` is written as text markup, never `{…}` (`M121`–`M123`); held in a `{% set %}` or a macro it is plain text. Every operation on data gives data; no bytes (`M311`) | `test_data_markup.py` |
 | Shared document pulls files via `template:` | template paths must be inside the document folder or `~/.config/bobina/templates` (`M315`) | `test_template_path_outside_document_folder_is_refused` |
 | Template escapes the sandbox | Jinja `ImmutableSandboxedEnvironment`, no loader (`include`/`import` → `M310`), unsafe attributes → `M311`, globals cleared except `now`, `today`, `seq`, `range`, `namespace`, `label` | `test_sandbox_blocks` |
 | Paper/CPU exhaustion | 2000 loop steps, 10 000 macro calls, 10 s, values and output ≤ 2 MB (`M313`), 1000 renders / 100 copies per batch, nudge above 30 cm, **confirmation before every print** | `test_sandbox_blocks`, `test_security_limits.py` |

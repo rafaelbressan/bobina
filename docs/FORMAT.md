@@ -488,7 +488,7 @@ Nudges:
 | `L106` | note | table turned vertical |
 | `L107` | warning | table columns narrowed to fit the paper |
 | `L108` | note | the width each table column got (`check` only) |
-| `L109` | warning | box border title cut (…) |
+| `L109` | warning | box title cut (…) |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
 | `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
@@ -520,9 +520,9 @@ Nudges:
 | `M105` | warning | a `:::` block is never closed |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
-| `M122` | warning | image removed from a --data/--set value |
-| `M123` | warning | code block, `:::` or link definition removed from data |
-| `M124` | warning | reserved characters removed from data |
+| `M122` | warning | image removed (not the author's value) |
+| `M123` | warning | code block, `:::` or link definition removed (not the author's value) |
+| `M124` | warning | reserved characters removed |
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |

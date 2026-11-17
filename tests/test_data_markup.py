@@ -328,12 +328,14 @@ def test_an_image_path_from_data_is_refused_through_nested_set_blocks():
         md(src, d="/etc/secret.png")
 
 
-def test_markdown_inside_a_macro_or_a_set_block_is_spliced():
+def test_markdown_held_in_a_macro_or_a_set_block_prints_as_plain_text_with_a_note():
     for src in ("{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) }}\n",
-                "{% set x %}A {{ d | markdown }}{% endset %}{{ x }}\n"):  # fmt: skip
-        res = md(src, d="**B**")
-        runs = [r for b in res.doc.blocks for r in b.runs]
-        assert any(r.bold and r.text == "B" for r in runs) and "**" not in printed(res), src
+                "{% set x %}A {{ d | markdown }}{% endset %}{{ x }}\n",
+                "{% set x %}{{ d | markdown }}{% endset %}{{ x ~ e }}\n"):  # fmt: skip
+        res = md(src, d="**B** :heart: ![i](p.png)", e=" {.invert size=3}")
+        text = printed(res)
+        assert "B" in text and "**" not in text and not any(b.attrs.classes for b in res.doc.blocks), src
+        assert "M120" in codes(res) and not images(res), src
 
 
 def test_the_authors_front_matter_may_name_a_code_blocks_kind():
@@ -375,3 +377,67 @@ def test_two_documents_built_at_once_keep_their_own_values():
     for t in threads:
         t.join()
     assert results == {f"N{k}": f"N{k}" for k in range(8)}
+
+
+# --- the last review's proofs of concept -------------------------------------------------------------------------
+
+LETTERS = "'#*![]()abcdefghijklmnopqrstuvwxyz.:/ '"
+
+
+@pytest.mark.parametrize("step", ["'{}{}'.format(ns.s, a)", "ns.s ~ a", "'%s%s' % (ns.s, a)"])
+def test_data_rebuilt_from_the_templates_own_letters_is_not_the_authors(step):
+    src = ("{% set ns = namespace(s='') %}{% for c in d %}{% for a in " + LETTERS + " %}{% if c == a %}"
+           "{% set ns.s = " + step + " %}{% endif %}{% endfor %}{% endfor %}{{ ns.s | markdown }}\n")  # fmt: skip
+    res = md(src, d="![x](/etc/passwd)")
+    assert not images(res) and "M122" in codes(res)
+
+
+def test_an_operation_on_the_authors_text_is_not_the_authors():
+    from bobina.templating import Trusted, carry
+
+    assert type(carry(Trusted("{}{}"), (Trusted("{}{}"), "x"))) is str
+    res = build("---\na: '**x**'\n---\n{{ '{}{}'.format(a, '![i](p.png)') | markdown }}\n")
+    assert not images(res) and "M122" in codes(res)
+
+
+@pytest.mark.parametrize("f, lead", [(8, ""), (5, "{% set ns.x %}{{ 1 | markdown }}{% endset %}")])
+def test_nested_set_blocks_build_in_well_under_a_second(f, lead):
+    src = ("{% set ns = namespace(x='') %}" + lead + "{% for i in range(8) %}{% set ns.x %}"
+           "{% for j in range(" + str(f) + ") %}{{ ns.x }}{% endfor %}{% endset %}{% endfor %}{{ ns.x }}\n")  # fmt: skip
+    start = time.perf_counter()
+    build(src)
+    assert time.perf_counter() - start < 1
+
+
+def test_data_after_a_set_block_brings_no_attributes_and_no_icons():
+    icon = chr(0x10F000)
+    for d2 in (" {.invert size=3}", "\n{.invert}", icon):
+        res = md("{% set x %}{{ d | markdown }}{% endset %}{{ x ~ d2 }} tail\n", d="**hello**", d2=d2)
+        assert not any(b.attrs.classes or b.attrs.kv for b in res.doc.blocks)
+        text = printed(res)
+        assert "hello" in text and "**" not in text and icon not in text
+
+
+@pytest.mark.parametrize("expr", ["d | striptags", "(d ~ '') | striptags", "d | replace('&', '&') | striptags"])
+def test_entities_in_data_never_become_a_placeholder(expr):
+    res = md("{{ a | markdown }}\n\n{{ " + expr + " }}\n", a="SECRET", d="&#57344;0&#57345; {.invert size=4}")
+    assert printed(res).count("SECRET") == 1
+    assert not any(b.attrs.classes for b in res.doc.blocks)
+
+
+def test_a_literal_kind_is_the_same_as_a_set_one():
+    folded = build("```{{ 'qr' }}\nhi\n```\n")
+    named = build("{% set k = 'qr' %}```{{ k }}\nhi\n```\n")
+    assert codes(folded) == codes(named) and "M123" not in codes(folded)
+    assert [type(b) for b in folded.doc.blocks] == [type(b) for b in named.doc.blocks]
+
+
+def test_a_refusal_is_said_once_per_value_even_in_a_loop():
+    res = md("{% for i in range(50) %}{{ d | markdown }}\n\n{% endfor %}", d="![x](p.png)")
+    assert len(said(res, "M122")) == 1
+
+
+def test_the_refusals_say_the_value_is_not_the_authors_own():
+    res = build("{% set p = 'p.png' %}{{ ('![i](' ~ p ~ ')') | markdown }}\n")  # computed: no --data in sight
+    (refusal,) = said(res, "M122")
+    assert "not the author's own" in refusal.message and "--data" not in refusal.message

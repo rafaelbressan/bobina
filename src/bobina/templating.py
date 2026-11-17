@@ -67,7 +67,7 @@ class Tainted(str):
         if name in _STR_METHODS:
 
             def kept(*a, **k):
-                return taint(attr(*a, **k))
+                return carry(attr(*a, **k), (self, *a, *k.values()))
 
             return kept
         return attr
@@ -114,6 +114,55 @@ def taint(value):
     return value
 
 
+class Captured(Tainted):
+    """The output of a {% set %}…{% endset %} block or a macro that holds values: the template's own text and
+    placeholders, never data's text (a value is always a placeholder there). Its placeholders are real ones, so they
+    are kept where the reserved characters of every other value from data are removed (carry, finalize)."""
+
+
+def _kept(x) -> frozenset:
+    """The real placeholders a value carries: all of a block's (Captured, or a plain string: a {% set %} block's or a
+    macro's output, the template's own), and those a value made with one keeps."""
+    if isinstance(x, Captured) or (isinstance(x, str) and not isinstance(x, Tainted)):
+        return frozenset(m.group(0) for m in PH_RE.finditer(x))
+    if isinstance(x, Tainted):
+        return getattr(x, "kept", frozenset())
+    if isinstance(x, (list, tuple)):
+        return frozenset().union(*(_kept(v) for v in x))
+    return frozenset()
+
+
+def _scrubbed(value, keep: frozenset = frozenset()):
+    """A value from data without bobina's reserved characters (|striptags or |unescape can make them from an
+    entity, after clean_data read the value), but for the real placeholders in `keep`."""
+    if isinstance(value, str):
+        if not RESERVED_CHARS.search(value):
+            return value
+        parts = re.split(f"({PH_OPEN}\\d+{PH_CLOSE})", str.__str__(value))
+        return "".join(x if k % 2 and x in keep else RESERVED_CHARS.sub("", x) for k, x in enumerate(parts))
+    if isinstance(value, (list, tuple)):
+        return type(value)(_scrubbed(v, keep) for v in value)
+    return value
+
+
+def carry(result, inputs) -> object:
+    """What an operation on values gives: the author's own text never stays Trusted (trust is given, never
+    carried); a result from data is data (Tainted), without reserved characters but for the real placeholders of
+    {% set %} blocks it was made with; from {% set %} blocks only, Captured."""
+    if isinstance(result, Trusted):
+        result = str.__str__(result)  # '{}'.format(literal): Jinja gives back the type of the format string
+    tainted = [x for x in inputs if _has_taint(x)]
+    if not tainted:
+        return result
+    if isinstance(result, str) and all(isinstance(x, Captured) for x in tainted):
+        return Captured(result)
+    keep = frozenset().union(*(_kept(x) for x in inputs))
+    out = taint(_scrubbed(result, keep))
+    if keep and isinstance(out, Tainted):
+        out.kept = keep
+    return out
+
+
 def _has_taint(x) -> bool:
     if isinstance(x, Tainted):
         return True
@@ -140,8 +189,7 @@ def keep_taint(f):
 
     @functools.wraps(f)  # keeps jinja_pass_arg (filters that receive the environment or the context)
     def wrapper(*a, **k):
-        r = f(*a, **k)
-        return taint(r) if any(_has_taint(x) for x in (*a, *k.values())) else r
+        return carry(f(*a, **k), (*a, *k.values()))
 
     return wrapper
 
@@ -230,18 +278,29 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
+    plains: dict[int, str] = field(default_factory=dict, repr=False)  # Markdown values held in set blocks: text
 
     def resolve(self, s: str) -> str:
         from . import icons
 
-        def value(m):  # a value never brings an icon, even typed in (data joined with ~ is no longer tainted)
-            return icons.strip(self.values[int(m.group(1))].text)
+        def value(m, held: bool):  # a value never brings an icon, even typed in
+            v = self.values[int(m.group(1))]
+            return icons.strip(self.plain(int(m.group(1))) if held and v.markdown else v.text)
 
-        for _ in range(4):  # defaults may nest placeholders once
+        for k in range(4):  # defaults may nest placeholders once
             if PH_OPEN not in s:
                 break
-            s = PH_RE.sub(value, s)
+            s = PH_RE.sub(lambda m, held=k > 0: value(m, held), s)
         return s
+
+    def plain(self, i: int) -> str:
+        """The text of a value rendered as Markdown that a {% set %} block or a macro holds: its words without
+        markup (it is spliced only where | markdown is written in the document)."""
+        if i not in self.plains:
+            from .parser import data_plain
+
+            self.plains[i] = data_plain(self.values[i].text)
+        return self.plains[i]
 
     def tainted_in(self, s: str) -> bool:
         seen, todo = set(), list(PH_RE.findall(s))
@@ -698,6 +757,13 @@ class _CountingCodeGenerator(CodeGenerator):
         else:
             super().visit_Const(node, frame)
 
+    def _output_child_to_const(self, node, frame, finalize):
+        """An expression is never folded at compile time: {{ 'qr' }} is a Trusted literal at run time, like
+        {% set k = 'qr' %}. The document's own text (TemplateData) still is: it is the source, not a value."""
+        if isinstance(node, nodes.TemplateData):
+            return super()._output_child_to_const(node, frame, finalize)
+        raise nodes.Impossible()
+
     def visit_Concat(self, node, frame):  # no constant folding: the result size is checked at render time
         self.write("environment.bobina_join((")
         for arg in node.nodes:
@@ -752,8 +818,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
         """a ~ b ~ c: as Jinja's str_join, with its size known before it is joined (call() ticks)."""
         texts = [str(p) for p in parts]
         check_estimate(sum(len(t) for t in texts))
-        joined = "".join(texts)
-        return Tainted(joined) if any(_has_taint(p) for p in parts) else joined  # d ~ "" is still data
+        return carry("".join(texts), parts)  # d ~ "" is still data
 
     def bobina_concat(self, buffer):
         """The output of a block kept as a value: it stops growing at MAX_OUTPUT, as the document does."""
@@ -763,7 +828,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
             check_estimate(size)
             out.append(chunk)
         joined = "".join(out)
-        return Tainted(joined) if any(_has_taint(c) for c in out) else joined
+        return Captured(joined) if any(_has_taint(c) for c in out) else joined  # placeholders, never data's text
 
     def call_binop(self, context, operator, left, right):
         self.loops.tick()
@@ -787,7 +852,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
         elif operator == "%" and isinstance(left, str):
             check_format(left, right if isinstance(right, tuple) else (right,))
         result = check_size(super().call_binop(context, operator, left, right))
-        return taint(result) if _has_taint(left) or _has_taint(right) else result  # '%s' % d, d * 2
+        return carry(result, (left, right))  # '%s' % d, d * 2
 
     def call(__self, __context, __obj, *args, **kwargs):  # noqa: N805 - Jinja's signature
         __self.loops.tick()
@@ -816,9 +881,11 @@ class Sandbox(ImmutableSandboxedEnvironment):
             elif name == "expandtabs":
                 check_estimate(expandtabs_size(owner, (*args, *kwargs.values(), 8)[0]))
         result = check_size(__self._bounded(super().call(__context, __obj, *args, **kwargs)))
-        if _has_taint(owner) or any(_has_taint(a) for a in (*args, *kwargs.values())):
-            return taint(result)  # '{}'.format(d), a macro called with data: what they make is data
-        return result
+        if getattr(__obj, "__func__", None) is Sandbox.bobina_value:  # {% set k = v %}: k is v, as it was
+            return result
+        if isinstance(__obj, Macro):  # its output is the template's text and placeholders, never data's text
+            return Captured(result) if isinstance(result, str) and _has_taint((*args, *kwargs.values())) else result
+        return carry(result, (owner, *args, *kwargs.values()))  # '{}'.format(d): what it makes is data
 
     def materialized(self, items, sep=None):
         """A lazy input (a generator, map/select output) drawn into a list, with the deadline ticking and at most
@@ -1226,7 +1293,8 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     def f_markdown(_context, v):
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
         # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
-        text = LINE_BREAK.sub("\n", str(v))
+        text = str(v) if isinstance(v, Captured) or not _has_taint(v) else _scrubbed(str(v), _kept(v))
+        text = LINE_BREAK.sub("\n", text)
         if isinstance(v, (Trusted, MdSafe)):  # proven to be the author's own: all of Markdown but raw blocks
             cleaned = RAW_FENCE.sub("", text)
             if cleaned != text:
@@ -1408,7 +1476,7 @@ def render(
             return ""
         if v is None:
             return ""
-        text = str(v)
+        text = str(v) if isinstance(v, Captured) or not _has_taint(v) else str(_scrubbed(str(v), _kept(v)))
         lengths.append(resolved_len(text))
         values.append(Value(text, _has_taint(v), isinstance(v, (MdData, TaintedMd)), isinstance(v, Trusted)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
