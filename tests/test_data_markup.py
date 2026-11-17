@@ -1,17 +1,20 @@
-"""Data rendered as Markdown (`{{ value | markdown }}` on a --data/--set value) brings text markup only (SECURITY.md,
-FORMAT §7.4). Two layers: the value is parsed alone and written again with only paragraphs, emphasis, inline code,
-links as text, headings, lists, quotes, tables, rules and {…} (parser.data_markdown), so that nothing in it can
-open, close or continue a block around it; then, on the whole document, any block whose marker came from data is
-refused again (parse, one pass). Data stays data through every operation of the template."""
+"""Data rendered as Markdown (`{{ value | markdown }}` on a --data/--set value) never enters the document's source:
+it is a placeholder there, like every value, and once the document is parsed the value, parsed alone, is spliced
+in with text markup only (paragraphs, emphasis, inline code, links as text, headings, lists, quotes, tables,
+rules). It never sets attributes, defines links, opens or closes a block, or meets the template's text. Data stays
+data through every operation of the template, and never carries bobina's reserved characters (SECURITY.md,
+FORMAT §7.4)."""
 
 import time
 
 import pytest
 from PIL import Image
 
+from bobina import view
 from bobina.engine import build
 from bobina.model import Div, Fence, Heading, ListBlock, Paragraph, Quote, Table
-from bobina.rows import BitmapRow, RawRow
+from bobina.nudges import SecurityError
+from bobina.rows import BitmapRow, QRRow, RawRow
 from bobina.templating import Tainted
 
 T = Tainted
@@ -21,6 +24,10 @@ BOX = "x\n::: {.box title=HACK}\ny"
 
 def codes(res) -> set[str]:
     return {n.code for n in res.nudges}
+
+
+def said(res, code: str) -> list:
+    return [n for n in res.nudges if n.code == code]
 
 
 def raws(res) -> list[bytes]:
@@ -48,6 +55,10 @@ def fences(res) -> list[Fence]:
     return [b for b in walk(res.doc.blocks) if isinstance(b, Fence)]
 
 
+def printed(res) -> str:
+    return "\n".join(view.lines(res.rows, res.profile))
+
+
 def md(template: str, **values):
     return build(template, fields={k: T(v) for k, v in values.items()})
 
@@ -59,7 +70,7 @@ def photo(tmp_path):
     return str(p)
 
 
-# --- 1. data stays data through every operation ------------------------------------------------------------------
+# --- data stays data through every operation of the template ------------------------------------------------------
 
 
 EXPRS = [
@@ -80,33 +91,34 @@ def test_whatever_the_template_does_with_data_it_brings_no_raw_image_or_box(expr
 def test_line_breaks_of_any_kind(crlf):
     for expr in ("d", "('%s' % d)", "('{}'.format(d))"):
         res = md("{{ " + expr + " | markdown }}\n", d=RAW.replace("\n", crlf))
-        assert not raws(res) and "M121" in codes(res)
+        assert not raws(res) and len(said(res, "M121")) == 1
 
 
-def test_a_loop_over_the_letters_of_data_gives_data():
-    res = md("{% for c in d %}{{ c | markdown }}{% endfor %}\nend\n", d=RAW)
-    assert not raws(res) and not fences(res)
-    res = md("{% for x in [d, 'ok'] %}{{ x | markdown }}{% endfor %}\nend\n", d=RAW)  # a list holding data
-    assert not raws(res) and "M121" in codes(res)
-    res = md(
-        "{% macro m() %}{{ caller() | markdown }}{% endmacro %}{% call m() %}{{ d | markdown }}{% endcall %}", d=RAW
-    )
-    assert not raws(res)
+def test_loops_set_blocks_macros_and_caller_keep_data_data(photo):
+    for src in (
+        "{% for c in d %}{{ c | markdown }}{% endfor %}\nend\n",
+        "{% for x in [d, 'ok'] %}{{ x | markdown }}{% endfor %}\nend\n",
+        "{% set x %}{{ d }}{% endset %}{{ x | markdown }}\n",
+        "{% set x %}{{ d | markdown }}{% endset %}{{ x | replace(x[0], '') | markdown }}\n",
+        "{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) | markdown }}\n",
+        "{% macro m() %}{{ caller() | markdown }}{% endmacro %}{% call m() %}{{ d | markdown }}{% endcall %}\n",
+    ):
+        for value in (RAW, f"![x]({photo})"):
+            res = md(src, d=value)
+            assert not raws(res) and not images(res) and not fences(res), src
 
 
-def test_a_set_block_holding_data_is_data_even_with_its_marks_cut():
-    src = "{% set x %}{{ d | markdown }}{% endset %}{{ x | replace(x[0], '') | markdown }}\n"
-    res = md(src, d=RAW)
-    assert not raws(res) and "M121" in codes(res)
+def test_bytes_cannot_launder_data():
+    with pytest.raises(SecurityError):
+        md("{{ d.encode().decode() | markdown }}\n", d=RAW)
 
 
-def test_a_macro_called_with_data_gives_data(photo):
-    src = "{% macro m(v) %}{{ v | markdown }}{% endmacro %}{{ m(d) | markdown }}\n"
-    res = md(src, d=f"![x]({photo})")
+def test_data_column_names_are_data_too(photo):
+    res = build("{% for k in row %}{{ k | markdown }}{% endfor %}\n", fields={"row": {T(f"![x]({photo})"): T("v")}})
     assert not images(res) and "M122" in codes(res)
 
 
-# --- 2. only text markup, and nothing that reaches past the value -------------------------------------------------
+# --- only text markup, said at the document's line, once ---------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -117,27 +129,58 @@ def test_a_macro_called_with_data_gives_data(photo):
         ("x\n> ```raw\n> 1b 40\n> ```\n", "M121"),  # in a quote
         ("x\n- ```raw\n  1b 40\n  ```\n", "M121"),  # in a list item
         ("x\n~~~raw\n1b 40\n~~~\n", "M121"),
-        ("```qr\nhttps://evil.example\n```", "M123"),  # a code of any kind: data does not make objects
+        ("```qr\nhttps://evil.example\n```", "M123"),  # data does not make objects
         ('```pay {scheme=pix to="x@y.z" name=A city=B}\n```', "M123"),
         ("```barcode\n123\n```", "M123"),
         ("```contact whatsapp\n+55 11 90000-0000\n```", "M123"),
         ("```\nplain code\n```", "M123"),
         ("para\n\n    indented code\n", "M123"),
         ("x\n::: {.box}\ny\n:::", "M123"),
-        ("[logo]: /etc/passwd\n", "M123"),  # a link definition the document's ![logo][logo] would use
+        ("one\n:::\ntwo", "M123"),
+        ("[logo]: /etc/passwd\n", "M123"),
+        ('[logo]:\n  /etc/passwd\n  "title"\n', "M123"),  # a definition over lines
     ],
 )
-def test_blocks_data_may_not_make_are_removed_and_said(value, code):
-    res = md("{{ d | markdown }}\n", d=value)
-    assert not raws(res) and not fences(res) and not divs(res) and code in codes(res)
+def test_blocks_data_may_not_bring_are_refused_at_the_documents_line_once(value, code):
+    res = md("intro\n\n{{ d | markdown }}\n", d=value)
+    assert not raws(res) and not fences(res) and not divs(res)
+    (refusal,) = said(res, code)
+    assert refusal.line == 3
 
 
 def test_text_markup_from_data_works():
     value = "# Title\n\n**bold** and *it* ~~old~~ `code` [link](https://x.example)\n\n- a\n- b\n\n> q\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---"  # noqa: E501
     res = md("{{ d | markdown }}\n", d=value)
     kinds = {type(b) for b in walk(res.doc.blocks)}
-    assert {Heading, Paragraph, ListBlock, Quote, Table} <= kinds
-    assert not codes(res) - {"M120"}
+    assert {Heading, Paragraph, ListBlock, Quote, Table} <= kinds and codes(res) == {"M120"}
+    assert "`code`" not in printed(res) and "code" in printed(res)  # no escape ever printed
+
+
+def test_data_never_sets_attributes():
+    res = md("```qr\nhttps://shop.example\n```\n{{ d | markdown }}\n", d="{module=1 width=10 .left}")
+    assert isinstance(res.doc.blocks[0], Fence) and not res.doc.blocks[0].attrs.kv
+    assert "{module=1 width=10 .left}" in printed(res)
+    res = md("# Sale {{ d | markdown }}\n", d="now {.invert size=huge}")
+    heading = res.doc.blocks[0]
+    assert not heading.attrs.classes and "{.invert size=huge}" in "".join(r.text for r in heading.runs)
+
+
+def test_a_payment_cannot_be_rewritten_by_data():
+    tpl = '```pay {scheme=pix to="shop@example.com" name=Shop city=Rio amount=10.00}\n```\n{{ d | markdown }}\n'
+    res = md(tpl, d="{amount=500 to=thief@example.com}")
+    (pay,) = fences(res)
+    assert pay.attrs.kv["amount"] == "10.00" and pay.attrs.kv["to"] == "shop@example.com"
+
+
+def test_data_never_defines_a_link_the_document_uses(photo, tmp_path):
+    logo = tmp_path / "logo.png"
+    Image.new("L", (40, 20), 255).save(logo)
+    for value in (f"[logo]: {photo}", f"[logo]:\n  {photo}", f"\\[x]\n[logo]: {photo}"):
+        res = md(f"![logo][logo]\n\n[logo]: {logo}\n\n{{{{ d | markdown }}}}\n", d=value)
+        assert [b.src for b in res.doc.blocks if type(b).__name__ == "Image"] == [str(logo)]
+        assert "M123" in codes(res) or value.startswith("\\")  # after a paragraph line it is only text
+    res = md(f"{{{{ d | markdown }}}}: {photo}\n\n![logo][logo]\n", d="[logo]")  # [label] then the document's
+    assert not images(res)
 
 
 def test_two_values_on_one_line_never_join_into_markup(photo):
@@ -147,11 +190,12 @@ def test_two_values_on_one_line_never_join_into_markup(photo):
         assert not raws(res) and not divs(res) and not images(res) and not fences(res), (a, b)
 
 
-def test_data_never_closes_or_continues_the_documents_code_block():
-    res = md("~~~\n{{ d | markdown }}\n~~~\nend\n", d="x\n```\n~~~\n::: {.box title=HACK}\nq\n```")
-    (fence,) = fences(res)  # the document's, with what data may bring: its own code block is removed
-    assert fence.content == "x\n" and not divs(res) and "M123" in codes(res)
-    assert isinstance(res.doc.blocks[-1], Paragraph)
+def test_in_the_documents_code_the_value_is_plain_text_with_no_escapes():
+    value = "x\n```\n~~~\n::: {.box title=HACK}\nq\n```"
+    res = md("~~~\n{{ d | markdown }}\n~~~\nend `{{ d | markdown }}`\n", d=value)
+    (fence,) = fences(res)
+    assert res.rendered.resolve(fence.content) == value + "\n" and not divs(res)
+    assert "\\" not in printed(res) and isinstance(res.doc.blocks[-1], Paragraph)
 
 
 @pytest.mark.parametrize("value", ["x\n```\n", "x\n~~~\n", "x\n````", "one\n:::\ntwo", "one\r:::\rtwo",
@@ -163,17 +207,26 @@ def test_data_never_swallows_or_closes_the_documents_box(value):
     assert "M105" not in codes(res)
 
 
-def test_the_documents_raw_and_image_blocks_never_take_data(photo):
-    res = md("```raw\n{{ d | markdown }}\n```\n", d="1b 40")
-    assert not raws(res) and "M121" in codes(res)
-    res = md("```image\n{{ d | markdown }}\n```\n", d=photo)
-    assert not images(res) and "M122" in codes(res)
+def test_the_documents_raw_block_never_takes_data_and_its_image_block_never_a_path(photo):
+    with pytest.raises(SecurityError):
+        md("```raw\n{{ d | markdown }}\n```\n", d="1b 40")
+    with pytest.raises(SecurityError):
+        md("```image\n{{ d | markdown }}\n```\n", d=photo)
 
 
 def test_data_never_chooses_a_code_blocks_kind():
     res = md("```{{ lang | markdown }}\n1b 40\n```\n", lang="raw")
     (fence,) = fences(res)
     assert fence.kind == "text" and fence.content == "1b 40\n" and not raws(res) and "M123" in codes(res)
+
+
+def test_the_documents_box_title_and_qr_caption_may_come_from_data():
+    res = md('::: {.box title="{{ t | markdown }}"}\nx\n:::\n', t="**TABLE** 4")
+    assert divs(res) and "**TABLE** 4" in printed(res)
+    res = md('```qr {caption="{{ c | markdown }}"}\nhttps://shop.example\n```\n', c="Menu *today*")
+    (qr,) = fences(res)
+    assert qr.kind == "qr" and qr.attrs.kv["caption"] and "M123" not in codes(res)
+    assert [r for r in res.rows if isinstance(r, (QRRow, BitmapRow))]
 
 
 def test_a_long_chain_of_tildes_prints_quickly_and_says_it():
@@ -196,11 +249,11 @@ def test_a_big_document_with_data_costs_about_what_it_costs_without():
     assert marked < plain * 1.5 + 0.2
 
 
-# --- no false positives -----------------------------------------------------------------------------------------
+# --- no false positives ------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("data", ["for", "Shop", "secret", "100"])
-def test_data_that_appears_in_the_authors_own_text_changes_nothing(data, photo, tmp_path):
+def test_data_that_appears_in_the_authors_own_text_changes_nothing(data, tmp_path):
     folder = tmp_path / "secret-shop-for-100"
     folder.mkdir()
     logo = folder / "logo.png"
@@ -220,26 +273,20 @@ def test_plain_values_are_unchanged_and_the_authors_markdown_keeps_everything():
 # --- data never carries bobina's reserved characters -------------------------------------------------------------
 
 
-def printed(res) -> str:
-    from bobina import view
-
-    return "\n".join(view.lines(res.rows, res.profile))
-
-
 def test_a_value_with_a_placeholder_character_cannot_show_another_values_text():
-    res = md("A={{ a }}\n\nB={{ b }}\n", a="SECRET", b="0")
+    res = md("A={{ a }}\n\nB={{ b }}\n", a="SECRET", b="\ue0000\ue001")
     assert printed(res).count("SECRET") == 1 and "M124" in codes(res)
-    res = build("A={{ a }}\n\nB={{ b[0] }}\n", fields={"a": "SECRET", "b": ["0"]})  # in a list too
+    res = build("A={{ a }}\n\nB={{ b[0] }}\n", fields={"a": "SECRET", "b": ["\ue0000\ue001"]})  # in a list too
     assert printed(res).count("SECRET") == 1 and "M124" in codes(res)
+    res = build("{% for k in row %}{{ k }}{% endfor %}\n", fields={"row": {T("\ue0000\ue001"): T("v")}})  # a key
+    assert "M124" in codes(res)
 
 
-def test_a_value_with_the_marks_of_data_cannot_fake_or_cut_one():
-    res = md("{{ d | markdown }}\n", d="x\n```raw\n1b 40\n```\ny")
-    assert not raws(res) and "M124" in codes(res) and "M121" in codes(res)
-    res = md("{{ d }}\n", d="abc")
-    assert "abc" in printed(res) and "M124" in codes(res)
+def test_ordinary_data_is_untouched_and_not_copied():
+    fields = {"d": T("Café 10:30 · R$ 4,50"), "rows": [{"a": T("1")}]}
+    from bobina.nudges import Nudges
+    from bobina.templating import clean_data
 
-
-def test_ordinary_data_is_untouched():
-    res = md("{{ d }}\n", d="Café 10:30 · R$ 4,50")
+    assert clean_data(fields, Nudges()) is fields
+    res = build("{{ d }}\n", fields=fields)
     assert "Café 10:30 · R$ 4,50" in printed(res) and "M124" not in codes(res)

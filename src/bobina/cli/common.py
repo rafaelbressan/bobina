@@ -614,9 +614,10 @@ def read_data(args) -> tuple[list[dict] | None, list[int] | None, list[tuple[str
     names = {src[0] for src in sources} if named else set()
     out = []
     for r in rows:
-        d = datasource.nest({k: v if datasource.internal(k) else Tainted(v) for k, v in r.items() if k}, names)
+        d = datasource.nest({k if datasource.internal(k) else Tainted(k): v if datasource.internal(k) else Tainted(v)
+                             for k, v in r.items() if k}, names)  # fmt: skip
         if "row" not in d:  # {{ row['Product Name'] }}: the columns exactly as the file names them
-            d["row"] = {k: Tainted(v) for k, v in r.items() if k in originals}
+            d["row"] = {Tainted(k): Tainted(v) for k, v in r.items() if k in originals}
         out.append(d)
     return out, per_row, notes
 

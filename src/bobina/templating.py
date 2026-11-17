@@ -115,7 +115,7 @@ def taint(value):
 
 
 def _has_taint(x) -> bool:
-    if isinstance(x, (Tainted, TaintedMd)):
+    if isinstance(x, Tainted):
         return True
     if isinstance(x, (list, tuple)):
         return any(_has_taint(v) for v in x)
@@ -150,51 +150,55 @@ class MdSafe(str):
     """A value explicitly marked to be interpreted as Markdown."""
 
 
-class TaintedMd(MdSafe):
-    """Data rendered as Markdown (| markdown on a --data/--set value): its text is wrapped in TAINT_OPEN and
-    TAINT_CLOSE, so where it lands in the document is known (data_spans) and parser.data_markup can refuse the
-    markup it must not make. Still data: anything built from it stays tainted."""
+class TaintedMd(Tainted):
+    """Data to render as Markdown ({{ value | markdown }} on a --data/--set value). It never enters the document's
+    source: like any value it is a placeholder there, and once the document is parsed the parser splices in the
+    value parsed alone, with text markup only (parser.data_blocks). Anything built from it is plain data."""
 
 
-TAINT_OPEN, TAINT_CLOSE = "\ue002", "\ue003"  # private use, next to the placeholders' (PH_OPEN, PH_CLOSE)
-RESERVED_CHARS = re.compile("[\ue000-\ue003]")  # bobina's own marks (PH_OPEN, PH_CLOSE, TAINT_OPEN, TAINT_CLOSE); icons
+RESERVED_CHARS = re.compile("[\ue000-\ue004]")  # bobina's own marks (PH_OPEN, PH_CLOSE, parser.ATTR_GUARD…); icons
 # use another area (icons.PUA, Supplementary Private Use Area-B), untouched
 
 
 def clean_data(fields: dict | None, nudges: Nudges) -> dict | None:
-    """The data of a job (--data rows, --set, --ask answers, MCP and chat fields, joined sources) without the
-    characters bobina reserves for its own marks: a value can then never point at another value's text (a
-    placeholder) nor fake or cut the mark of data rendered as Markdown. Said once (M124) when some were there."""
-    found = False
+    """The data of a job (--data rows, --set, --ask answers, MCP and chat fields, joined sources; keys too) without
+    the characters bobina reserves for its own marks: a value can then never point at another value's text (a
+    placeholder). Said once (M124) when some were there; the same container when there were none."""
+
+    def dirty(v) -> bool:
+        if isinstance(v, str):
+            return bool(RESERVED_CHARS.search(v))
+        if isinstance(v, dict):
+            return any(dirty(k) or dirty(x) for k, x in v.items())
+        if isinstance(v, (list, tuple)):
+            return any(dirty(x) for x in v)
+        return False
 
     def clean(v):
-        nonlocal found
         if isinstance(v, str):
-            if not RESERVED_CHARS.search(v):
-                return v
-            found = True
             out = RESERVED_CHARS.sub("", str.__str__(v))
             return Tainted(out) if isinstance(v, Tainted) else out
         if isinstance(v, dict):
-            return {k: clean(x) for k, x in v.items()}
+            return {clean(k): clean(x) for k, x in v.items()}
         if isinstance(v, (list, tuple)):
             return type(v)(clean(x) for x in v)
         return v
 
-    out = clean(fields) if fields else fields
-    if found:
-        nudges.add(
-            "M124",
-            "characters bobina reserves for its own marks were removed from a --data/--set value",
-            suggestion="nothing to fix: they are private-use characters (U+E000 to U+E003) no text needs",
-        )
-    return out
+    if not fields or not dirty(fields):
+        return fields
+    nudges.add(
+        "M124",
+        "characters bobina reserves for its own marks were removed from a --data/--set value",
+        suggestion="nothing to fix: they are private-use characters (U+E000 to U+E004) no text needs",
+    )
+    return clean(fields)
 
 
 @dataclass
 class Value:
     text: str
     tainted: bool = False
+    markdown: bool = False  # data to splice as Markdown after parsing (TaintedMd); its text is the data as given
 
 
 @dataclass
@@ -203,7 +207,10 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
-    spans: list[tuple[int, int]] = field(default_factory=list)  # where data rendered as Markdown is in text
+
+    def markdown(self) -> dict[int, str]:
+        """The placeholders of data rendered as Markdown: index -> the data (parse splices it in)."""
+        return {i: v.text for i, v in enumerate(self.values) if v.markdown}
 
     def resolve(self, s: str) -> str:
         from . import icons
@@ -683,6 +690,12 @@ class Sandbox(ImmutableSandboxedEnvironment):
         self.loops, self.calls = loops, calls
         self.code_generator_class = _CountingCodeGenerator
         self.concat = self.bobina_concat  # {% set %}…{% endset %}, macro bodies, {% filter %} blocks
+
+    def is_safe_attribute(self, obj, attr, value):
+        """As Jinja's, and no bytes: d.encode().decode() would give back data without its mark (M311)."""
+        if attr in ("encode", "decode") and isinstance(obj, (str, bytes, bytearray)):
+            return False
+        return super().is_safe_attribute(obj, attr, value)
 
     def bobina_loop(self, iterable):
         """Wraps the iterable of every {% for %} (see _CountingCodeGenerator)."""
@@ -1180,21 +1193,15 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
         # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
         text = LINE_BREAK.sub("\n", str(v))
-        cleaned = RAW_FENCE.sub("", text)
-        if cleaned != text:
-            nudges.add("M121", "a raw block inside a variable was removed")
-        if not _has_taint(v):  # the author's own value: all of Markdown
+        if not _has_taint(v):  # the author's own value: all of Markdown but raw blocks
+            cleaned = RAW_FENCE.sub("", text)
+            if cleaned != text:
+                nudges.add("M121", "a raw block inside a variable was removed")
             return MdSafe(cleaned)
         from . import icons
-        from .parser import data_markdown
 
-        # data never brings an icon: icon characters go, and :name: is escaped so the parser keeps it as text
-        cleaned = icons.ONE.sub(lambda m: "\\" + m.group(0), icons.strip(text))
         nudges.add("M120", "a value from --data/--set is rendered as Markdown (| markdown)")
-        cleaned = cleaned.replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")  # data never fakes a mark
-        # only text markup, written so that nothing in it can open or close a block of the document around it;
-        # and where it lands is marked, for the parser's second check (parse)
-        return TaintedMd(TAINT_OPEN + data_markdown(cleaned, nudges) + TAINT_CLOSE)
+        return TaintedMd(icons.strip(text))  # a placeholder in the document; spliced in after parsing
 
     return {
         **text_filters(loc),
@@ -1216,32 +1223,6 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
 
 RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?^[ \t]*\1[ \t]*$\n?", re.S | re.M | re.I)
 LINE_BREAK = re.compile(r"\r\n?")
-
-
-def data_spans(text: str) -> tuple[str, list[tuple[int, int]]]:
-    """The rendered document without the TAINT_OPEN/TAINT_CLOSE marks of data rendered as Markdown, its line breaks
-    as markdown-it reads them (\\n), and where that data now is: [(start, end)] in the text returned. Nested marks
-    (data rendered twice) count as their outermost pair."""
-    text = LINE_BREAK.sub("\n", text)
-    if TAINT_OPEN not in text:
-        return text.replace(TAINT_CLOSE, ""), []
-    out, spans, depth, start = [], [], 0, 0
-    size = 0
-    for piece in re.split(f"([{TAINT_OPEN}{TAINT_CLOSE}])", text):
-        if piece == TAINT_OPEN:
-            depth += 1
-            if depth == 1:
-                start = size
-        elif piece == TAINT_CLOSE:
-            if depth == 1 and size > start:
-                spans.append((start, size))
-            depth = max(0, depth - 1)
-        else:
-            out.append(piece)
-            size += len(piece)
-    if depth and size > start:  # a mark never closed (a filter cut it): to the end, never less
-        spans.append((start, size))
-    return "".join(out), spans
 
 
 # ---------------------------------------------------------------- render
@@ -1385,15 +1366,15 @@ def render(
 
     def finalize(v):  # what is data stays marked as data in a block's output ({% set x %}…{% endset %}, macros)
         if isinstance(v, MdSafe):
-            return Tainted(str.__str__(v)) if isinstance(v, TaintedMd) else str(v)
+            return str(v)
         if isinstance(v, Undefined):
             str(v)
             return ""
         if v is None:
             return ""
-        text = str(v).replace(TAINT_OPEN, "").replace(TAINT_CLOSE, "")  # Markdown from data, then made a value
+        text = str(v)
         lengths.append(resolved_len(text))
-        values.append(Value(text, _has_taint(v)))
+        values.append(Value(text, _has_taint(v), isinstance(v, TaintedMd)))
         ph = f"{PH_OPEN}{len(values) - 1}{PH_CLOSE}"
         return Tainted(ph) if _has_taint(v) else ph
 
@@ -1477,5 +1458,4 @@ def render(
         if given:
             hint += "; the data and --set give: " + ", ".join(given[:12]) + (" …" if len(given) > 12 else "")
         nudges.add("M130", f"variable '{name}' is not defined", suggestion=hint)
-    text, spans = data_spans("".join(out))
-    return Rendered(text, values, store, _data_texts(fields), spans)
+    return Rendered(LINE_BREAK.sub("\n", "".join(out)), values, store, _data_texts(fields))

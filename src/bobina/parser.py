@@ -3,7 +3,6 @@ Pandoc-style attributes `{.class key=value}`, fenced objects. Jinja runs before 
 
 from __future__ import annotations
 
-import bisect
 import re
 from urllib.parse import unquote
 
@@ -28,6 +27,9 @@ from .model import (
     Table,
 )
 from .nudges import Nudges
+from .templating import PH_CLOSE, PH_OPEN
+
+PH_SPLIT = re.compile(f"({PH_OPEN}\\d+{PH_CLOSE})")  # a value's placeholder, kept by re.split
 
 KNOWN_CLASSES = {
     "center",
@@ -149,7 +151,6 @@ def _icons_rule(state) -> None:
     so a value is never an icon. Unknown names stay as written and are listed in env["icons_unknown"] (line, name)
     for M161."""
     from . import icons
-    from .templating import PH_CLOSE, PH_OPEN
 
     for tok in state.tokens:
         if tok.type != "inline" or not tok.children:
@@ -202,12 +203,14 @@ def _div_rule(state, start: int, end: int, silent: bool) -> bool:
     return True
 
 
-def _md() -> MarkdownIt:
+def _md(icons: bool = True) -> MarkdownIt:
+    """The document's Markdown; icons=False for data (data never brings an icon)."""
     md = MarkdownIt("commonmark", {"breaks": True, "html": False})
     md.enable(["table", "strikethrough"])
     md.use(attrs_plugin, spans=True)
     md.block.ruler.before("fence", "fenced_div", _div_rule, {"alt": ["paragraph", "reference", "blockquote", "list"]})
-    md.core.ruler.before("text_join", "icons", _icons_rule)
+    if icons:
+        md.core.ruler.before("text_join", "icons", _icons_rule)
     return md
 
 
@@ -235,7 +238,14 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
     def walk(n, st: Run):
         for c in n.children:
             t = c.type
-            if t == "text":
+            if t == "text" and _SPLICE.values and PH_OPEN in c.content:  # data rendered as Markdown, inline
+                for k, part in enumerate(PH_SPLIT.split(c.content)):
+                    i = int(part[1:-1]) if k % 2 else None
+                    if i in _SPLICE.values:
+                        out.extend(_SPLICE.runs(i, st))
+                    elif part:
+                        out.append(Run(**{**st.__dict__, "text": part}))
+            elif t == "text":
                 out.append(Run(**{**st.__dict__, "text": c.content}))
             elif t in ("softbreak", "hardbreak"):
                 out.append(Run("\n"))
@@ -383,87 +393,151 @@ def _line(node, offset: int) -> int:
 BROKEN_IMAGE = re.compile(r"!\[([^\]]*)\]\(((?!<)[^)\n]*\s[^)\n]*)\)")
 
 
-FROM_DATA = {  # what data rendered as Markdown may not make: (code, what the problem says)
+FROM_DATA = {  # what data rendered as Markdown may not bring: (code, what the problem says)
     "raw": ("M121", "a raw block in a --data/--set value was removed"),
     "image": ("M122", "an image inside a --data/--set value was removed (data cannot choose files)"),
     "block": ("M123", "a code block, ::: line or link definition in a --data/--set value was removed"),
-    "kind": ("M123", "a --data/--set value chose this code block's kind: printed as plain text"),
+    "kind": ("M123", "a --data/--set value cannot choose a code block's kind: printed as plain text"),
 }
 DATA_HINT = "data brings text, lists, quotes, tables and headings; other markup belongs in the document"
-LINE_MARKS = re.compile(r"(?:[ \t]*(?:>|[-+*](?=[ \t]|$)|\d{1,9}[.)](?=[ \t]|$)))*[ \t]*")  # a quote's, an item's
-BLOCK_START = re.compile(r"`{3,}|~{3,}|:{3,}|\[[^\]]*\]:")  # a fence, a ::: line, a link definition
-EDGE = "`~:[!"  # what could join markup next to it on the line: escaped at a value's start and end
+ATTR_GUARD = "\ue004"  # a { of data while its Markdown is read: never a {…} attribute (templating.RESERVED_CHARS)
 
 
-def data_markdown(text: str, nudges: Nudges) -> str:
-    """A --data/--set value rendered as Markdown (| markdown), checked alone and written again so that it can
-    only bring text markup: paragraphs, line breaks, emphasis, strike, inline code, links (as text), headings,
-    lists, quotes, tables, rules and {…} attributes. Code blocks of any kind (fenced or indented: raw M121,
-    image M122, every other M123), ::: lines and link definitions (M123) are removed; images are text (M122).
-    Then no line of it may start a fence, a ::: line or a link definition wherever it is put, and its first and
-    last characters cannot join the text around them into one: a backslash goes before each of those (it prints
-    as the character itself). So two values on one line, or a value inside the document's own code block or
-    box, never open, close or continue anything. `text` has \\n line breaks only."""
+class _Splice:
+    """Data rendered as Markdown ({{ value | markdown }} on --data/--set values): placeholders in the document, as
+    every value is, filled in once the document is parsed. A placeholder alone in its paragraph becomes the value's
+    blocks; one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line
+    breaks. In a code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
+
+    def __init__(self, values: dict[int, str] | None = None, nudges: Nudges | None = None, off: int = 0):
+        self.values, self.nudges, self.off = values or {}, nudges, off
+        self.line = 0  # the document line being read: where a refusal is said
+        self.parsed: dict[int, tuple[list[Block], list[tuple[str, str]]]] = {}
+
+    def index(self, text: str) -> int | None:
+        """The data placeholder that is all of `text` (spaces aside), else None."""
+        from .templating import PH_RE
+
+        m = PH_RE.fullmatch(text.strip())
+        return int(m.group(1)) if m and int(m.group(1)) in self.values else None
+
+    def blocks(self, i: int, line: int) -> list[Block]:
+        """The value's blocks (copies), each at the document's `line`; its refusals said there."""
+        import copy
+
+        if i not in self.parsed:
+            self.parsed[i] = data_blocks(self.values[i])
+        kept, refused = self.parsed[i]
+        for code, message in refused:
+            self.nudges.add(code, message, line, DATA_HINT)
+        out = copy.deepcopy(kept)
+        for b in _all_blocks(out):
+            b.line = line
+        return out
+
+    def runs(self, i: int, st: Run) -> list[Run]:
+        """The value as inline text: its blocks' runs, one line each, styled with the text around it."""
+        out: list[Run] = []
+        for r in _flat(self.blocks(i, self.line)):
+            if r.text == "\n":
+                out.append(r)
+                continue
+            out.append(Run(r.text, bold=r.bold or st.bold, italic=r.italic or st.italic, strike=r.strike or st.strike,
+                           underline=r.underline or st.underline, invert=r.invert or st.invert,
+                           mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
+        return out
+
+
+_SPLICE = _Splice()  # the one in use while a document is parsed (parse sets it, data_blocks clears it)
+
+
+def data_blocks(text: str) -> tuple[list[Block], list[tuple[str, str]]]:
+    """A --data/--set value rendered as Markdown, parsed alone with the document's rules: (the blocks it may bring,
+    the refusals to say). Kept: paragraphs, line breaks, emphasis, strike, inline code, links (as their text),
+    headings, lists, quotes, tables, rules. Refused: code blocks of any kind (raw M121, image M122, the rest M123),
+    images (M122), ::: blocks (their content stays) and link definitions (M123). Its { never starts an attribute:
+    data does not set attributes, they print as written. No icons from data either."""
+    global _SPLICE
+    refused: list[tuple[str, str]] = []
     env: dict = {}
-    lines = text.split("\n")
-    drop: set[int] = set()
-    for tok in _md().parse(text, env):
-        if tok.type in ("fence", "code_block", "fenced_div") and tok.map:
-            kind = (tok.info.split() or [""])[0].lower() if tok.type == "fence" else ""
-            nudges.add(*FROM_DATA[kind if kind in ("raw", "image") else "block"], None, DATA_HINT)
-            drop.update(range(*tok.map))
-        elif tok.type == "inline" and any(c.type == "image" for c in tok.children or []):
-            nudges.add(*FROM_DATA["image"], None, DATA_HINT)
-    if env.get("references"):
-        nudges.add(*FROM_DATA["block"], None, DATA_HINT)
-    out = []
-    for k, line in enumerate(lines):
-        if k in drop:
-            continue
-        marks = LINE_MARKS.match(line).end()
-        if BLOCK_START.match(line, marks):
-            line = line[:marks] + "\\" + line[marks:]
-        out.append(line.replace("![", "\\!["))
-    kept = "\n".join(out)
-    if kept[:1] and kept[0] in EDGE:
-        kept = "\\" + kept
-    end = len(kept.rstrip(EDGE))
-    if end < len(kept) and not kept[:end].endswith("\\"):
-        kept = kept[:end] + "\\" + kept[end:]
-    return kept
+    guarded = text.replace("{", ATTR_GUARD)
+    tokens = _md(icons=False).parse(guarded, env)
+    if env.get("references") or any(t.type == "fenced_div" for t in tokens):  # a closer alone too
+        refused.append(FROM_DATA["block"])
+    if any(t.type == "inline" and any(c.type == "image" for c in t.children or []) for t in tokens):
+        refused.append(FROM_DATA["image"])
+    outer, _SPLICE = _SPLICE, _Splice()
+    try:
+        blocks = _blocks(SyntaxTreeNode(tokens).children, Nudges(), 0, _Source(guarded.split("\n")))
+    finally:
+        _SPLICE = outer
+
+    def keep(bs: list[Block]) -> list[Block]:
+        out: list[Block] = []
+        for b in bs:
+            if isinstance(b, Fence):
+                refused.append(FROM_DATA[b.kind if b.kind in ("raw", "image") else "block"])
+            elif isinstance(b, Image):
+                refused.append(FROM_DATA["image"])
+            elif isinstance(b, Div):
+                refused.append(FROM_DATA["block"])
+                out += keep(b.children)
+            else:
+                if isinstance(b, Quote):
+                    b.children = keep(b.children)
+                for it in getattr(b, "items", []):
+                    it.children = keep(it.children)
+                b.attrs = Attrs()
+                out.append(b)
+        return out
+
+    kept = keep(blocks)
+    for r in _all_runs(kept):
+        r.text = r.text.replace(ATTR_GUARD, "{")
+    return kept, list(dict.fromkeys(refused))
 
 
-class _Taint:
-    """Where data rendered as Markdown (| markdown) is in the document's text: spans of offsets
-    (templating.data_spans), asked by offset range or by line (bisect: never a scan of every span)."""
+def _all_blocks(blocks):
+    for b in blocks:
+        yield b
+        if isinstance(getattr(b, "children", None), list):
+            yield from _all_blocks(b.children)
+        for it in getattr(b, "items", []):
+            yield from _all_blocks(it.children)
 
-    def __init__(self, text: str, spans):
-        self.spans = sorted(spans)
-        self.firsts = [s for s, _e in self.spans]
-        self.starts = [0]
-        for line in text.split("\n"):
-            self.starts.append(self.starts[-1] + len(line) + 1)
 
-    def __bool__(self) -> bool:
-        return bool(self.spans)
+def _all_runs(blocks):
+    for b in _all_blocks(blocks):
+        yield from getattr(b, "runs", [])
+        if isinstance(b, Table):
+            for cell in [*b.header, *(c for row in b.rows for c in row)]:
+                yield from cell
 
-    def any(self, lo: int, hi: int) -> bool:
-        """Some of text[lo:hi] came from data (the spans do not overlap)."""
-        k = bisect.bisect_left(self.firsts, hi) - 1
-        return k >= 0 and self.spans[k][1] > lo
 
-    def lines(self, first: int, last: int) -> bool:
-        """Some of lines first..last-1 (markdown-it's map) came from data."""
-        return self.any(self.starts[first], self.starts[min(last, len(self.starts) - 1)])
-
-    def marker(self, src, node) -> tuple[bool, bool]:
-        """A fence's or a ::: line's (marker from data, the rest of its line from data)."""
-        if not self or not node.map:
-            return False, False
-        first = node.map[0]
-        line = src[first] if first < len(src) else ""
-        at = self.starts[first] + max(0, line.find(node.markup))
-        return self.any(at, at + len(node.markup)), self.any(at + len(node.markup), self.starts[first + 1] - 1)
+def _flat(blocks: list[Block]) -> list[Run]:
+    """Blocks as one text: each paragraph, heading, list item and table row on a line of its own."""
+    lines: list[list[Run]] = []
+    for b in blocks:
+        if isinstance(b, (Paragraph, Heading)):
+            lines.append(list(b.runs))
+        elif isinstance(b, ListBlock):
+            for k, it in enumerate(b.items):
+                mark = f"{b.start + k}. " if b.ordered else "• "
+                inner = _flat(it.children)
+                lines.append([Run(mark), *inner])
+        elif isinstance(b, Quote):
+            lines.append(_flat(b.children))
+        elif isinstance(b, Table):
+            for row in [b.header, *b.rows]:
+                cells = [c for c in row if c]
+                line: list[Run] = []
+                for c in cells:
+                    line += ([Run(" | ")] if line else []) + list(c)
+                lines.append(line)
+    out: list[Run] = []
+    for line in lines:
+        out += ([Run("\n")] if out else []) + line
+    return out
 
 
 def parse(
@@ -472,13 +546,20 @@ def parse(
     line_offset: int = 0,
     base_dir: str = ".",
     meta: dict | None = None,
-    tainted: list[tuple[int, int]] | None = None,
+    markdown: dict[int, str] | None = None,
 ) -> Document:
-    """tainted: where data rendered as Markdown is in `text` (Rendered.spans). Its markup was checked alone
-    (data_markdown); here, in one pass, a block whose marker is in it is refused again, as a second layer."""
-    taint = _Taint(text, tainted or [])
+    """markdown: the placeholders of data rendered as Markdown and their data (Rendered.markdown): spliced in
+    after the document is parsed, so they never meet its source (_Splice)."""
+    global _SPLICE
+    outer, _SPLICE = _SPLICE, _Splice(markdown, nudges, line_offset)
+    try:
+        return _parse(text, nudges, line_offset, base_dir, meta)
+    finally:
+        _SPLICE = outer
+
+
+def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dict | None) -> Document:
     lines = _Source(re.split(r"\r\n?|\n", text))  # as markdown-it counts them (its maps index these)
-    lines.taint = taint
     tails = _title_tails(lines)
     while True:  # a {…} after a title row is taken out first: GFM would not see a table with one cell too many
         src = _Source(lines)
@@ -491,7 +572,6 @@ def parse(
             break
         tails = {i: v for i, v in tails.items() if i in heads}  # not a table after all (a code block): as written
     src.title_rows = {i: a for i, (_row, a) in tails.items()}
-    src.taint = taint
     root = SyntaxTreeNode(tokens)
     doc = Document(meta=meta or {}, base_dir=base_dir)
     doc.blocks = _blocks(root.children, nudges, line_offset, src)
@@ -538,12 +618,9 @@ def _divs(nodes, nudges: Nudges, off: int, src=None) -> list:
     if not any(n.type == "fenced_div" for n in nodes):
         return list(nodes)
     stack = [_DivGroup(nodes[0])]  # the container itself
-    taint = getattr(src, "taint", None)
     for n in nodes:
         if n.type != "fenced_div":
             stack[-1].children.append(n)
-        elif taint and any(taint.marker(src, n)):  # a ::: line data made (second layer: data_markdown removes it)
-            nudges.add(*FROM_DATA["block"], _line(n, off), DATA_HINT)
         elif _div_info(n):
             stack.append(_DivGroup(n))
         elif len(stack) > 1:
@@ -648,7 +725,11 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             out.append(_div(n, nudges, off, src))
             continue
         ln = _line(n, off)
+        _SPLICE.line = ln
         t = n.type
+        if t == "paragraph" and (i := _SPLICE.index(n.children[0].content)) is not None:
+            out.extend(_SPLICE.blocks(i, ln))  # data rendered as Markdown, alone in its paragraph: its blocks
+            continue
         if t == "heading":
             inline = n.children[0]
             a = _strip_tail_attrs(inline) or Attrs()
@@ -692,9 +773,6 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 )  # fmt: skip
                 for k in ("src", "alt", "title"):
                     ia.kv.pop(k, None)
-                if _from_data(n, src):  # data never chooses a file
-                    nudges.add(*FROM_DATA["image"], ln, DATA_HINT)
-                    continue
                 out.append(Image(line=ln, attrs=ia, src=unquote(img.attrs.get("src", "")), alt=img.content))
                 continue
             paras: list[Paragraph] = []
@@ -741,33 +819,19 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 arg = rest[: attrs.start()].strip() if attrs else rest.strip()
                 a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
-            taint = getattr(src, "taint", None)
-            mark, rest = taint.marker(src, n) if taint and t == "fence" else (False, False)
-            if mark:  # a fence data made (second layer: data_markdown removes it)
-                nudges.add(*FROM_DATA[k if k in ("raw", "image") else "block"], ln, DATA_HINT)
-                continue
-            if rest:  # ```{{ lang | markdown }}: data does not choose what a block is
+            if PH_OPEN in (info.split("{", 1)[0].split() or [""])[0]:  # ```{{ lang }}: data does not choose a kind
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
                 kind, k, a, arg = "text", "text", Attrs(), ""
             check_attrs(
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
                 extra=IMAGE_KEYS if k == "image" else CAPTION_KEYS if k in CODES else frozenset(),
             )  # fmt: skip
-            if k in ("raw", "image") and _from_data(n, src):  # its bytes or its path would come from data
-                nudges.add(*FROM_DATA[k], ln, DATA_HINT)
-                continue
             out.append(Fence(line=ln, attrs=a, kind=kind.lower(), content=n.content, arg=arg))
         elif t == "table":
             out.append(_table(n, ln, nudges, src))
         elif n.children:
             out.extend(_blocks(n.children, nudges, off, src))
     return out
-
-
-def _from_data(node, src) -> bool:
-    """Some of the node's lines came from data rendered as Markdown (parse's tainted spans)."""
-    taint = getattr(src, "taint", None)
-    return bool(taint) and bool(node.map) and taint.lines(node.map[0], node.map[1])
 
 
 def _attr_lines(tb: Table, a: Attrs, line: int) -> None:
@@ -796,12 +860,10 @@ class _Source(list):
     """The document's lines, and the {…} written after a table's title row (its line index -> Attrs)."""
 
     title_rows: dict[int, Attrs]
-    taint: _Taint | None  # where data rendered as Markdown is (parse)
 
     def __init__(self, lines=()):
         super().__init__(lines)
         self.title_rows = {}
-        self.taint = None
 
 
 def _braces(segments: list[str]) -> Attrs | None:

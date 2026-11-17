@@ -17,7 +17,7 @@ from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Par
 from .model import Image as ImageBlock
 from .nudges import Nudges, SecurityError
 from .rows import BarcodeRow, BitmapRow, Boxed, Cell, FeedRow, QRRow, RawRow, TextRow, columns
-from .templating import PH_RE, Rendered
+from .templating import PH_RE, RESERVED_CHARS, Rendered
 
 NO_CAPTION = {"", "auto", "none", "no", "false", "off"}  # caption= words that print no caption on a plain QR
 PAY_HINT = 'write ```pay {scheme=pix to="your key" name="Shop" city="Rio" amount=10.00} (bobina help pay)'
@@ -275,6 +275,7 @@ class Layout:
     def text(self, s: str) -> str:
         if self.r is not None:
             s = self.r.resolve(s)
+        s = RESERVED_CHARS.sub("", s)  # a placeholder a template cut in two: never printed as a glyph
         return CTRL.sub("", s.replace("\t", "    ")).translate(SPACES)
 
     def scale_for(self, size: str | None, line: int) -> tuple[int, int]:
