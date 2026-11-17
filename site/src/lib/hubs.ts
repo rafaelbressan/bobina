@@ -17,7 +17,8 @@ export interface Hub {
 }
 
 function summaryOf(body: string): string {
-  const p = body.split(/\n\s*\n/).find((x) => x.trim() && !/^(#|\||```|>|-|\d+\.)/.test(x.trim()));
+  const text = body.replace(/<!--[\s\S]*?-->/g, ''); // a generated page's "do not edit" comment is not its summary
+  const p = text.split(/\n\s*\n/).find((x) => x.trim() && !/^(#|\||```|>|-|\d+\.)/.test(x.trim()));
   return p ? p.replace(/\s+/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim() : '';
 }
 
