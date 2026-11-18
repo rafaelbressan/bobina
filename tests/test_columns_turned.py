@@ -659,3 +659,48 @@ def test_widths_and_a_gap_that_move_a_column_suggest_both():
     (n,) = [n for n in res.nudges if n.code == "L110"]
     assert "the widths and the gap of 3 letters ask for 33 of the 32" in n.message
     assert "smaller widths or a smaller gap= keep them on one row" in n.suggestion
+
+
+# --- the rendered examples ----------------------------------------------------------------------------------------
+
+LONG_QR = "```qr\nhttps://example.com/consulta/276712?chave=35261112345678000190650040002767121234567890\n```"
+
+
+@pytest.mark.parametrize("where", ["column", "box"])
+def test_a_qr_squeezed_step_by_step_is_said_once_for_its_last_module(where):
+    if where == "column":
+        src = standing(LONG_QR, "A QR in a column too narrow for it.", each=("width=6ch",))
+    else:
+        src = f"::: {{.box width=8ch}}\n{LONG_QR}\n:::\n"
+    res = build(src)
+    assert len(said(res, "Q103")) == 1 and len(said(res, "Q101")) == 1
+    assert "module reduced to 1" in said(res, "Q103")[0] and "module 1" in said(res, "Q101")[0]
+
+
+def test_two_turned_labels_are_parted_by_a_dashed_line_and_3_mm_each_side():
+    res = build(cols(LINES, "short"))
+    first, second = labels(res)
+    between = res.rows[res.rows.index(first) + 1 : res.rows.index(second)]
+    gaps = [r.dots for r in between if not isinstance(r, BitmapRow)]
+    lines_ = [r for r in between if isinstance(r, BitmapRow)]
+    assert gaps == [24, 24] and len(lines_) == 1 and lines_[0].kind == "divider"  # 3 mm at 203 dpi
+    dashes = ink(lines_[0].image)
+    assert dashes and dashes[2] - dashes[0] > W * 0.9  # across the paper
+
+
+def test_the_view_places_a_column_at_the_bottom_level_with_the_tallest_ones_last_line():
+    src = standing("**Top**", "**Middle**", "One\ncolumn\ntaller\nthan\nthe\nothers\nhere", "**Base**",
+                   each=("valign=top", "valign=middle", "", "valign=bottom"))  # fmt: skip
+    lines = view.lines(build(src).rows, build(src).profile)
+    at = {
+        word: next(i for i, ln in enumerate(lines) if word in ln) for word in ("Top", "Middle", "One", "here", "Base")
+    }
+    assert at["Top"] == at["One"] and at["Base"] == at["here"] and at["Middle"] == at["One"] + 3
+
+
+def test_with_wrap_on_a_column_too_tall_even_alone_is_said_so_without_suggesting_wrap():
+    res = build(cols("price", LINES, opts="wrap=wrap"))
+    (n,) = [n for n in res.nudges if n.code == "L112"]
+    assert "too tall even on a label of its own" in n.message and "wrap=wrap" not in n.suggestion
+    (plain,) = [n for n in build(cols("price", LINES)).nudges if n.code == "L112"]
+    assert "wrap=wrap" in plain.suggestion

@@ -69,6 +69,7 @@ CODE_KINDS = frozenset({"qr", "barcode", "datamatrix", "pdf417"})  # rows a turn
 # letters become 17 dots tall, their 2-dot strokes about 1.4: resampled letters blur where a font drawn that size
 # would not, so this keeps them well above Terminus 12px, the smallest text tested legible on paper (tables.md)
 LEGIBLE_SHRINK = 0.7
+LABEL_GAP_MM = 3  # between two turned labels, each side of the dashed line that parts them (between_labels)
 BAR_MIN_DOTS = 40  # a barcode laid out to fit a turned label keeps bars at least this tall (5 mm), else Q108
 COLUMN_HINT = "a column takes width=auto|40%|30mm|12ch and valign=top|middle|bottom (docs/guides/layout-columns.md)"
 WRAPS = ("nowrap", "wrap", "wrap-reverse")  # wrap= on columns: CSS flex-wrap's names
@@ -1472,10 +1473,10 @@ class Layout:
         height = max(top + tall, *(y + im.height for (_, im, _, h, _), y in zip(parts, ys, strict=True) if h))
         full = Image.new("L", (self.W, height), 255)
         x, views = indent * cw, []
-        for (rows, im, _, h, _), w, y in zip(parts, widths, ys, strict=True):
+        for (rows, im, _, h, _), w, y, va in zip(parts, widths, ys, aligns, strict=True):
             if h:
                 full.paste(im, (x, y))
-            views.append(Column(rows, w * cw, x // cw, max(0, y)))
+            views.append(Column(rows, w * cw, x // cw, max(0, y), va))
             x += (w + g) * cw
         full = self.draw_bars(full, indent, 0)
         marks = {u for rows, *_ in parts for r in rows if isinstance(r, BitmapRow) for u in r.untested} | {"columns"}
@@ -1544,10 +1545,15 @@ class Layout:
             sub, mine = [cols[i] for i in idx], [asked[i] for i in idx]
             here = room if length is not None or len(idx) == len(cols) else min(most, self.auto_room(sub, mine, gap))
             if out:
-                out.append(FeedRow(int(self.p.get("native.line_gap_dots", 6)) * 4))
+                out += self.between_labels(line)
             out += self.turned_label(sub, mine, [aligns[i] for i in idx], here, gap,
                                      length or here * cw, a, line, auto=length is None)  # fmt: skip
         return out
+
+    def between_labels(self, line: int) -> list:
+        """What parts two turned labels on the paper, so one is seen to end: 3 mm, a dashed line across, 3 mm."""
+        gap = self.p.mm_to_dots(LABEL_GAP_MM)
+        return [FeedRow(gap), BitmapRow(imaging.divider(self.W, "dashed", 2, pad=0), line, "divider"), FeedRow(gap)]
 
     def label_length(self, a: Attrs, line: int) -> int | None:
         """length= of turned columns, in dots along the roll: 72mm (the default, 575 dots at 203 dpi), 7.2cm, 480 or
@@ -1641,10 +1647,12 @@ class Layout:
             stacks.append(bands)
             if len(bands) - 1 > cut:  # labels its cut blocks do not account for (fit_label said those)
                 more = len(bands) - 1
+                alone = ", too tall even on a label of its own" if self.wrapping else ""
+                move = "" if self.wrapping else "; wrap=wrap moves a column to a label of its own"
                 self.n.add("L112", f"column {k + 1} is taller than the label ({height} of the {tall} dots across the "
-                           f"paper): what does not fit goes on in {more} more label{'s' if more > 1 else ''} after "
-                           "it", c.line, "a longer length= (or length=auto), less text or smaller sizes; wrap=wrap "
-                           "moves a column to a label of its own")  # fmt: skip
+                           f"paper{alone}): what does not fit goes on in {more} more label{'s' if more > 1 else ''} "
+                           "after it", c.line,
+                           f"a longer length= (or length=auto), less text or smaller sizes{move}")  # fmt: skip
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a column: its bytes are sent after the columns",
                        raws[0].line, "put the raw block after the line of colons that closes the columns")  # fmt: skip
@@ -1659,14 +1667,14 @@ class Layout:
                 y = {"top": 0, "middle": (tall - h) // 2, "bottom": tall - h}[va] - lead if h else 0
                 if h:
                     canvas.paste(im, (x, y))
-                views.append(Column(rows, w * cw, x // cw, max(0, y)))
+                views.append(Column(rows, w * cw, x // cw, max(0, y), va))
                 x += (w + g) * cw
             if out:
-                out.append(FeedRow(int(self.p.get("native.line_gap_dots", 6)) * 4))
+                out += self.between_labels(line)
             marks = {u for bands in stacks for rows, *_ in bands for r in rows if isinstance(r, BitmapRow)
                      for u in r.untested} | {"columns", "turned-columns"}  # fmt: skip
             turned = canvas.rotate(-90, expand=True)  # clockwise, like a turned table: the top goes to the right
-            view = Columned(views, "", turned=True)
+            view = Columned(views, "", turned=True, lines=round(tall / self.em.row_height(TextRow([Cell(" ")]))))
             spans = _turned_spans([s for bands in stacks if b < len(bands) for s in bands[b][2]], turned.height, 90)
             out.append(BitmapRow(_bw(turned), line, "columns", untested=tuple(sorted(marks)), columns=view,
                                  code_spans=spans))  # fmt: skip
@@ -1981,27 +1989,26 @@ class Layout:
             less = f"a wider {self.within}: module {lo} needs {need} letters; or " + (
                 "less data" if self.wrapping else "wrap=wrap, less data"
             )
-        mod = self.fit_module(target, units, mod, 16 if render == "native" else 64)
-        if mod < lo:
-            what = f"width={kv['width']} gives module {mod}" if target else f"QR module {mod}"
-            hint = f"a larger width or less data (module ≥ {lo})" if target else f"use module={lo}"
-            self.n.add("Q101", f"{what} in {render} mode" + (": it may not scan" if cannot else ""), f.line,
-                       less if cannot else hint)  # fmt: skip
-        while units * mod > self.W and mod > 1:
+        asked = mod = self.fit_module(target, units, mod, 16 if render == "native" else 64)
+        while units * mod > self.W and mod > 1:  # the paper, or the column it is in: the largest module that fits
             mod -= 1
-            self.n.add(
-                "Q103",
-                f"QR does not fit: module reduced to {mod}",
-                f.line,
-                less if self.within else "shorten the content",
-            )
-            if mod < lo:  # the paper took it below what scans: say so, never as if fine
-                self.n.add("Q101", f"QR module {mod} in {render} mode: it may not scan", f.line, less)
+        if mod < asked:  # said once, for the module it gets
+            self.n.add("Q103", f"QR does not fit: module reduced to {mod}", f.line,
+                       less if self.within else "shorten the content")  # fmt: skip
+        fitted = mod
         if self.tall_max and units * mod > self.tall_max and mod > 1:  # a turned label: the largest whole module
             mod = max(1, self.tall_max // units)  # that fits its height (never resampled: fit_label)
-            if mod < lo:
+        if mod < lo:  # below what scans: said once, for the module printed, never as if fine
+            if mod < fitted:
                 self.n.add("Q101", f"QR module {mod} in {render} mode, to fit the turned label's height: it may not "
                            "scan", f.line, "less data or ecc=L; or take the QR out of the turned columns")  # fmt: skip
+            elif mod < asked:  # the paper took it below what scans
+                self.n.add("Q101", f"QR module {mod} in {render} mode: it may not scan", f.line, less)
+            else:
+                what = f"width={kv['width']} gives module {mod}" if target else f"QR module {mod}"
+                hint = f"a larger width or less data (module ≥ {lo})" if target else f"use module={lo}"
+                self.n.add("Q101", f"{what} in {render} mode" + (": it may not scan" if cannot else ""), f.line,
+                           less if cannot else hint)  # fmt: skip
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]

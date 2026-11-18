@@ -64,6 +64,7 @@ class Column:
     inner: int  # dots: the width it was laid out at
     left: int  # columns from the paper's edge to the column (quote bars and list indents included)
     top: int = 0  # dots from the top of the row to the top of the column's content (valign=)
+    valign: str = ""  # top, middle, bottom: the views place it so among the others' lines ("": by `top`)
 
 
 @dataclass
@@ -73,6 +74,7 @@ class Columned:
     columns: list  # Column, left to right
     lead: str = ""  # what the view shows before the columns: the bars of the quotes they are in
     turned: bool = False  # a label of turned columns (orientation=vertical): the view shows it standing, under a mark
+    lines: int = 0  # a turned label's height in the views' lines (valign= places a column in it); 0: the tallest's
 
 
 @dataclass

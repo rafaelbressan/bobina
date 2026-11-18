@@ -237,10 +237,14 @@ def columns_lines(cv, profile, color: bool = False) -> list[str]:
     or columns in it too) at its place on the paper, side by side, moved down as valign= placed it. A label of
     turned columns is drawn standing, as it is read, under a ↻ mark (as a turned table is)."""
     placed, used = _columns_view(cv, profile)
+    drawn = [lines(c.rows, sub, color, max_feed_lines=0, frame=w)
+             for c, (sub, _, w) in zip(cv.columns, placed, strict=True)]  # fmt: skip
+    tall = max([cv.lines, *(len(ls) for ls in drawn)])  # valign= in the view's own lines, as on paper among dots
     cols = []
-    for c, (sub, x, w) in zip(cv.columns, placed, strict=True):
-        ls = lines(c.rows, sub, color, max_feed_lines=0, frame=w)
-        cols.append((x, w, [" " * w] * round(c.top / profile.cell[1]) + ls))
+    for c, (_, x, w), ls in zip(cv.columns, placed, drawn, strict=True):
+        free = tall - len(ls)
+        down = {"middle": free // 2, "bottom": free, "top": 0}.get(c.valign, round(c.top / profile.cell[1]))
+        cols.append((x, w, [" " * w] * down + ls))
     out = []
     for y in range(max(len(ls) for _, _, ls in cols)):
         line, at = cv.lead, len(cv.lead)

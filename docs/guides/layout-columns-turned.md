@@ -20,14 +20,14 @@ R$ 18,90 {size=3x}
 ::::
 ````
 
-It prints turned the way a [turned table](tables.md#turned-tables) does, clockwise: the label's top on the right
+It prints turned like a [turned table](tables.md#turned-tables), clockwise: the label's top on the right
 of the paper, its first column printed first. Read it with that edge up.
 
 ## Length and height
 
 | Setting | What it does |
 |---|---|
-| `length=72mm` | the default: the label's length along the roll (`7.2cm`, `575` dots at 203 dpi); at most 300 mm |
+| `length=72mm` | the default: the label's length along the roll (`7.2cm`, `575` dots); at most 300 mm |
 | `length=auto` | as long as the columns' content needs: text on as few lines as it can, an image as big as fits the height |
 
 - The label's height is the paper's printable width: 48 mm (384 dots, 16 lines of text) on 58 mm paper, 72 mm on
@@ -42,11 +42,11 @@ Nothing is lost:
 
 - `wrap=wrap`: a column that does not fit (the widths, or its content taller than the label) starts a new label,
   printed after this one; `wrap=wrap-reverse`, before it (`L110`).
-- Otherwise what does not fit goes on in another label printed after it, each column at its place, cut between
-  lines and blocks (`L112`).
+- Otherwise what does not fit goes on in the next label, each column at its place, cut between lines and blocks
+  (`L112`). A dashed line with 3 mm of paper on each side parts two labels.
 - A single block taller than the label: a QR code or Data Matrix gets the largest whole module that fits (`Q101`
   when it may not scan), in a box too; a barcode shorter bars. A picture is drawn smaller; a block of text (a box,
-  a table) at most 70% smaller, so it still reads. Codes are never drawn smaller: what is still too tall goes on
+  a table) never below 70%, so it still reads. Codes are never drawn smaller: what is still too tall goes on
   in the next label, cut at a blank line near the edge, never through a code (`L112`), else across its lines
   (`L114`, a warning); a code taller than the label is cut and will not scan (`Q101`, `Q108`).
 
