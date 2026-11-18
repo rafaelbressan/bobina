@@ -165,8 +165,6 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             for tr in r.text_rows:
                 tr = tr if r.wide_view else fit(tr, frame)  # a wide table's cells are never cut
                 wide = tr.columns() * tr.scale[0] > cols
-                if r.kind == "band":  # white on black on paper, from edge to edge
-                    tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
                 ls = text_lines(tr, frame, color) if wide else [ln + more for ln in text_lines(tr, cols, color)]
                 out += [f"\x1b[7m{ln}\x1b[0m" if color and r.kind == "band" else ln for ln in ls]
         elif isinstance(r, RawRow):

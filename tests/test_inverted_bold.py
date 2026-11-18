@@ -4,7 +4,7 @@ names a span does not take (M101)."""
 
 from pathlib import Path
 
-from bobina import chat, escpos, preview
+from bobina import chat, escpos, preview, rasterfont
 from bobina.emulator import Emulator
 from bobina.engine import apply_overrides, build
 from bobina.profile import load
@@ -93,6 +93,26 @@ def test_descenders_of_heavy_letters_are_whole():
     assert bottom > 4 + 24 - 1  # the descender's last row grew a dot down, into the line's gap
 
 
+def test_a_heavy_inverted_word_keeps_its_cell_in_a_box():
+    src = "::: {.box}\nOrder [T-7]{.invert} ready\n:::\n"
+    box, thin = drawn(build(src))[0].image, drawn(build(src, overrides=OFF))[0].image
+    assert box.size == thin.size and box != thin  # heavier white, the black box no dot taller
+
+
+def test_a_heavy_stretched_hyphen_stays_two_dots_tall():
+    def tallest(heavy: bool) -> int:
+        path = rasterfont.resolve("Spleen").path
+        t = rasterfont.Tok("-", path, 24, bold=True, invert=True, heavy=heavy, stretch=2.0)
+        asc, desc = t.font.getmetrics()
+        im = rasterfont.draw_tok(t, asc, asc + desc)
+        column = "".join("w" if im.getpixel((im.width // 2, y)) > 127 else "k" for y in range(asc + desc))
+        return max(len(r) for r in column.split("k"))
+
+    assert (tallest(True), tallest(False)) == (2, 1)  # 2x1: thickened at its own size, never squashed back
+    src = "A-B [xy-z]{size=2x1 .invert}\n"
+    assert drawn(build(src))[0].image != drawn(build(src, overrides=OFF))[0].image and "F206" in codes(build(src))
+
+
 def test_the_hyphen_is_two_dots_tall_white_on_black():
     def tallest(res) -> int:
         im = drawn(res)[0].image.convert("L")
@@ -113,6 +133,15 @@ def test_an_inverted_line_at_2x_keeps_its_weight():
 def test_text_already_bold_gets_no_note():
     res = build("**PAID** {.invert}\n")
     assert "F206" not in codes(res) and untested(res)  # drawn a dot taller all the same: not tested on paper
+
+
+def test_a_native_inverted_run_is_one_esc_e_spaces_included():
+    data = build("Total [9,00 EUR now]{.invert} ok\n").data
+    run = ESC + b"E\x01" + GS + b"B\x01" + b"9,00 EUR now" + ESC + b"E\x00" + GS + b"B\x00"
+    assert run in data and data.count(ESC + b"E\x01") == 1  # as before the review: no ESC E toggled at spaces
+    assert build("Hello world\n").data == bytes.fromhex(  # a document with nothing inverted: bytes as before it all
+        "1b401b4a181b331e1b61001d210048656c6c6f20776f726c640a1d21001b45001b2d001d42001b61001b4a58"
+    )
 
 
 def test_a_native_inverted_word_gets_esc_e_with_gs_b():
@@ -160,6 +189,28 @@ def test_an_inverted_word_in_a_table_cell_is_treated_as_in_a_paragraph():
     assert untested(res)
 
 
+def test_a_word_inverted_inside_an_inverted_row_shows_black_in_the_view():
+    def band(src):
+        row = next(r for r in drawn(build(src)) if r.kind == "band")
+        return {c.ch: c.invert for v in row.text_rows for c in v.cells if c.ch.strip()}
+
+    table = band("| Item | Price |\n|---|---|\n| [T-7]{.invert} tea | 9,00 | {.invert}\n")
+    assert not table["T"] and not table["7"] and table["e"] and table["9"]  # T-7 black on paper, the rest white
+    line = band("A [b-c]{.invert} d {.invert}\n")
+    assert line["A"] and not line["b"] and line["d"]
+    titles = band("| Item | Price |\n|---|---|\n| Tea | 9,00 |\n{style=header-invert}\n")
+    assert all(titles.values())
+
+
+def test_a_table_without_white_text_looks_up_no_bold_face(monkeypatch):
+    from bobina import layout
+
+    asked, real = [], layout.rasterfont.resolve
+    monkeypatch.setattr(layout.rasterfont, "resolve", lambda fam, bold=False: asked.append(bold) or real(fam, bold))
+    build("| Item | Price |\n|---|---|\n| Tea | 9,00 |\n{style=receipt font=Terminus size=20px}\n")
+    assert asked and True not in asked  # nothing printed white, nothing bold: no bold face looked up
+
+
 def test_a_table_in_a_raster_font_takes_its_bold_face_and_no_p301():
     res = build(BILL + "| Tea | 2 | 18,00 | {.invert}\n{font=Terminus size=20px}\n")
     assert said(res, "F206") == [
@@ -191,6 +242,12 @@ def test_a_black_chat_bubble_has_bold_white_letters():
     heavy = chat.bubble_row(load(), "T-7 ok", inverted=True)
     thin = chat.bubble_row(apply_overrides(load(), OFF), "T-7 ok", inverted=True)
     assert white(heavy.image) > white(thin.image)
+
+
+def test_a_black_chat_bubble_drawn_as_an_image_is_heavy_too():
+    for text in ("שלום ok", "★ ok"):  # drawn whole (right to left), a glyph the printer font lacks
+        heavy = chat.bubble_row(load(), text, inverted=True).image
+        assert heavy != chat.bubble_row(apply_overrides(load(), OFF), text, inverted=True).image, text
 
 
 def test_a_black_chat_bubble_still_reads_its_bold_markup():

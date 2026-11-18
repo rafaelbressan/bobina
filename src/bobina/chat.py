@@ -136,16 +136,12 @@ def text_image(profile, text: str, width: int, *, bold: bool = False, align: str
 
     from . import preview
     from .emulator import Emulator
-    from .layout import whiten
-    from .rows import TextRow
 
     prof = _narrow(profile, width)
-    blocks = [Paragraph(attrs=Attrs({align}), runs=[Run(p, bold=bold)] if bold else runs(p))
+    blocks = [Paragraph(attrs=Attrs({align}), runs=[replace(r, white=white) for r in ([Run(p, bold=bold)] if bold
+                                                                                      else runs(p))])
               for p in re.split(r"\n\s*\n", text) if p.strip()]  # fmt: skip
     rows = Layout(prof, Document(meta={}, blocks=blocks), None, Nudges()).run()[1:-1]
-    if white:
-        small = [isinstance(r, TextRow) and prof.invert_bold(prof.cell[1] * min(r.scale)) for r in rows]
-        rows = [replace(r, cells=whiten(r.cells, True)[0]) if s else r for r, s in zip(rows, small, strict=True)]
     im = preview.render(rows, prof, Emulator(prof), drawn=True)
     from PIL import ImageOps
 

@@ -245,10 +245,21 @@ class Tok:
         return int(round((w + (self.px * 0.1 if self.italic and not self.space else 0)) * self.stretch))
 
 
+def _heavy(im: Image.Image, t: Tok, line_h: int) -> Image.Image:
+    """The one place a raster glyph is drawn heavy (Tok.heavy): a font without a bold file (the printer font's look)
+    a dot taller, into one more row (a descender in the last row grows into the leading below); a bold face is heavy
+    enough (R2-12). Inverted, its black box stays line_h tall: only the white ink grows."""
+    if not t.heavy or "bold" in t.path.lower():
+        return im
+    tall = Image.new("L", (im.width, line_h + 1), 255)
+    tall.paste(im, (0, 0))
+    return imaging.thicken_down(tall, 255 if t.invert else 0)
+
+
 def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
-    if t.stretch != 1:  # GS ! at 2x1 or 1x2: the glyphs as drawn at their height, then as wide as the width says
-        plain = draw_tok(dataclasses.replace(t, stretch=1.0), ascent, line_h)
-        return plain.resize((max(1, t.width()), line_h), Image.NEAREST)
+    if t.stretch != 1:  # GS ! at 2x1 or 1x2: the glyphs as drawn at their height, as wide as the width says, then
+        plain = draw_tok(dataclasses.replace(t, stretch=1.0, heavy=False), ascent, line_h)  # heavy at that size
+        return _heavy(plain.resize((max(1, t.width()), line_h), Image.NEAREST), t, line_h)
     w = max(1, t.width())
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
@@ -275,11 +286,7 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
             d.text((x, ascent - fa), txt, font=t.font, fill=ink)
             if t.bold and "bold" not in t.path.lower():  # synthetic bold for fonts without a bold file
                 d.text((x + 1, ascent - fa), txt, font=t.font, fill=ink)
-        if t.heavy and "bold" not in t.path.lower():  # the one place a raster glyph is drawn heavy (a bold face is
-            tall = Image.new("L", (w, line_h + 1), 255)  # heavy enough: R2-12), a dot taller: a descender in
-            tall.paste(im, (0, 0))  # the last row grows into the leading below
-            im = imaging.thicken_down(tall, ink)
-            d = ImageDraw.Draw(im)
+        im = _heavy(im, t, line_h)
     if t.italic and not t.icon:  # an icon is not slanted
         im = im.transform(
             im.size,
@@ -323,7 +330,6 @@ def _unspaced(text: str) -> bool:
 def _breaks(text: str) -> list[int]:
     """Offsets where a line may break inside `text`: before a letter, never before a combining mark, after a
     virama (conjunct) or after a vowel written before its consonant."""
-    import unicodedata
 
     out = []
     for i in range(1, len(text)):
@@ -347,18 +353,6 @@ def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     if best is None:
         return None, t
     return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
-
-
-def _fits(t: Tok, room: int) -> int:
-    """How many letters of t fit in `room` dots (a mark stays with its letter)."""
-    n = 0
-    for i in range(1, len(t.text) + 1):
-        if i < len(t.text) and unicodedata.category(t.text[i]).startswith("M"):
-            continue
-        if dataclasses.replace(t, text=t.text[:i]).width() > room:
-            break
-        n = i
-    return n
 
 
 def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[list[Tok]]:
@@ -413,15 +407,19 @@ def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[lis
                 room -= u[k].width()
                 taken.append(u[k])
                 k += 1
-            n = _fits(u[k], room) or (0 if taken else 1)  # at least one letter a line
-            head = [dataclasses.replace(u[k], text=u[k].text[:n])] if n else []
-            split("".join(x.text for x in u), sum(len(x.text) for x in taken) + n)
-            lines.append(taken + head)
+            head, rest = _split(u[k], room)
+            if head is None and not taken:  # at least one letter a line
+                cut = (_breaks(u[k].text) or [len(u[k].text)])[0]
+                head, rest = (
+                    dataclasses.replace(u[k], text=u[k].text[:cut]),
+                    dataclasses.replace(u[k], text=u[k].text[cut:]),
+                )
+            split("".join(x.text for x in u), sum(len(x.text) for x in taken) + (len(head.text) if head else 0))
+            lines.append(taken + ([head] if head else []))
             avail = width - hang
-            rest = dataclasses.replace(u[k], text=u[k].text[n:], glue=False)
-            units.append([rest, *u[k + 1 :]] if rest.text else [dataclasses.replace(x, glue=False) for x in u[k + 1 :]])
-            if not units[-1]:
-                units.pop()
+            more = ([dataclasses.replace(rest, glue=False)] if rest.text else []) + u[k + 1 :]
+            if more:
+                units.append([dataclasses.replace(more[0], glue=False), *more[1:]])
             continue
         cur.extend(u)
         cw += tw

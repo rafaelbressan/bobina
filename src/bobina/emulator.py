@@ -95,9 +95,9 @@ class Emulator:
                 g2 = Image.new("L", g.size, 255)
                 g2.paste(g, (1, 0))
                 g = _darker(g, g2)
-            if c.heavy and drawn and c.ch != " ":  # the one place a printer-font glyph is drawn heavy
-                tall = Image.new("L", (g.width, g.height + 1), 255)
-                tall.paste(g, (0, 0))
+            if c.heavy and drawn and c.ch != " ":  # the one place a printer-font glyph is drawn heavy: a dot taller,
+                tall = Image.new("L", (g.width, g.height + (not c.invert)), 255)  # into the gap below; an inverted
+                tall.paste(g, (0, 0))  # cell's black box stays its cell: its white grows inside it
                 g = imaging.thicken_down(tall)
             if c.italic:
                 g = g.transform(
