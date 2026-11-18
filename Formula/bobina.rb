@@ -3,8 +3,8 @@ class Bobina < Formula
 
   desc "Print Markdown on thermal roll printers"
   homepage "https://github.com/rafaelbressan/bobina"
-  url "https://files.pythonhosted.org/packages/8a/7f/12d2d00ff8f94c1a1bffd89d1ad8338668e55c8c6b4268b0eb50cdb8ac69/bobina-0.1.4.tar.gz"
-  sha256 "66ec87f4a7f69268e604de15571bb4695e31502821e21ca5aa9d0dc67fbbc6a5"
+  url "https://files.pythonhosted.org/packages/63/80/61bafa3d8644bd66658a80adc945f3a6cb48a36e7cfa2cb1421282a96432/bobina-0.1.5.tar.gz"
+  sha256 "7db640c4e106424a47d039ba7cca883a9f0be48c8b77d2f19175958e66f33b34"
   license "MIT"
 
   depends_on "libyaml"
