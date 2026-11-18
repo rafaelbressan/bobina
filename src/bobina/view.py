@@ -209,10 +209,11 @@ def box_lines(b, profile, color: bool = False) -> list[str]:
     marks = (f" ↻ box printed turned {b.turned:g}° ", f" ↻ {b.turned:g}° ", "↻")  # the longest that fits the box
     mark = next((m for m in marks if len(m) <= room + 2), "↻")
     out = [lead + mark.center(room + 2, "┄")] if b.turned else []
-    out.append(lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
+    cut = lead + v + "┄" * room + v  # the side of a piece of a box cut across turned labels
+    out.append(cut if b.open_top else lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
     for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
         out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
-    return [*out, lead + bl + h * room + br]
+    return [*out, cut if b.open_bottom else lead + bl + h * room + br]
 
 
 def _columns_view(cv, profile):

@@ -744,3 +744,16 @@ def test_with_wrap_on_a_column_too_tall_even_alone_is_said_so_without_suggesting
     assert "too tall even on a label of its own" in n.message and "wrap=wrap" not in n.suggestion
     (plain,) = [n for n in build(cols("price", LINES)).nudges if n.code == "L112"]
     assert "wrap=wrap" in plain.suggestion
+
+
+def test_a_box_cut_across_turned_labels_views_as_its_text_each_piece_its_own_lines():
+    lines_ = "\n".join(f"Linha {i} do texto da caixa" for i in range(1, 13))
+    res = build(cols(f'::: {{.box title="LOTE 4471"}}\n{lines_}\n:::', opts="length=40mm"))
+    pieces = [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.box is not None]
+    assert len(pieces) == 2 and pieces[0].box.title == "LOTE 4471" and not pieces[1].box.title
+    assert pieces[0].box.open_bottom and not pieces[0].box.open_top
+    assert pieces[1].box.open_top and not pieces[1].box.open_bottom
+    shown = view.lines(res.rows, res.profile)
+    assert any("LOTE 4471" in ln and "┌" in ln for ln in shown) and any("└" in ln for ln in shown)
+    assert all(sum(f"Linha {i} " in ln for ln in shown) == 1 for i in range(1, 13))  # each line once, as text
+    assert not any(0x2800 < ord(ch) <= 0x28FF for ln in shown if "│" in ln for ch in ln)  # no braille in the box

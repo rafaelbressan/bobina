@@ -54,6 +54,9 @@ class Boxed:
     style: str = "solid"  # solid, dashed, dotted, double: the frame's line
     lead: str = ""  # what the view shows before the box: the bars of the quotes it is in
     turned: float = 0  # degrees it was turned (rotate=, .flip): the view shows it standing, under a mark
+    row_tops: tuple = ()  # dots from the top of the box's picture to each of its rows (a box cut across labels)
+    open_top: bool = False  # a piece of a box cut across turned labels: no frame line on that side (┄ instead)
+    open_bottom: bool = False
 
 
 @dataclass

@@ -1067,7 +1067,8 @@ class Layout:
             with self.narrow(inner):
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
-                band_im = self.compose(band) if band else None
+                band_pics = [preview.row_image(r, self.p, self.em) for r in band]
+                band_im = self.stacked(band_pics, self.W) if band else None
                 if outer and ang % 180 != 90:  # in a turned label: what the frame, its room and a border or band
                     above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
                                 title_y + ch + 2 if on_border else 0)  # fmt: skip
@@ -1085,6 +1086,7 @@ class Layout:
                        "put the raw block after the ::: line that closes the box")  # fmt: skip
         y = top + stroke
         parts = []
+        tops = _tops(band_pics, y) if band_im is not None else []  # where each row is, for a box cut in pieces
         if band_im is not None:  # black from side to side of the frame, the title centred in it
             black = Image.new("L", (width - 2 * stroke, band_im.height), 0)
             black.paste(band_im, (side - stroke, 0))
@@ -1097,6 +1099,7 @@ class Layout:
             y += max(2, BOX_ROOM - lead, under)
             parts.append((body, side, y))
             codes = tuple((y + a, y + b, k) for a, b, k in codes)
+            tops += _tops(pics, y)
             y += body.height + max(2, BOX_ROOM - trail)
         else:
             y += BOX_ROOM
@@ -1130,7 +1133,8 @@ class Layout:
         marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
         lead = "".join(c.ch for c in self.lead(indent))
         left = min(place(im.width), indent * cw + room - width) // cw  # where it is, as far as it fits standing
-        view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang)
+        view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang,
+                     tuple(tops) if not ang and len(tops) == len(band) + len(rows) else ())  # fmt: skip
         return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes), *raws]
 
     def box_width(self, a: Attrs, line: int, room: int) -> int:
@@ -1738,7 +1742,16 @@ class Layout:
             small = imaging.place(_bw(piece), width, align)
             inside = tuple((max(0, a - top), min(piece.height, b - top), k) for a, b, k in spans
                            if b > top and a < top + piece.height)  # fmt: skip
-            return BitmapRow(small, line, kind, untested=mark, code_spans=inside), small
+            view = None
+            if framed and framed.row_tops:  # a piece of a box: the view draws its rows, its cut sides open
+                first, last = top == 0, top + piece.height >= ink.height
+                at, ends = top + box[1], (*framed.row_tops[1:], im.height)
+                mids = [(t + e) / 2 for t, e in zip(framed.row_tops, ends, strict=True)]  # a row: where its middle is
+                keep = [x for x, m in zip(framed.rows, mids, strict=True)
+                        if (first or m >= at) and (last or m < at + piece.height)]  # fmt: skip
+                view = replace(framed, rows=keep, title=framed.title if first else "", row_tops=(),
+                               open_top=not first, open_bottom=not last)  # fmt: skip
+            return BitmapRow(small, line, kind, untested=mark, code_spans=inside, box=view), small
 
         if ink.height <= tall:  # only the white around it was too tall
             return [row(ink)]
@@ -3306,6 +3319,15 @@ def _turned_spans(spans, height: int, ang: float) -> tuple:
     if ang == 180:
         return tuple((height - b, height - a, k) for a, b, k in spans)
     return ((0, height, spans[0][2]),)
+
+
+def _tops(pics: list, y: int) -> list[int]:
+    """Where rows stacked from `y` start, one under the other (a row that draws nothing takes no room)."""
+    out = []
+    for im in pics:
+        out.append(y)
+        y += im.height if im is not None else 0
+    return out
 
 
 def _white_row(im: Image.Image, y: int, sides: int = 0) -> bool:
