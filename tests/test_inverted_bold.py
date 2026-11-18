@@ -48,8 +48,27 @@ def test_an_inverted_line_at_1x_prints_bold_and_a_dot_taller():
     band = drawn(res)[0]
     assert band.kind == "band" and all(c.bold for c in band.text_rows[0].cells if c.ch != " ")
     assert white(band.image) > white(drawn(thin)[0].image) * 1.5  # bold and taller: much more white letter
-    assert said(res, "F206") == ["inverted text at 1x printed bold: ink fills thin white strokes"]
+    assert said(res, "F206") == ["inverted text printed bold (1x on line 1): ink fills thin white strokes"]
     assert untested(res) and "F206" not in codes(thin) and not untested(thin)
+
+
+def test_f206_is_said_once_for_the_document_with_every_place():
+    src = (
+        "A {.invert}\n\nB {.invert}\n\nC {.invert}\n\nTotal [9,00]{.invert}\n\n"
+        + BILL
+        + "| Tea | 2 | 18,00 | {.invert}\n| Pie | 1 | 9,00 | {.invert}\n\n"
+        + BILL
+        + "| Tea | 2 | 18,00 | {.invert}\n\n"
+        + "Big {.invert size=2x}\n"
+    )
+    assert said(build(src), "F206") == [
+        "inverted text printed bold (1x on lines 1, 3, 5, 7 and the tables at lines 9, 15): ink fills thin white "
+        "strokes"
+    ]
+    res = build(FONT + "Thanks {.invert size=24px}\n\nA [b]{.invert} c {render=native}\n")
+    assert said(res, "F206") == [
+        "inverted text printed bold (24px on line 5; 1x on line 7): ink fills thin white strokes"
+    ]
 
 
 def test_the_hyphen_is_two_dots_tall_white_on_black():
@@ -106,12 +125,14 @@ def test_an_inverted_row_prints_bold():
     res = build(BILL + "| Tea-bag | 2 | 18,00 | {.invert}\n")
     row = next(r for r in drawn(res) if r.kind == "band")
     assert all(c.bold for v in row.text_rows for c in v.cells if c.ch.strip())
-    assert said(res, "F206") == ["inverted text at 1x printed bold: ink fills thin white strokes"]
+    assert said(res, "F206") == ["inverted text printed bold (1x on the table at line 1): ink fills thin white strokes"]
 
 
 def test_a_table_in_a_raster_font_takes_its_bold_face_and_no_p301():
     res = build(BILL + "| Tea | 2 | 18,00 | {.invert}\n{font=Terminus size=20px}\n")
-    assert said(res, "F206") == ["inverted text at 20px printed bold: ink fills thin white strokes"]
+    assert said(res, "F206") == [
+        "inverted text printed bold (20px on the table at line 1): ink fills thin white strokes"
+    ]
     assert "P301" not in codes(res)  # a real bold face: R2-12 tested it on paper
 
 
@@ -120,7 +141,7 @@ def test_a_table_in_a_raster_font_takes_its_bold_face_and_no_p301():
 
 def test_a_raster_line_below_48px_takes_the_bold_face():
     res = build(FONT + "Thanks {.invert size=24px}\n")
-    assert said(res, "F206") == ["inverted text at 24px printed bold: ink fills thin white strokes"]
+    assert said(res, "F206") == ["inverted text printed bold (24px on line 5): ink fills thin white strokes"]
     assert "F204" not in codes(res) and "P301" not in codes(res)
     assert "F206" not in codes(build(FONT + "Thanks {.invert size=48px}\n"))
 

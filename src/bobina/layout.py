@@ -251,6 +251,7 @@ class Layout:
         self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
         self.untested: set[str] = set()  # features not tested on paper this job used that no row records (P301)
+        self.whitened: dict[str, set] = {}  # size -> (line, is a table) of the white text made bold: one F206 (run)
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -650,11 +651,30 @@ class Layout:
             self.white_note(size, line)
         return out
 
-    def white_note(self, size: str, line: int) -> None:
-        """F206: small white text on black printed bold, and the size that keeps its weight."""
+    def white_note(self, size: str, line: int, table: bool = False) -> None:
+        """White text at this size made bold on this line (a table's: its first line); said once (white_said)."""
+        self.whitened.setdefault(size, set()).add((line, table))
+
+    def white_said(self) -> None:
+        """F206 once for the document: every size made bold and where (a receipt with many inverted lines and rows
+        gets one note, not one per line), and the size that keeps its weight."""
+        if not self.whitened:
+            return
+        parts = []
+        for size, at in self.whitened.items():
+            lines = sorted(n for n, table in at if not table)
+            tables = sorted(n for n, table in at if table)
+            where = [f"line{'s' if len(lines) > 1 else ''} {', '.join(map(str, lines))}"] if lines else []
+            if tables:
+                many = len(tables) > 1
+                where.append(
+                    f"the table{'s' if many else ''} at line{'s' if many else ''} {', '.join(map(str, tables))}"
+                )
+            parts.append(f"{size} on {' and '.join(where)}")
         least = int(self.p.get("raster.invert_bold_below_px", 48))
         k = -(-least // self.p.cell[1])
-        self.n.add("F206", f"inverted text at {size} printed bold: ink fills thin white strokes", line,
+        first = min(n for at in self.whitened.values() for n, _ in at)
+        self.n.add("F206", f"inverted text printed bold ({'; '.join(parts)}): ink fills thin white strokes", first,
                    f"nothing to fix; size={k}x or {least}px and larger keep their weight")  # fmt: skip
 
     def view_cells(self, toks) -> list[Cell]:
@@ -843,6 +863,7 @@ class Layout:
         if self.p.get("marks", "none") in ("tear", "both"):  # printed so that the feed leaves it on the tear bar
             tear_at = max(0, feed - min(feed, max(1, int(self.p.get("margins.tear_dots", 40)))))  # 1 dot after it
         rows.append(FeedRow(feed, mark="tear", tear_at=tear_at))
+        self.white_said()
         return rows
 
     def blocks(self, blocks, indent: int) -> list:
@@ -2865,7 +2886,7 @@ class Layout:
                 thin = thin or changed
             rows.append(out)
         if thin:
-            self.white_note(size, t.line)
+            self.white_note(size, t.line, table=True)
         return head, rows, white
 
     def table_cell(self, runs, line: int, bold: bool = False) -> list[Cell]:
