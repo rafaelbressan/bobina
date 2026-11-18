@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.5 — 2026-11-18
+
+Layout:
+- Columns side by side: `:::: {.columns}` holds columns, each opened with `::: {.column}` and closed with `:::`.
+  Widths `width=40%|30mm|12ch|auto` (`%` of the text room, so 40% + 60% fill it), `gap=`, `valign=top|middle|bottom`
+  on all columns or one. Any block goes in a column: text, lists, QR codes, images, tables, boxes, other columns.
+- `wrap=nowrap` (the default) squeezes the content to fit; `wrap=wrap` moves a column that does not fit to a new row
+  (L110), `wrap=wrap-reverse` puts that row above. A QR squeezed below the module a phone reads says so (Q101).
+- Closing `:::: {.columns}` with fewer colons than opened them says so (M101), with both fixes: `::::` to close the
+  columns, `::: {.column}` to open another one. No room for a box or columns (deep in quotes or boxes): L111.
+- `bobina view` shows the columns side by side where they print; the guide is layout-columns.md, `bobina help
+  layout` the short version, and receipts.md has an NFC-e footer with the QR beside its text.
+
+Docs:
+- The problems index lists the codes by category, each category on its own page with what every code means.
+- The supermarket receipt (receipts-supermarket.md) and how counters reserve their numbers (counters.md) have their
+  own pages.
+
 ## 0.1.4 — 2026-11-17
 
 Security (upgrade if you print templates filled from `--data`, `--set`, `--ask`, MCP or chat):
