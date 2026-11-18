@@ -348,23 +348,54 @@ def test_a_data_matrix_too_tall_for_the_label_gets_a_smaller_whole_module():
     assert ink(dm.image)[3] - ink(dm.image)[1] <= W and "L112" not in codes(res)
 
 
-def test_a_barcode_too_tall_for_the_label_gets_shorter_bars_its_module_kept():
-    from bobina.rows import BarcodeRow
+def _barcodes(res) -> list[BitmapRow]:
+    return [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "barcode"]
 
-    res = build(cols("```barcode {type=code128 height=600}\nPED-1042\n```"))
-    (bar,) = [r for c in labels(res)[0].columns.columns for r in c.rows if isinstance(r, BarcodeRow)]
-    assert bar.height < 600 and bar.module == 2 and "L112" not in codes(res) and "Q108" not in codes(res)
+
+def test_a_barcode_too_tall_for_the_label_gets_shorter_bars():
+    res = build(cols("```barcode {type=code128 height=600}\nPED-1042\n```", opts="length=200mm"))
+    (bar,) = _barcodes(res)
+    box = ink(bar.image)
+    assert box[3] - box[1] <= W and "L112" not in codes(res) and "Q108" not in codes(res)
 
 
 def test_a_barcode_squeezed_below_the_shortest_bars_is_said():
+    inner = cols("```barcode {type=code128 height=600}\nAB\n```", opts="length=200mm")
+    res = build(":::::: {.columns}\n::::: {.column width=5ch}\n" + inner + ":::::\n::: {}\nx\n:::\n::::::\n")
+    assert any("too short to scan" in m for m in said(res, "Q108"))
+
+
+EAN = "```barcode {type=ean13}\n789123456789\n```"
+
+
+def test_a_barcode_in_a_turned_label_takes_module_4_and_a_10_module_margin_as_a_vertical_one():
+    res = build(cols(EAN, "R$ 18,90", opts="length=100mm", each=("width=60%", "width=40%")))
+    (bar,) = _barcodes(res)
+    box = ink(bar.image)
+    assert box[2] - box[0] == 95 * 4  # its bars at module 4: 95 modules
+    assert box[0] >= 10 * 4 and bar.image.width - box[2] >= 10 * 4  # and 10 modules of white each side
+    assert "Q108" not in codes(res)
+
+
+def test_a_barcode_in_a_column_too_narrow_for_module_4_is_said_with_the_width_it_needs():
+    res = build(cols(EAN, "R$ 18,90", each=("width=60%", "width=40%")))  # 28 letters of a 72 mm label: 42 mm
+    (q,) = said(res, "Q108")
+    assert "needs module 4" in q and "58 mm across its column, which has 42 mm" in q and "may not scan" in q
+    (n,) = [n for n in res.nudges if n.code == "Q108"]
+    assert "a wider column" in n.suggestion and "length=" in n.suggestion
+
+
+def test_a_pdf417_in_a_turned_label_takes_module_4_too():
+    res = build(cols("```pdf417\nLOTE-4471\n```", opts="length=200mm"))
+    (code,) = [r for r in _all_rows(res.rows) if isinstance(r, BitmapRow) and r.kind == "pdf417"]
+    assert "Q108" not in codes(res) and ink(code.image)[0] >= 10 * 4
+
+
+def test_a_standing_barcode_is_unchanged():
     from bobina.rows import BarcodeRow
 
-    inner = cols("```barcode {type=code128 height=600}\nAB\n```").replace("\n", "\n")
-    res = build(":::::: {.columns}\n::::: {.column width=5ch}\n" + inner + ":::::\n::: {}\nx\n:::\n::::::\n")
-    bars = [r for row in [r for r in res.rows if isinstance(r, BitmapRow) and r.columns]
-            for c in row.columns.columns for lab in c.rows if isinstance(lab, BitmapRow) and lab.columns
-            for cc in lab.columns.columns for r in cc.rows if isinstance(r, BarcodeRow)]  # fmt: skip
-    assert bars and bars[0].height < 40 and any("too short to scan" in m for m in said(res, "Q108"))
+    (bar,) = [r for r in build(EAN).rows if isinstance(r, BarcodeRow)]
+    assert bar.module == 2
 
 
 @pytest.mark.parametrize("shares", [("50%", "50%"), ("40%", "40%"), ("50%", "50%", "50%")])
@@ -376,23 +407,23 @@ def test_length_auto_holds_every_share_side_by_side(shares):
     assert all(w >= 1 for _, w in spans(row))
 
 
-def test_a_box_a_little_too_tall_is_drawn_smaller_but_never_below_70_percent():
+def test_a_box_a_little_too_tall_is_never_drawn_smaller_it_goes_on_in_the_next_label():
     box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(13)) + "\n:::"  # ~420 dots
     res = build(cols(box, "x"))
-    (note,) = said(res, "L112")
-    pct = int(note.split("drawn at ")[1].split("%")[0])
-    assert 70 <= pct < 100 and len(labels(res)) == 1
+    (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
+    assert n.code == "L112" and "between its lines" in n.message and "drawn" not in n.message
+    assert len(labels(res)) == 2  # 18/11: a box drawn at 75% printed "texto" as "texlo"
 
 
-def test_text_too_tall_even_at_70_percent_goes_on_cut_at_a_blank_line_as_a_note():
+def test_text_too_tall_goes_on_cut_at_a_blank_line_as_a_note():
     turned = "\n".join(f"line {i}" for i in range(30)) + " {rotate=180}"  # a turned block: 30 lines, ~900 dots
     res = build(cols(turned, "x"))
     (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
-    assert n.code == "L112" and n.severity == "note" and "between its lines" in n.message and "70%" in n.message
-    assert len(labels(res)) >= 2
+    assert n.code == "L112" and n.severity == "note" and "between its lines" in n.message and "drawn" not in n.message
+    assert len(labels(res)) >= 3
 
 
-def test_a_box_too_tall_even_at_70_percent_goes_on_cut_between_its_lines_its_side_lines_aside():
+def test_a_box_too_tall_goes_on_cut_between_its_lines_its_side_lines_aside():
     box = "::: {.box}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"
     res = build(cols(box, "x"))
     (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
@@ -455,6 +486,15 @@ def test_standing_wrap_never_draws_its_trials(monkeypatch):
     build(standing("short", "Pneumoultramicroscopico", opts="wrap=wrap", each=("width=60%",)))
     assert calls.count(True) == 2 and calls.count(False) >= 2  # the trials are laid out, only what prints is drawn
     assert not hasattr(Layout, "column_at")
+
+
+def test_boxes_and_standing_columns_are_tested_on_paper_turned_ones_not_yet():
+    from bobina import features
+
+    assert features.FEATURES["box"]["tested_on_paper"] and features.FEATURES["columns"]["tested_on_paper"]
+    assert "turned-columns" in features.untested()
+    (p301,) = said(build(cols("a", "b")), "P301")
+    assert "turned columns" in p301 and "columns side by side" not in p301
 
 
 def test_the_lengths_in_dots_said_are_the_ones_printed():

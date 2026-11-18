@@ -75,7 +75,8 @@ right. The widths share the length; content too tall for the label goes on in an
 
 ## On paper
 
-- ⚠ Not tested on paper yet. A row of columns prints as one image, the text in it in the printer font's look.
+- A row of columns prints as one image, the text in it in the printer font's look. Tested on paper (MTP-II,
+  18/11): a QR beside two lines at its middle, as the preview; the QR scanned.
 - Columns are never wider than their room: the paper, or what a quote, a list item or a box leaves.
 - `bobina view FILE` draws the columns side by side, where they are on the paper.
 

@@ -4,7 +4,7 @@
 sideways, the paper's width as its height. A shelf label, the name on the left and a big price on the right:
 
 ````markdown
-:::: {.columns orientation=vertical valign=middle}
+:::: {.columns orientation=vertical length=100mm valign=middle}
 ::: {.column width=60%}
 ## Café Torrado e Moído
 
@@ -30,9 +30,8 @@ of the paper, its first column printed first. Read it with that edge up.
 | `length=72mm` | the default: the label's length along the roll (`7.2cm`, `575` dots); at most 300 mm |
 | `length=auto` | as long as the columns' content needs: text on as few lines as it can, an image as big as fits the height |
 
-- The label's height is the paper's printable width: 48 mm (384 dots, 16 lines of text) on 58 mm paper, 72 mm on
-  80 mm.
-- Widths share the length as they share the line of standing columns: a 72 mm label has 47 letters, so `60%` and
+- The label's height is the paper's printable width: 48 mm (384 dots) on 58 mm paper, 72 mm on 80 mm.
+- Widths share the length as standing ones share the line: a 72 mm label has 47 letters, so `60%` and
   `40%` get 28 and 18 of the 46 left by the gap. `12ch`, `30mm` and `auto` work as they do standing.
 - `valign=` places each column across the height, as read: `top` is the paper's right edge, `bottom` its left.
 
@@ -43,17 +42,18 @@ Nothing is lost:
 - `wrap=wrap`: a column that does not fit (the widths, or its content taller than the label) starts a new label,
   printed after this one; `wrap=wrap-reverse`, before it (`L110`).
 - Otherwise what does not fit goes on in the next label, each column at its place, cut between lines and blocks
-  (`L112`). A dashed line with 3 mm of paper on each side parts two labels.
+  (`L112`). A dashed line between 3 mm of white parts two labels.
 - A single block taller than the label: a QR code or Data Matrix gets the largest whole module that fits (`Q101`
-  when it may not scan), in a box too; a barcode shorter bars. A picture is drawn smaller; a block of text (a box,
-  a table) never below 70%, so it still reads. Codes are never drawn smaller: what is still too tall goes on
-  in the next label, cut at a blank line near the edge, never through a code (`L112`), else across its lines
+  when it may not scan), in a box too; a barcode shorter bars. Only a picture is drawn smaller: text and codes go
+  on in the next label, cut at a blank line near the edge, never through a code (`L112`), else across its lines
   (`L114`, a warning); a code taller than the label is cut and will not scan (`Q101`, `Q108`).
+- A barcode's bars run along the paper once turned: like a [vertical one](../FORMAT.md#62-barcodes-), module 4
+  and 10 modules of white each side (an EAN-13: 58 mm of column), else `Q108`.
 
 ## Good to know
 
-- Only columns outside quotes and lists turn (`M101`); there they stand.
+- Columns in a quote or a list stand (`M101`).
 - `rotate=90` on standing columns turns their picture; bobina suggests `orientation=vertical` (`L113`). On
   turned columns `rotate=` and `.flip` are ignored (`M101`).
-- `bobina view FILE` shows the label standing, as read, under `↻ columns printed turned, top on the right`.
+- `bobina view FILE` shows the label standing, as read, under a `↻` mark.
 - ⚠ Not tested on paper yet.

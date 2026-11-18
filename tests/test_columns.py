@@ -302,7 +302,7 @@ def test_the_nfce_footer_a_qr_beside_three_lines_in_the_middle():
     qr = ink(row.image, (0, 0, 12 * CW, row.image.height))
     text = ink(row.image, (13 * CW, 0, W, row.image.height))
     assert abs((qr[1] + qr[3]) / 2 - (text[1] + text[3]) / 2) <= 2  # their middles meet
-    assert "P301" in codes(res) and "columns side by side" in said(res, "P301")[0]
+    assert "P301" not in codes(res)  # tested on paper 18/11: as the preview, the QR scanned (docs/TESTED.md)
 
 
 def test_a_box_inside_a_column():

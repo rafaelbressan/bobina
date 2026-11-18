@@ -1,7 +1,7 @@
 ---
 profile: epson-tm-t20ii
 ---
-:::: {.columns orientation=vertical valign=middle}
+:::: {.columns orientation=vertical length=100mm valign=middle}
 ::: {.column width=60%}
 ## Café Torrado e Moído
 

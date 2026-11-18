@@ -83,6 +83,8 @@ PAID
 - The whole box prints as one image: the frame shares its lines with the text, so the text inside is drawn in the
   printer font's look (the same dots). A QR code inside is sized as an image, to fit the room.
 - `bobina view FILE` shows the box in the terminal: `┌─ TABLE ─┐`, the text inside, `└───┘`.
+- Tested on paper (MTP-II, 18/11): a border title and a band, a dashed frame, the grey, as the preview. Text on
+  `.shade`: prefer bold, thin strokes fade on the grey (the top bar of a "T").
 
 ## When something is wrong
 

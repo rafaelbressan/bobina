@@ -65,12 +65,9 @@ TURNED_LENGTH_MM = 72  # orientation=vertical on columns: a label this long alon
 TURNED_MOST_MM = 300  # … and never longer than this (length=auto too: a column's content measured up to it)
 LENGTH_HINT = "72mm (the default), 7.2cm, 575 (dots) or auto (as long as the columns' content needs)"
 CODE_KINDS = frozenset({"qr", "barcode", "datamatrix", "pdf417"})  # rows a turned label never resamples (fit_label)
-# a block holding text taller than a turned label is drawn at most this much smaller: the printer font's 24-dot
-# letters become 17 dots tall, their 2-dot strokes about 1.4: resampled letters blur where a font drawn that size
-# would not, so this keeps them well above Terminus 12px, the smallest text tested legible on paper (tables.md)
-LEGIBLE_SHRINK = 0.7
 LABEL_GAP_MM = 3  # between two turned labels, each side of the dashed line that parts them (between_labels)
-BAR_MIN_DOTS = 40  # a barcode laid out to fit a turned label keeps bars at least this tall (5 mm), else Q108
+BAR_MIN_DOTS = 40  # a barcode fitted to a turned label keeps bars this tall (5 mm), else Q108: on paper 18/11, a
+# standing EAN-13 with 40-dot bars scanned (MTP-II)
 COLUMN_HINT = "a column takes width=auto|40%|30mm|12ch and valign=top|middle|bottom (docs/guides/layout-columns.md)"
 WRAPS = ("nowrap", "wrap", "wrap-reverse")  # wrap= on columns: CSS flex-wrap's names
 VALIGNS = {"top": "top", "middle": "middle", "center": "middle", "bottom": "bottom"}  # center (CSS's word): middle
@@ -1719,9 +1716,9 @@ class Layout:
         """A row taller than a turned label (its ink), as pieces no taller than the label, each fact said once,
         naming its column:
         - a photo or drawing (an image) is drawn smaller to fit it (L112);
-        - a block with text (a box, a turned block, a table) is drawn at most LEGIBLE_SHRINK smaller (L112);
-        - what is still too tall, and whatever holds a code (never resampled: a code is laid out to fit the label
-          already, laid_column), goes on in the next labels, cut where no code is: at a blank line near each cut
+        - anything else holds text or a code, never resampled (18/11: a box drawn at 75% printed "texto" as
+          "texlo"; a code is laid out to fit the label already, laid_column): it goes on in the next labels, cut
+          where no code is: at a blank line near each cut
           (a box's side lines aside) or at a code's edge, a clean cut (L112, a note); across its lines when there is
           no such place (L114, a warning); through a code only when the code itself is taller than the label
           (Q101, Q108 for a barcode: it will not scan). A block cut both ways says both."""
@@ -1751,14 +1748,6 @@ class Layout:
         if photo:
             self.n.add("L112", f"{what}: drawn smaller to fit it", line, "a smaller width= for it")
             return [row(ink.resize((max(1, round(ink.width * tall / ink.height)), tall), Image.BOX))]
-        scale = 1.0
-        if not spans:
-            scale = max(LEGIBLE_SHRINK, tall / ink.height)
-            ink = ink.resize((max(1, round(ink.width * scale)), max(1, round(ink.height * scale))), Image.BOX)
-            sides = math.ceil(sides * scale)
-            if ink.height <= tall:
-                self.n.add("L112", f"{what}: drawn at {scale:.0%} to fit it", line, "a smaller size= or less text")
-                return [row(ink)]
 
         def free(y: int) -> bool:  # a row that cuts no code
             return not any(a < y < b for a, b, _ in spans)
@@ -1781,7 +1770,6 @@ class Layout:
             top = at
         pieces.append((top, ink.crop((0, top, ink.width, ink.height))))
         more = f"{len(pieces) - 1} more label{'s' if len(pieces) > 2 else ''}"
-        shrunk = f"drawn at {scale:.0%} (smaller would not read) and " if scale < 1 else ""
         for a, b, k in through:
             name = {"qr": "QR code", "datamatrix": "Data Matrix", "pdf417": "PDF417"}.get(k, "barcode")
             turn = ", or orientation=horizontal on the barcode" if name == "barcode" else ""
@@ -1790,10 +1778,10 @@ class Layout:
                        f"{labels} turned labels: it will not scan", line,
                        f"a longer length=, a smaller module={turn}")  # fmt: skip
         if across:
-            self.n.add("L114", f"{what}: {shrunk}it goes on in {more}, cut across its lines", line,
+            self.n.add("L114", f"{what}: it goes on in {more}, cut across its lines", line,
                        "read the labels together; a smaller size= or width=, or less in it")  # fmt: skip
         elif not through:
-            self.n.add("L112", f"{what}: {shrunk}it goes on in {more}, cut between its lines", line,
+            self.n.add("L112", f"{what}: it goes on in {more}, cut between its lines", line,
                        "a smaller size= or width=, or less in it")  # fmt: skip
         return [row(p, t) for t, p in pieces]
 
@@ -2117,6 +2105,20 @@ class Layout:
                 self.n.add("Q108", f"width={f.attrs.kv['width']} would give module {fitted}: too thin to scan", f.line,
                            f"module {lo} is kept; a larger width or less data")  # fmt: skip
             mod = max(lo, fitted)
+        if self.tall_max is not None and pattern and orientation != "vertical":  # in a turned label
+            mod = self.feed_module(kind, units, mod, f.line)
+            quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
+            im = codes.image(kind, data, mod, height, text, self.em, wide=3)  # drawn by bobina, as a vertical one
+            over = im.height - self.tall_max
+            if over > 0:  # shorter bars to fit the label's height, their widths untouched
+                im = codes.image(kind, data, mod, max(1, height - over), text, self.em, wide=3)
+                if height - over < BAR_MIN_DOTS:
+                    self.n.add("Q108", f"bars {max(1, height - over)} dots tall, to fit the turned label's height: "
+                               "too short to scan reliably", f.line, "text=none, or take the barcode out of the turned "
+                               "columns")  # fmt: skip
+            padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
+            padded.paste(im, (quiet, 0))
+            return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
         too_wide = bool(units) and units * mod > self.W
         if orientation == "vertical" or (orientation == "auto" and too_wide):
             if not pattern:
@@ -2158,16 +2160,26 @@ class Layout:
                 f.line,
                 "orientation=auto prints it vertically",
             )
-        row = BarcodeRow(kind, data, mod, height, text, align, f.line)
-        if self.tall_max:  # a turned label: shorter bars to fit its height, the bars' widths untouched
-            over = preview.barcode_image(row, self.em).height - self.tall_max
-            if over > 0:
-                row.height = max(1, height - over)
-                if row.height < BAR_MIN_DOTS:
-                    self.n.add("Q108", f"bars {row.height} dots tall, to fit the turned label's height: too short "
-                               "to scan reliably", f.line, "text=none, or take the barcode out of the turned "
-                               "columns")  # fmt: skip
-        return [row]
+        return [BarcodeRow(kind, data, mod, height, text, align, f.line)]
+
+    def feed_module(self, kind: str, units: int, mod: int, line: int) -> int:
+        """The module of a code whose bars run along the paper once its turned label turns (a barcode, PDF417), as a
+        vertical barcode's do, so the same rule measured on paper: at least barcode.min_module_feed (05/11: modules 2
+        and 3 did not scan, 4 did; 18/11: an EAN-13 at module 2 in a turned label did not), and
+        barcode.quiet_modules of white each side, within its column. A column too narrow for that is said (Q108) with
+        the width the code needs; it then gets the largest module that fits."""
+        lo, quiet = int(self.p.get("barcode.min_module_feed", 4)), int(self.p.get("barcode.quiet_modules", 10))
+        mod = max(mod, lo)
+        fits = self.W // (units + 2 * quiet)
+        if fits < mod:
+            per = self.p.dpi / 25.4
+            self.n.add("Q108", f"{kind} in a turned label: its bars run along the paper, so it needs module {lo} and "
+                       f"{quiet} modules of white each side, {(units + 2 * quiet) * lo / per:.0f} mm across its "
+                       f"column, which has {self.W / per:.0f} mm: it may not scan", line,
+                       "a wider column, a longer length=, or the code in a label of its own",
+                       "05/11 codes ticket; 18/11 shelf label")  # fmt: skip
+            mod = max(1, fits)
+        return mod
 
     def matrix_code(self, f: Fence, kind: str) -> list:
         """2D codes the printer cannot draw natively: always raster (R5: module >= 4 for square codes)."""
@@ -2201,6 +2213,15 @@ class Layout:
             if stepped and kind == "datamatrix" and mod < int(self.p.get("qr.min_module_raster", 4)):
                 self.n.add("Q101", f"datamatrix module {mod}, to fit the turned label's height", f.line,
                            "less data, or take it out of the turned columns")  # fmt: skip
+            if self.tall_max is not None and kind == "pdf417":  # its rows of bars run along the paper once turned
+                units = max(1, im.width // mod)
+                turned = self.feed_module(kind, units, mod, f.line)
+                if turned != mod:
+                    mod, im = turned, draw(turned)
+                quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
+                padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
+                padded.paste(im, (quiet, 0))
+                im = padded
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []

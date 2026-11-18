@@ -80,8 +80,8 @@ FIX = {
     ),
     "L112": (
         "Turned columns are as tall as the paper is wide. Give the label more length (length=, or length=auto), use "
-        "less text or smaller sizes, or wrap=wrap to move a column to a label of its own. A block drawn smaller or "
-        "cut between two labels: give it a smaller width= or size=, or take it out of the turned columns."
+        "less text or smaller sizes, or wrap=wrap to move a column to a label of its own. A block cut between two "
+        "labels, or a picture drawn smaller: give it a smaller width= or size=, or take it out of the turned columns."
     ),
     "L114": (
         "Nothing is lost: the block goes on in the next label, cut across a line. Read the labels together, or "

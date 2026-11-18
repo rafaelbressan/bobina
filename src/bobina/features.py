@@ -28,15 +28,18 @@ FEATURES = {
     },
     "box": {
         "title": "boxes (::: {.box}): a frame around blocks, its title and grey, printed as one image",
-        "where": "documents with ::: {.box} (docs/guides/layout.md); the 2-dot line and the grey were tested alone",
-        "tested_on_paper": False,
-        "evidence": "",
+        "where": "documents with ::: {.box} (docs/guides/layout.md)",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 18/11: a border title box (MESA, # 12) and a dashed band box with .shade (PAGO, Total R$ "
+        "93,50) printed as the preview: frame whole, title cut into the border, band black, grey even; on the grey "
+        "the thin top bar of a T fades (text on .shade: prefer bold)",
     },
     "columns": {
         "title": "columns side by side (:::: {.columns}), each row of them printed as one image",
         "where": "documents with :::: {.columns} (docs/guides/layout-columns.md)",
-        "tested_on_paper": False,
-        "evidence": "",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 18/11: an NFC-e footer (a QR at 40%, two lines at 60%, valign=middle) and two auto text "
+        "columns (the right one .right) printed as the preview, the text at the QR's middle; the QR scanned",
     },
     "turned-columns": {
         "title": "turned columns (:::: {.columns orientation=vertical}): a label along the roll, read sideways",

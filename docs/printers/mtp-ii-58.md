@@ -71,6 +71,8 @@ bobina picks native when ✅ and falls back to raster otherwise; problems are nu
 | Data Matrix | — | raster module 4+ read | 🖼️ |
 | Pix (BR Code) as native QR | ✅ | read by banking apps (CPF, e-mail, phone keys) | native up to version 7, 🖼️ above |
 | **Vertical barcode** (raster, bars across the paper) | — | modules 2 and 3 **did not scan**, **4 did**: the feed direction blurs (whole heated lines in a row close thin gaps) | module ≥ 4 + 10-module quiet zone |
+| Barcode in a turned label (bars along the paper, as a vertical one) | — | an EAN-13 at module 2 **did not scan** (18/11) | the vertical rule: module ≥ 4 + 10-module quiet zone |
+| Bar height 40 dots | ✅ | a standing EAN-13 with `height=40` scanned (18/11) | the shortest bars a turned label gives a barcode |
 
 **The native QR has no module size.** Strips of 13/11 and 16/11, photographed next to a raster QR ruler (25 modules
 × 6 dots = 150 dots), each code decoded with OpenCV to count its modules:
