@@ -44,8 +44,11 @@ FEATURES = {
     "turned-columns": {
         "title": "turned columns (:::: {.columns orientation=vertical}): a label along the roll, read sideways",
         "where": "documents with :::: {.columns orientation=vertical} (docs/guides/layout-columns-turned.md)",
-        "tested_on_paper": False,
-        "evidence": "",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 18/11: a 100 mm shelf label (name, 500 g and an EAN-13 at module 4 with 10-module margins "
+        "at 60%, R$ 18,90 size=3x at 40%, valign=middle) printed as the preview and the phone scanned its EAN-13; it "
+        "reads right with the paper's right edge up. The first strip that day: a 72 mm label's EAN-13 at module 2 did "
+        "not scan, and a box drawn at 75% blurred letters (both changed)",
     },
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",

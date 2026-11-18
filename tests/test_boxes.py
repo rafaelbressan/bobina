@@ -147,7 +147,7 @@ def test_a_box_is_one_image_with_its_frame_and_text_inside():
     res = build("::: {.box}\nhello\n:::\n")
     (b,) = boxes(res)
     assert b.image.width == W and ink(b.image) == (0, 0, W, b.image.height)  # the frame: the whole width
-    assert "P301" not in codes(res)  # tested on paper 18/11 (docs/TESTED.md)  # not seen on paper yet
+    assert "P301" not in codes(res)  # tested on paper 18/11 (docs/TESTED.md)
 
 
 def test_the_view_draws_the_frame_its_title_and_the_text():

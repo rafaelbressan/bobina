@@ -259,9 +259,8 @@ def test_columns_in_a_quote_stand_and_say_why():
     assert not row.columns.turned and any("outside quotes and lists" in m for m in said(res, "M101"))
 
 
-def test_turned_columns_get_the_untested_note():
-    (p301,) = said(build(cols("a", "b")), "P301")
-    assert "turned columns" in p301
+def test_turned_columns_are_tested_on_paper_no_untested_note():
+    assert "P301" not in codes(build(cols("a", "b")))  # 18/11: the 100 mm shelf label printed and scanned
 
 
 # --- the terminal view --------------------------------------------------------------------------------------------
@@ -488,13 +487,11 @@ def test_standing_wrap_never_draws_its_trials(monkeypatch):
     assert not hasattr(Layout, "column_at")
 
 
-def test_boxes_and_standing_columns_are_tested_on_paper_turned_ones_not_yet():
+def test_boxes_and_columns_standing_and_turned_are_tested_on_paper():
     from bobina import features
 
-    assert features.FEATURES["box"]["tested_on_paper"] and features.FEATURES["columns"]["tested_on_paper"]
-    assert "turned-columns" in features.untested()
-    (p301,) = said(build(cols("a", "b")), "P301")
-    assert "turned columns" in p301 and "columns side by side" not in p301
+    assert all(features.FEATURES[k]["tested_on_paper"] for k in ("box", "columns", "turned-columns"))
+    assert not {"box", "columns", "turned-columns"} & set(features.untested())
 
 
 def test_the_lengths_in_dots_said_are_the_ones_printed():

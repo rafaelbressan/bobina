@@ -61,7 +61,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
-| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)); blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`); along the roll: `orientation=vertical` ⚠ not tested on paper |
+| `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)); blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`); along the roll: `orientation=vertical` |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |

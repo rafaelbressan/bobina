@@ -20,8 +20,8 @@ R$ 18,90 {size=3x}
 ::::
 ````
 
-It prints turned like a [turned table](tables.md#turned-tables), clockwise: the label's top on the right
-of the paper, its first column printed first. Read it with that edge up.
+It prints turned like a [turned table](tables.md#turned-tables), clockwise: its top on the right of the
+paper, its first column first. Read it with that edge up.
 
 ## Length and height
 
@@ -52,8 +52,8 @@ Nothing is lost:
 
 ## Good to know
 
-- Columns in a quote or a list stand (`M101`).
+- In a quote or list they stand (`M101`).
 - `rotate=90` on standing columns turns their picture; bobina suggests `orientation=vertical` (`L113`). On
   turned columns `rotate=` and `.flip` are ignored (`M101`).
-- `bobina view FILE` shows the label standing, as read, under a `↻` mark.
-- ⚠ Not tested on paper yet.
+- `bobina view FILE` shows it as read, under a `↻`.
+- Tested on paper (MTP-II, 18/11): the label above; its EAN-13 scans.
