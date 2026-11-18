@@ -220,6 +220,16 @@ def shade(im: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
     return out.convert("1", dither=Image.NONE) if im.mode == "1" else out
 
 
+def thicken_down(im: Image.Image) -> Image.Image:
+    """Black ink on white grown one dot down (mode L): the printer font's 1-dot horizontal strokes (a hyphen, the
+    bar of a T) become 2 dots, as at 2x. White on black they closed up at 1 dot, even bold (MTP-II, paper 18/11);
+    with the bold's dot to the right, drawn white text gets 2 dots both ways."""
+    g = im.convert("L")
+    down = Image.new("L", g.size, 255)
+    down.paste(g, (0, 1))
+    return ImageChops.darker(g, down)
+
+
 def vstack(parts: list, width: int, mode: str = "1", margin: int = 0) -> Image.Image:
     """Images one under the other on a white page `width` wide (and `margin` white dots above and below)."""
     out = Image.new(mode, (width, max(1, sum(p.height for p in parts) + 2 * margin)), 1 if mode == "1" else 255)

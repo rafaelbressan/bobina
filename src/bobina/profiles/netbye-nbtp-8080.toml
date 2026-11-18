@@ -69,6 +69,7 @@ min_stroke_dots = 2
 min_gap_dots = 2
 min_text_px = 12
 invert_min_px = 20
+invert_bold_below_px = 48  # white text smaller than this prints bold (conservative: 2x the printer font)
 invert_margin_dots = 4
 
 [image]

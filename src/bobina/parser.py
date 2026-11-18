@@ -216,6 +216,10 @@ def _md(icons: bool = True) -> MarkdownIt:
     return md
 
 
+SPAN_CLASSES = frozenset({"bold", "italic", "underline", "strike", "invert", "mono"})  # what [text]{…} takes
+SPAN_KEYS = frozenset({"font", "size", "id"})
+
+
 def _span_attrs(node) -> Attrs:
     a = Attrs()
     for k, v in (node.attrs or {}).items():
@@ -278,6 +282,11 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
                         mono=st.mono or a.has("mono"),
                         font=a.kv.get("font", st.font),
                         size=a.kv.get("size", st.size),
+                        idle=(
+                            *st.idle,
+                            *(f".{k}" for k in sorted(a.classes - SPAN_CLASSES)),
+                            *(f"{k}=" for k in sorted(set(a.kv) - SPAN_KEYS)),
+                        ),
                     ),
                 )
             elif t == "link":

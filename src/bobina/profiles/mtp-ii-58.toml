@@ -100,6 +100,8 @@ min_gap_dots = 2          # R5-02
 min_text_px = 12          # R5-04, F2 (Terminus); 14 for Atkinson
 invert_min_px = 20        # R2-12, bold, with >= 4 dots of margin
 invert_margin_dots = 4
+invert_bold_below_px = 48 # paper 18/11: white text 24 dots tall (the printer font at 1x) closed up, even bold
+                          # (a hyphen lost); at 2x (48) it held: smaller white text prints bold
 
 [image]
 dither = "floyd-steinberg"

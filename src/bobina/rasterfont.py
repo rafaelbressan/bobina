@@ -225,6 +225,7 @@ class Tok:
     tracking: int = 0
     glue: bool = False  # part of the word before it (another script, another font): never a line break before it
     icon: str = ""  # an icon (:fragile:) drawn as a square the height of the letters, not a glyph of the font
+    heavy: bool = False  # white on black below the size the paper holds: a synthetic bold also a dot taller
 
     @property
     def font(self):
@@ -268,6 +269,9 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
             d.text((x, ascent - fa), txt, font=t.font, fill=ink)
             if t.bold and "bold" not in t.path.lower():  # synthetic bold for fonts without a bold file
                 d.text((x + 1, ascent - fa), txt, font=t.font, fill=ink)
+                if t.heavy:  # its 1-dot horizontal strokes 2 dots too (imaging.thicken_down)
+                    d.text((x, ascent - fa + 1), txt, font=t.font, fill=ink)
+                    d.text((x + 1, ascent - fa + 1), txt, font=t.font, fill=ink)
     if t.italic and not t.icon:  # an icon is not slanted
         im = im.transform(
             im.size,

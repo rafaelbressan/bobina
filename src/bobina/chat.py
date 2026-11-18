@@ -237,7 +237,14 @@ def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: 
     w = profile.width_dots
     side = ICON_PX + 6 if icon else 0
     inner = w - side - 2 * PAD - 4
-    words = text_image(profile, text, inner, align="right" if full else "left")
+    heavy = inverted and profile.invert_bold(profile.cell[1])  # small white text: bold, a dot taller (layout)
+    words = text_image(profile, text, inner, bold=heavy, align="right" if full else "left")
+    if heavy:
+        from . import imaging
+
+        grown = Image.new("1", (words.width, words.height + 1), 1)  # cropped to its ink: room for the dot below
+        grown.paste(words, (0, 0))
+        words = imaging.thicken_down(grown).convert("1", dither=Image.NONE)
     bw = (w - side) if full else words.width + 2 * PAD
     bh = words.height + 2 * PAD
     out = Image.new("1", (w, bh), 1)

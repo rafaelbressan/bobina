@@ -26,6 +26,8 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/layout-columns-turned.md": 690,  # set on 17/11, turned columns split from layout-columns.md (not in llms-full)
     "docs/guides/receipts-supermarket.md": 385,  # set on 17/11, split from receipts.md (not in llms-full.txt)
     "docs/guides/counters.md": 260,  # set on 17/11, when a number is taken: split from FORMAT §7.3 (not in llms-full)
+    "docs/guides/text-styles.md": 650,  # set on 18/11, spans and white text made bold (not in llms-full.txt)
+    "docs/guides/scripts.md": 200,  # set on 18/11, other scripts split from FORMAT §4 (not in llms-full.txt)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,

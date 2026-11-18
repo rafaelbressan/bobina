@@ -12,7 +12,7 @@ from functools import cache
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont
 
-from . import icons, paths
+from . import icons, imaging, paths
 from .rows import Cell, TextRow
 
 CHECKBOX = {"☐": None, "☑": "check", "☒": "cross"}
@@ -81,8 +81,10 @@ class Emulator:
             d.line((x0 + 3, y0 + 3, x0 + 12, y0 + 12), fill=0, width=2)
             d.line((x0 + 12, y0 + 3, x0 + 3, y0 + 12), fill=0, width=2)
 
-    def line_image(self, cells: list[Cell], tracking: int = 0) -> Image.Image:
-        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell)."""
+    def line_image(self, cells: list[Cell], tracking: int = 0, heavy: bool = False) -> Image.Image:
+        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell). heavy: inverted
+        cells are drawn a dot taller too (imaging.thicken_down), as a drawn line's white text below the size the
+        paper holds."""
         widths = [self.cw * (2 if c.wide else 1) for c in cells]
         im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), self.ch), 255)
         x = 0
@@ -101,7 +103,7 @@ class Emulator:
                     fillcolor=255,
                 )
             if c.invert and c.ch != " ":
-                g = g.point(lambda v: 255 - v)
+                g = (imaging.thicken_down(g) if heavy else g).point(lambda v: 255 - v)
             im.paste(g, (x, 0))
             if c.underline and c.ch != " ":
                 ImageDraw.Draw(im).line((x, self.ch - 2, x + w - 1, self.ch - 2), fill=0, width=1)
@@ -111,9 +113,9 @@ class Emulator:
             x += w + tracking
         return im
 
-    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int) -> Image.Image:
+    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int, heavy: bool = False) -> Image.Image:
         """Glyphs scaled by GS !, then `tracking` dots after each one, as they are (Profile.tracking_gap)."""
-        glyphs = self.line_image(cells, 0)
+        glyphs = self.line_image(cells, 0, heavy)
         glyphs = glyphs.resize((glyphs.width * sw, glyphs.height * sh), Image.NEAREST)
         widths = [self.cw * (2 if c.wide else 1) * sw for c in cells]
         im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), glyphs.height), 255)
@@ -137,13 +139,15 @@ class Emulator:
         return min(255, self.ch * row.scale[1] + gap)
 
     def render_row(self, row: TextRow, width: int) -> Image.Image:
-        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does."""
+        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. A row drawn as an image draws
+        its inverted words heavy below the size the paper holds (a native row: the printer's ESC E bold)."""
         sw, sh = row.scale
+        heavy = not row.native and self.p.invert_bold(self.ch * min(sw, sh))
         gap = self.p.tracking_gap(row.tracking, sw)
         if gap != row.tracking * sw:  # the printer does not scale ESC SP at this width (MTP-II at 2x)
-            li = self._gapped(row.cells, gap, sw, sh)
+            li = self._gapped(row.cells, gap, sw, sh, heavy)
         else:
-            li = self.line_image(row.cells, row.tracking)
+            li = self.line_image(row.cells, row.tracking, heavy)
             if (sw, sh) != (1, 1):
                 li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
         if sw == sh > 1:

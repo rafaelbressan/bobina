@@ -71,7 +71,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 - at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, its line and those above back to the previous `{…}`
-- on a span: `Total: [R$ 42,00]{.bold size=large}`
+- on a span: `Total: [R$ 42,00]{.bold size=large}` ([what a span takes](guides/text-styles.md))
 - on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
 
@@ -81,7 +81,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 |---|---|
 | `.left` `.center` `.right` `.justify` | alignment (justify spreads spaces on the character grid, or pixels in raster) |
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
-| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native) |
+| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); small: bold (`F206`, ⚠ not tested on paper) |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
 | `.mono` | monospace (the printer font is already monospace) |
 | `.compact` | tables: do not stretch |
@@ -120,15 +120,12 @@ A font that cannot be found falls back to Atkinson Hyperlegible (`F203`).
 Quality nudges, from the printed tests of the profile:
 - below a font's **tested minimum** → `F201` with the minimum and the evidence;
 - an **untested** font: bobina measures its stem at the requested size and warns below 2 dots (`F202`);
-- inverted raster text thinner than bold 20 px → `F204`;
+- inverted raster text under 20 px → `F204`;
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
 
-**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
-downloads its Noto font (pinned, 38 KB for Thai, up to 8.3 MB for CJK), says so first (font, OFL license, size,
-source; `F304`) and keeps it in `~/.local/share/bobina/fonts/` for offline use. No network, or `bobina config set
-font_downloads off`: boxes and `F305` (`bobina fonts get thai`, a language or a document). Han follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and Arabic or
-Hebrew ones, are drawn whole (joined, stacked, right to left), never letter by letter.
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): bobina downloads their Noto font once and says so
+(`F304`; off or no network: boxes and `F305`): [guides/scripts.md](guides/scripts.md).
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
@@ -455,6 +452,7 @@ Nudges:
 | `F203` | warning | font not found, a bundled font was used |
 | `F204` | warning | inverted raster text too thin or small |
 | `F205` | warning | font size out of range (6 to 400 px), clamped |
+| `F206` | note | small white-on-black text printed bold: ink fills thin white strokes |
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |

@@ -28,6 +28,7 @@ class Run:
     mono: bool = False
     font: str | None = None
     size: str | None = None
+    idle: tuple[str, ...] = ()  # what its span's {…} gave that a span does not take (.center, foo=): M101
 
 
 @dataclass
