@@ -29,6 +29,7 @@ class Run:
     font: str | None = None
     size: str | None = None
     idle: tuple[str, ...] = ()  # what its span's {…} gave that a span does not take (.center, foo=): M101
+    stretch: float = 1.0  # drawn this many times as wide as tall (layout.printer_px: a span at 2x1 on a drawn line)
 
 
 @dataclass

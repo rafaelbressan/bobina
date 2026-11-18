@@ -19,6 +19,8 @@ class Cell:
     italic: bool = False
     strike: bool = False
     wide: bool = False  # occupies two columns (CJK, drawn checkbox)
+    heavy: bool = False  # printed white on black below the size the paper holds (layout.whiten): bold, and drawn a
+    # dot taller where bobina draws it (Emulator.line_image); a native one gets the printer's bold, ESC E
 
 
 def columns(cells: list[Cell]) -> int:

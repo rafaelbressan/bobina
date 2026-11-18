@@ -11,12 +11,13 @@ import dataclasses
 import re
 import shutil
 import subprocess
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import paths
+from . import imaging, paths
 
 SIZES_MM = {"small": 1.5, "normal": 2.5, "large": 3.5, "title": 5.0, "huge": 8.0}
 SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")  # 2x, 1x2: the printer font's multipliers (width x height)
@@ -225,7 +226,9 @@ class Tok:
     tracking: int = 0
     glue: bool = False  # part of the word before it (another script, another font): never a line break before it
     icon: str = ""  # an icon (:fragile:) drawn as a square the height of the letters, not a glyph of the font
-    heavy: bool = False  # white on black below the size the paper holds: a synthetic bold also a dot taller
+    heavy: bool = False  # white on black below the size the paper holds (layout): bold, and a synthetic bold (no
+    # bold file: the printer font's look) a dot taller too
+    stretch: float = 1.0  # drawn this many times as wide (a printer-font span at 2x1 or 1x2 on a drawn line)
 
     @property
     def font(self):
@@ -237,12 +240,15 @@ class Tok:
 
     def width(self) -> int:
         if self.icon:
-            return self.icon_px() + self.tracking
+            return round((self.icon_px() + self.tracking) * self.stretch)
         w = self.font.getlength(self.text) + self.tracking * len(self.text)
-        return int(round(w + (self.px * 0.1 if self.italic and not self.space else 0)))
+        return int(round((w + (self.px * 0.1 if self.italic and not self.space else 0)) * self.stretch))
 
 
 def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
+    if t.stretch != 1:  # GS ! at 2x1 or 1x2: the glyphs as drawn at their height, then as wide as the width says
+        plain = draw_tok(dataclasses.replace(t, stretch=1.0), ascent, line_h)
+        return plain.resize((max(1, t.width()), line_h), Image.NEAREST)
     w = max(1, t.width())
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
@@ -269,9 +275,11 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
             d.text((x, ascent - fa), txt, font=t.font, fill=ink)
             if t.bold and "bold" not in t.path.lower():  # synthetic bold for fonts without a bold file
                 d.text((x + 1, ascent - fa), txt, font=t.font, fill=ink)
-                if t.heavy:  # its 1-dot horizontal strokes 2 dots too (imaging.thicken_down)
-                    d.text((x, ascent - fa + 1), txt, font=t.font, fill=ink)
-                    d.text((x + 1, ascent - fa + 1), txt, font=t.font, fill=ink)
+        if t.heavy and "bold" not in t.path.lower():  # the one place a raster glyph is drawn heavy (a bold face is
+            tall = Image.new("L", (w, line_h + 1), 255)  # heavy enough: R2-12), a dot taller: a descender in
+            tall.paste(im, (0, 0))  # the last row grows into the leading below
+            im = imaging.thicken_down(tall, ink)
+            d = ImageDraw.Draw(im)
     if t.italic and not t.icon:  # an icon is not slanted
         im = im.transform(
             im.size,
@@ -341,7 +349,21 @@ def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
 
 
-def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
+def _fits(t: Tok, room: int) -> int:
+    """How many letters of t fit in `room` dots (a mark stays with its letter)."""
+    n = 0
+    for i in range(1, len(t.text) + 1):
+        if i < len(t.text) and unicodedata.category(t.text[i]).startswith("M"):
+            continue
+        if dataclasses.replace(t, text=t.text[:i]).width() > room:
+            break
+        n = i
+    return n
+
+
+def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[list[Tok]]:
+    """Tokens as lines `width` dots wide (`hang`: less on the next ones). split(word, at): a word wider than a line
+    is cut where it fits, as a native line cuts it (L101), never cropped; None: it runs past the edge."""
     units: list[list[Tok]] = []  # words: a token and the glued parts after it
     for t in toks:
         if t.glue and units and not units[-1][0].brk and not units[-1][-1].space:
@@ -385,6 +407,22 @@ def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
                 cw -= cur.pop().width()
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
+        if not cur and tw > avail and split is not None:  # a word wider than the line: as much as fits, the rest on
+            room, k, taken = avail, 0, []  # the next line
+            while k < len(u) and u[k].width() <= room:
+                room -= u[k].width()
+                taken.append(u[k])
+                k += 1
+            n = _fits(u[k], room) or (0 if taken else 1)  # at least one letter a line
+            head = [dataclasses.replace(u[k], text=u[k].text[:n])] if n else []
+            split("".join(x.text for x in u), sum(len(x.text) for x in taken) + n)
+            lines.append(taken + head)
+            avail = width - hang
+            rest = dataclasses.replace(u[k], text=u[k].text[n:], glue=False)
+            units.append([rest, *u[k + 1 :]] if rest.text else [dataclasses.replace(x, glue=False) for x in u[k + 1 :]])
+            if not units[-1]:
+                units.pop()
+            continue
         cur.extend(u)
         cw += tw
     while cur and cur[-1].space:
@@ -432,10 +470,12 @@ def render_block(
     prefix: Image.Image | None,
     indent: int = 0,
     rtl: bool = False,
+    split=None,
 ) -> tuple[Image.Image, list[list[Tok]]]:
-    """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views)."""
+    """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views);
+    split: what to say when a word wider than a line is cut (layout_lines)."""
     pw = prefix.width if prefix else 0
-    lines = layout_lines(toks, width - indent - pw, 0)
+    lines = layout_lines(toks, width - indent - pw, 0, split)
     imgs, texts = [], []
     for i, logical in enumerate(lines):
         ln = visual_order(logical, rtl)

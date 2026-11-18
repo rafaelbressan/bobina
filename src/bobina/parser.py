@@ -500,7 +500,8 @@ class _Splice:
                 continue
             out.append(replace(r, bold=r.bold or st.bold, italic=r.italic or st.italic, strike=r.strike or st.strike,
                                underline=r.underline or st.underline, invert=r.invert or st.invert,
-                               mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
+                               mono=r.mono or st.mono, font=st.font, size=st.size,
+                               idle=(*r.idle, *st.idle)))  # fmt: skip
         return out
 
     def kind(self, info: str) -> tuple[str, bool]:

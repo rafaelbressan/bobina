@@ -685,7 +685,7 @@ def test_a_turned_block_draws_its_rows_once(monkeypatch):
 
     calls = []
     real = layout.preview.row_image
-    monkeypatch.setattr(layout.preview, "row_image", lambda r, *a: calls.append(r) or real(r, *a))
+    monkeypatch.setattr(layout.preview, "row_image", lambda r, *a, **k: calls.append(r) or real(r, *a, **k))
     res = build("one\ntwo\nthree {rotate=90}\n")
     rotated = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "rotated"]
     assert rotated and len(calls) == len(set(map(id, calls)))  # no row drawn twice

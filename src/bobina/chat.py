@@ -128,17 +128,25 @@ def _narrow(profile, width: int):
     return dataclasses.replace(profile, width_dots=width)
 
 
-def text_image(profile, text: str, width: int, *, bold: bool = False, align: str = "left"):
+def text_image(profile, text: str, width: int, *, bold: bool = False, align: str = "left", white: bool = False):
     """Text laid out as the printer's own font would print it, as a 1-bit image at most `width` dots wide,
-    cropped to its ink (wrapped like native text: by words)."""
+    cropped to its ink (wrapped like native text: by words). white: to be printed white on black, so small letters
+    are heavy (layout.whiten), its **bold** kept."""
+    from dataclasses import replace
+
     from . import preview
     from .emulator import Emulator
+    from .layout import whiten
+    from .rows import TextRow
 
     prof = _narrow(profile, width)
     blocks = [Paragraph(attrs=Attrs({align}), runs=[Run(p, bold=bold)] if bold else runs(p))
               for p in re.split(r"\n\s*\n", text) if p.strip()]  # fmt: skip
     rows = Layout(prof, Document(meta={}, blocks=blocks), None, Nudges()).run()[1:-1]
-    im = preview.render(rows, prof, Emulator(prof))
+    if white:
+        small = [isinstance(r, TextRow) and prof.invert_bold(prof.cell[1] * min(r.scale)) for r in rows]
+        rows = [replace(r, cells=whiten(r.cells, True)[0]) if s else r for r, s in zip(rows, small, strict=True)]
+    im = preview.render(rows, prof, Emulator(prof), drawn=True)
     from PIL import ImageOps
 
     box = ImageOps.invert(im.convert("L")).getbbox()
@@ -237,14 +245,7 @@ def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: 
     w = profile.width_dots
     side = ICON_PX + 6 if icon else 0
     inner = w - side - 2 * PAD - 4
-    heavy = inverted and profile.invert_bold(profile.cell[1])  # small white text: bold, a dot taller (layout)
-    words = text_image(profile, text, inner, bold=heavy, align="right" if full else "left")
-    if heavy:
-        from . import imaging
-
-        grown = Image.new("1", (words.width, words.height + 1), 1)  # cropped to its ink: room for the dot below
-        grown.paste(words, (0, 0))
-        words = imaging.thicken_down(grown).convert("1", dither=Image.NONE)
+    words = text_image(profile, text, inner, align="right" if full else "left", white=inverted)
     bw = (w - side) if full else words.width + 2 * PAD
     bh = words.height + 2 * PAD
     out = Image.new("1", (w, bh), 1)

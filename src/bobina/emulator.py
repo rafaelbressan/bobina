@@ -81,12 +81,13 @@ class Emulator:
             d.line((x0 + 3, y0 + 3, x0 + 12, y0 + 12), fill=0, width=2)
             d.line((x0 + 12, y0 + 3, x0 + 3, y0 + 12), fill=0, width=2)
 
-    def line_image(self, cells: list[Cell], tracking: int = 0, heavy: bool = False) -> Image.Image:
-        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell). heavy: inverted
-        cells are drawn a dot taller too (imaging.thicken_down), as a drawn line's white text below the size the
-        paper holds."""
+    def line_image(self, cells: list[Cell], tracking: int = 0, drawn: bool = False) -> Image.Image:
+        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell). drawn: printed
+        as this image, so a heavy cell (white on black, small) is drawn a dot taller too; a native row's heavy cell
+        is the printer's ESC E, as any bold."""
         widths = [self.cw * (2 if c.wide else 1) for c in cells]
-        im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), self.ch), 255)
+        heavy = drawn and any(c.heavy for c in cells)  # a descender in the cell's last row grows into the gap below
+        im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), self.ch + heavy), 255)
         x = 0
         for c, w in zip(cells, widths, strict=True):
             g = self.glyph(c.ch, c.wide)
@@ -94,6 +95,10 @@ class Emulator:
                 g2 = Image.new("L", g.size, 255)
                 g2.paste(g, (1, 0))
                 g = _darker(g, g2)
+            if c.heavy and drawn and c.ch != " ":  # the one place a printer-font glyph is drawn heavy
+                tall = Image.new("L", (g.width, g.height + 1), 255)
+                tall.paste(g, (0, 0))
+                g = imaging.thicken_down(tall)
             if c.italic:
                 g = g.transform(
                     g.size,
@@ -103,7 +108,7 @@ class Emulator:
                     fillcolor=255,
                 )
             if c.invert and c.ch != " ":
-                g = (imaging.thicken_down(g) if heavy else g).point(lambda v: 255 - v)
+                g = g.point(lambda v: 255 - v)
             im.paste(g, (x, 0))
             if c.underline and c.ch != " ":
                 ImageDraw.Draw(im).line((x, self.ch - 2, x + w - 1, self.ch - 2), fill=0, width=1)
@@ -113,9 +118,9 @@ class Emulator:
             x += w + tracking
         return im
 
-    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int, heavy: bool = False) -> Image.Image:
+    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int, drawn: bool = False) -> Image.Image:
         """Glyphs scaled by GS !, then `tracking` dots after each one, as they are (Profile.tracking_gap)."""
-        glyphs = self.line_image(cells, 0, heavy)
+        glyphs = self.line_image(cells, 0, drawn)
         glyphs = glyphs.resize((glyphs.width * sw, glyphs.height * sh), Image.NEAREST)
         widths = [self.cw * (2 if c.wide else 1) * sw for c in cells]
         im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), glyphs.height), 255)
@@ -138,16 +143,17 @@ class Emulator:
         gap = row.gap if row.gap is not None else int(self.p.get("native.line_gap_dots", 6))
         return min(255, self.ch * row.scale[1] + gap)
 
-    def render_row(self, row: TextRow, width: int) -> Image.Image:
-        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. A row drawn as an image draws
-        its inverted words heavy below the size the paper holds (a native row: the printer's ESC E bold)."""
+    def render_row(self, row: TextRow, width: int, drawn: bool | None = None) -> Image.Image:
+        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. drawn: printed as this image
+        (a row that is not native, or one laid into a band, box, table or column picture: True), so its heavy cells
+        are drawn heavy; else it emulates the native row."""
         sw, sh = row.scale
-        heavy = not row.native and self.p.invert_bold(self.ch * min(sw, sh))
+        drawn = not row.native if drawn is None else drawn
         gap = self.p.tracking_gap(row.tracking, sw)
         if gap != row.tracking * sw:  # the printer does not scale ESC SP at this width (MTP-II at 2x)
-            li = self._gapped(row.cells, gap, sw, sh, heavy)
+            li = self._gapped(row.cells, gap, sw, sh, drawn)
         else:
-            li = self.line_image(row.cells, row.tracking, heavy)
+            li = self.line_image(row.cells, row.tracking, drawn)
             if (sw, sh) != (1, 1):
                 li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
         if sw == sh > 1:

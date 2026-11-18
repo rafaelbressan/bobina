@@ -15,8 +15,9 @@ Total: [R$ 42,00]{.bold size=large}
 ```
 
 A line whose words all take one size prints natively at that size (the second line: a 2x band). Sizes mixed on a
-line (`Um [BRS]{size=2x} dois`) print that line as an image in the printer font's look: one line as tall as its
-tallest part, the words on one baseline. In a table cell a span's `size=` and `font=` do nothing (`M101`): they go
+line (`Pay [NOW]{size=2x} please`) print that line as an image in the printer font's look: one line as tall as its
+tallest part, the words on one baseline, each as GS ! would size it (`2x1`: twice as wide; `20px`: exactly). A
+word wider than the line is cut where it fits (`L101`), as on a native line. In a table cell a span's `size=` and `font=` do nothing (`M101`): they go
 on the table's `{…}` line.
 
 ## White text on black is bold when small
@@ -24,8 +25,9 @@ on the table's `{…}` line.
 Ink spreads into thin white strokes: on the MTP-II (paper, 18/11) white letters of the printer font at 1x (24 dots
 tall) closed up, even bold, and a hyphen, one dot tall, disappeared; at 2x they held. So white text on black
 smaller than the profile's `raster.invert_bold_below_px` (48 dots) prints bold, and bobina says so (`F206`, a note):
-`.invert` lines and words, `title-style=band` box titles, a table's `style=header-invert` titles and its inverted
-rows and cells.
+`.invert` lines and words, `title-style=band` box titles, a table's `style=header-invert` titles, its inverted
+rows and cells and the inverted words in them, black chat bubbles. A word inverted inside an inverted line is black
+on paper: it stays as it is.
 
 - The printer font drawn as an image (bands, tables, box titles): bold, and a dot taller, so its 1-dot strokes are
   2 dots both ways. Native inverted words (`GS B`) get the printer's bold, `ESC E`.
