@@ -25,6 +25,7 @@ STYLES = {  # every style of layout.TABLE_STYLES (a test checks): how it looks
 }
 
 TABLE_ALSO = (
+    ".bold .italic .underline: every row, titles too; "
     ".compact: narrow, not the paper's width; .center .right: where a narrow table goes; "
     "orientation=auto|vertical|horizontal: auto turns a table that cannot fit (L106)"
 )

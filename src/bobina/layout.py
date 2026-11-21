@@ -32,7 +32,8 @@ QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
-TABLE_CLASSES = {"compact", "left", "center", "right", "flip"}  # what a table takes; the rest: M101
+TABLE_TEXT = ("bold", "italic", "underline")  # on a table's {…} line: every cell's text, titles too (they add up)
+TABLE_CLASSES = {"compact", "left", "center", "right", "flip", *TABLE_TEXT}  # what a table takes; the rest: M101
 TABLE_KEYS = {"align", "orientation", "width", "rotate", "id", "font", "size", "style"}
 TABLE_STYLES = ("plain", "receipt", "lines", "grid", "header-invert", "zebra")  # style= on a table; plain: the default
 CELL_HINT = (
@@ -2553,13 +2554,14 @@ class Layout:
         face = self.table_font(t)
         ncol = len(t.header)
         given = self.table_columns(t, ncol)
+        whole = Attrs({c for c in TABLE_TEXT if t.attrs.has(c)})  # .bold under the table: every row, titles too
         head = [
-            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i, Attrs()), t.head_row)
+            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i, Attrs()), t.head_row, whole)
             for i, c in enumerate(t.header)
         ]
         rows_at = [*t.row_lines, *[t.line] * (len(t.rows) - len(t.row_lines))]
         body = [
-            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _cell(t, k, i), _row(t, k))
+            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _cell(t, k, i), _row(t, k), whole)
              for i, c in enumerate([*r[:ncol], *[[]] * (ncol - len(r))])]
             for k, (r, at) in enumerate(zip(t.rows, rows_at, strict=True))
         ]  # fmt: skip

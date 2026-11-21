@@ -273,6 +273,37 @@ def test_row_and_cell_attributes_combine_the_cell_winning_on_alignment():
     assert lines(res)[1] == "Rice                    1  9,00"  # 1 centered in Qty (the row's), Rice left (its own)
 
 
+@pytest.mark.parametrize("cls", ["bold", "italic", "underline"])
+def test_a_text_class_under_the_table_styles_every_row_and_the_titles(cls):
+    res = build(BILL + "| Rice | 1 | 9,00 |\n| TOTAL | | 19,00 |\n" + f"{{.{cls}}}\n")
+    for text in ("Item", "Price", "Rice", "TOTAL", "19,00"):
+        assert all(getattr(c, cls) for c in cells_of(res, text)), text
+    assert not codes(res)
+
+
+def test_a_text_class_under_the_table_adds_up_with_the_rows_and_cells():
+    res = build(BILL + "| Rice {.italic} | 1 | 9,00 |\n| TOTAL | | 19,00 | {.underline}\n{style=receipt .bold}\n")
+    assert all(c.bold for c in cells_of(res, "Item"))  # receipt titles are not bold, but the table's .bold is
+    assert all(c.bold and c.italic for c in cells_of(res, "Rice"))
+    assert all(c.bold and c.underline for c in cells_of(res, "TOTAL"))
+    assert not any(c.italic for c in cells_of(res, "9,00"))
+
+
+def test_strike_and_marks_under_the_table_are_said_with_what_a_table_takes():
+    res = build(BILL + "| Rice | 1 | 9,00 |\n{.strike .invert}\n")
+    msg = [n for n in res.nudges if n.code == "M101"]
+    assert len(msg) == 1 and ".invert, .strike do nothing on a table" in msg[0].message
+    assert ".bold" in msg[0].suggestion and ".underline" in msg[0].suggestion
+    assert not any(c.strike for c in cells_of(res, "Rice"))
+
+
+def test_bold_under_a_stretched_table_is_the_restaurant_total():
+    res = build("| | |\n|---|--:|\n| TOTAL DO CONSUMO: | 263,70 |\n{.bold size=1x2}\n", profile_name="mtp-ii-58")
+    row = next(r for r in res.rows if isinstance(r, TextRow))
+    assert row.native and row.scale == (1, 2) and all(c.bold for c in row.cells if c.ch != " ")
+    assert not [n for n in res.nudges if n.severity != "note"]
+
+
 def test_an_inverted_row_is_one_band_across_the_row_gaps_included():
     res = build(BILL + "| Rice | 1 | 9,00 |\n| TOTAL | | 9,00 | {.invert .bold}\n")
     row = drawn_with(res, "TOTAL")

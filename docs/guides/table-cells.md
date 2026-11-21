@@ -8,7 +8,7 @@ reach goes in one `{…}`.
 
 | Where | Reach | What |
 |---|---|---|
-| the line right under the table | the whole table | `style=` `font=` `size=` `.compact` `orientation=` |
+| the line right under the table | the whole table | `style=` `font=` `size=` `.compact` `orientation=`; `.bold .italic .underline`: every row, titles too |
 | the end of a title cell | its column, and that title cell | `width=` `prefix=` `suffix=`; the cell classes below |
 | the end of a body cell | that cell | the cell classes, `span=` |
 | after the pipe that closes a row | that row | `.bold .italic .underline .invert .shade .left .center .right` |
@@ -52,7 +52,7 @@ Starting in the 3rd column, under the description:
 
 After the pipe that closes the row, with nothing after it. A `{…}` there is the row's when the row has more
 cells than the title row, or when the row starts with a pipe; otherwise a last cell that is only `{…}` is a cell.
-GitHub and Obsidian ignore that extra cell, so the table stays a table there. Every cell of the row takes the classes; a cell's own alignment wins, styles add up.
+GitHub and Obsidian ignore that extra cell, so the table stays a table there. Every cell of the row takes the classes; a cell's own alignment wins, styles add up (with the table's too).
 `.invert` and `.shade` make one band across the whole row, spaces between columns and spans included.
 
 ```markdown

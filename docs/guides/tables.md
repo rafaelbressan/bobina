@@ -24,7 +24,8 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
   widest text column (left-aligned, with letters) takes the rest; `.compact` keeps it narrow (`.center`, `.right`).
 - 4 columns on 58 mm leave 29 of the printer font's 32 for text; 80 mm has 48. A cell wraps at its spaces; a
   word longer than an `auto` column is cut (`L101`).
-- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`; `font=` and `size=` go to the whole table.
+- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`. Under the table, `font=`, `size=`, `.bold`,
+  `.italic` and `.underline` are for every cell, titles too.
 
 ## Tables without a title row
 
@@ -96,7 +97,7 @@ hold along the paper); `orientation=horizontal` never does, narrowing every colu
 
 ## When something is wrong
 
-bobina prints anyway and says what to fix (`bobina check FILE`: the same list, nothing printed):
+bobina prints anyway and says what to fix (`bobina check FILE` lists it, printing nothing):
 
 | Code | When | Example message |
 |---|---|---|

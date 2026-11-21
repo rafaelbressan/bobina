@@ -205,14 +205,14 @@ def test_keys_a_table_does_not_take_are_said_with_the_ones_it_takes():
 
 
 def test_classes_a_table_does_not_take_are_said():
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{.bold .invert}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{.strike .invert}\n")
     msgs = " ".join(n.message for n in res.nudges if n.code == "M101")
-    assert ".bold" in msgs and ".invert" in msgs
+    assert ".strike" in msgs and ".invert" in msgs
 
 
 def test_attributes_a_table_takes_are_not_nudged():
     for attrs in (".compact", ".compact .center", ".compact .right", "orientation=horizontal", "rotate=180", ".flip",
-                  ".compact align=right", "#bill"):  # fmt: skip
+                  ".compact align=right", "#bill", ".bold .italic .underline"):  # fmt: skip
         res = build(f"| a | b |\n|---|---|\n| 1 | 2 |\n\n{{{attrs}}}\n")
         assert "M101" not in codes(res), attrs
     res = build("| a | b |\n|---|---|\n| 1 | 2 |\n\n{orientation=vertical width=half .left}\n")
@@ -381,9 +381,9 @@ def test_a_loose_paragraph_in_a_list_is_still_a_block_of_its_own():
 
 
 def test_each_idle_table_attribute_is_said_on_the_line_it_was_written_on():
-    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{.bold}\n\n{leading=4}\n")
+    res = build("| a | b |\n|---|---|\n| 1 | 2 |\n{.strike}\n\n{leading=4}\n")
     at = {n.line: n.message for n in res.nudges if n.code == "M101"}
-    assert set(at) == {4, 6} and ".bold" in at[4] and "leading=" in at[6]
+    assert set(at) == {4, 6} and ".strike" in at[4] and "leading=" in at[6]
 
 
 def test_a_span_size_in_a_body_cell_is_said_on_its_row():
