@@ -38,6 +38,8 @@ COLUMNS_PER_LINE = (  # (font, columns on 58 mm, on 80 mm), the 1-column spaces 
     ("Spleen 24px", 31, 47),
 )
 
+STRETCHED = "size=1x2, 2x1: the printer font itself, twice as tall (its columns) or twice as wide (half of them)"
+
 COLUMN = {
     "width=": "auto (the default: the auto columns share what is left, and the widest text column, left-aligned "
     "with letters, takes the rest of the paper), 7ch (columns of the table's font), "
@@ -96,6 +98,7 @@ def help_text() -> str:
     out += ["  font=Terminus size=16px: drawn in that font. Columns per line (spaces too):",
             f"    {'':20s}58 mm  80 mm"]  # fmt: skip
     out += [f"    {font:20s}{a:5d}  {b:5d}" for font, a, b in COLUMNS_PER_LINE]
+    out += _wrap(STRETCHED, "  ")
     out += ["", "COLUMN  at the end of its title cell"]
     for key, what in COLUMN.items():
         out += _wrap(what, f"  {key:9s}", 11)
@@ -116,6 +119,7 @@ def help_json() -> dict:
         "styles": STYLES,
         "table": TABLE_ALSO,
         "columns_per_line": [{"font": f, "58mm": a, "80mm": b} for f, a, b in COLUMNS_PER_LINE],
+        "stretched": STRETCHED,
         "column": COLUMN,
         "cell": {"classes": list(CELL_CLASSES), "span": SPAN},
         "row": {"classes": list(ROW_CLASSES)},

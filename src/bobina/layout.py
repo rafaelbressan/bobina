@@ -327,6 +327,20 @@ class Layout:
         self.n.add("M101", f"unknown size '{size}'", line, "small, normal, large, title, huge, 2x, 1x2, 20px, 3mm")
         return (1, 1)
 
+    @staticmethod
+    def stretch(size) -> tuple[int, int] | None:
+        """(width, height) of a printer multiplier taller than wide or wider than tall (1x2, 2x1): the printer font
+        stretches its cells (GS !) and keeps its columns, where a raster font can only scale evenly (F303)."""
+        m = SIZE_RE.match(str(size or ""))
+        wh = (int(m.group(1)), int(m.group(2))) if m and m.group(2) else (0, 0)
+        return wh if min(wh) > 0 and wh[0] != wh[1] else None  # 1x0: a size of nothing (F205, as before)
+
+    def jagged(self, scale: tuple[int, int], line: int) -> None:
+        """F303 for a multiplier the printer draws jagged (above 4x on most)."""
+        ok = self.p.get("native.scales_ok", [1, 2, 3, 4])
+        if scale[0] not in ok or scale[1] not in ok:
+            self.n.add("F303", f"size {scale[0]}x{scale[1]} is jagged on this printer", line, "use up to 4x", "N1")
+
     def cells_from_runs(self, runs: list[Run], extra: dict) -> list[Cell | None]:
         """Runs -> cells; None marks a forced line break."""
         out: list[Cell | None] = []
@@ -650,6 +664,13 @@ class Layout:
         indent_dots = self.attr_dots(attrs, "indent", line, self.W // 2) or 0
         indent_is_columns = raw_indent.isdigit()  # indent=4 means 4 columns; 4px / 2mm are physical
         fam = self.raster_family(attrs, role, runs)
+        # render=raster on the printer font at 1x2 or 2x1: its stretched cells, drawn as the printer draws them
+        # (a raster font cannot stretch: it would scale evenly)
+        emulated = bool(fam == "Spleen" and attrs.kv.get("render") == "raster" and self.stretch(attrs.kv.get("size"))
+                    and self.family(attrs.kv.get("font") or self.fonts.get(role, "native")).lower() == "native"
+                    and not any(r.font for r in runs))  # fmt: skip
+        if emulated:
+            fam = None
         if fam is not None:
             named = {1: "title", 2: "large", 3: "normal"}.get(level) if role == "title" else None
             fallback = rasterfont.px_for(named or self.size, self.p, 20)  # an unreadable size= falls back to it
@@ -697,10 +718,7 @@ class Layout:
             if attrs.has(k):
                 extra[k] = True
         scale = scale or self.scale_for(attrs.kv.get("size"), line)
-        if scale[0] not in self.p.get("native.scales_ok", [1, 2, 3, 4]) or scale[1] not in self.p.get(
-            "native.scales_ok", [1, 2, 3, 4]
-        ):
-            self.n.add("F303", f"size {scale[0]}x{scale[1]} is jagged on this printer", line, "use up to 4x", "N1")
+        self.jagged(scale, line)
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)), self.align
         )
@@ -760,6 +778,8 @@ class Layout:
                     gap=leading,
                 )
             )
+        if emulated and not attrs.has("invert") and not drawn_bars:
+            return [BitmapRow(self.em.render_row(r, self.W), line, "text", [r]) for r in rows]
         if attrs.has("invert"):
             band = self.band(rows, line)
             self.draw_bars(band.image, gutter, 255)  # white, from edge to edge of the band (its margins too)
@@ -2549,10 +2569,13 @@ class Layout:
             if not body:
                 return []
         every = [c for r in ([head] if head else []) + body for c in r]
+        stretched = None if face else self.stretch(t.attrs.kv.get("size"))
         if face:
             ink = _FontInk(self, *face, self.said_at(t, "font=" if "font" in t.attrs.kv else "size="), every)
         else:
-            ink = _NativeInk(self)
+            ink = _NativeInk(self, stretched or (1, 1))
+            if stretched:
+                self.jagged(stretched, self.said_at(t, "size="))
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted titles at {ink.px}px close up", self.said_at(t, "style="),
                        "use size=20px or more, or style=receipt", "R2-12")  # fmt: skip
@@ -2570,10 +2593,13 @@ class Layout:
         natural = [max([0, *(ink.units(c) for c in col)]) for col in cols]
         longest = [_longest(col, ink.units) for col in cols]
         in_body = [_longest(col[1:] if head else col, ink.units) for col in cols]  # a header word gives way first
-        room = self.cols - indent if ink.native else (self.W - indent * self.p.cell[0]) * 64 // ink.scale
+        if ink.native:  # the printer font's columns, fewer when stretched wider (2x1)
+            room = self.cols // ink.wh[0] - ink.lead(indent)
+        else:
+            room = (self.W - indent * self.p.cell[0]) * 64 // ink.scale
         cap = room - (ncol - 1) - (1 if style == "grid" else 0)  # grid: half a column each side for the border
         fixed = self.column_shares([self.column_units(w, ink, t.line) for w, _, _ in given], cap)
-        say = face is not None or any(c.kv for c in t.columns)  # L108, in bobina check: settings or a font
+        say = face is not None or stretched is not None or any(c.kv for c in t.columns)  # L108: settings, a size
         wide = [max([0, *(ink.units([c]) for cell in col for c in cell if c.wide)]) for col in cols]
         hard = [max(w, 1 if n or f else 0) for w, n, f in zip(wide, natural, fixed, strict=True)]
         lay = _Lay(fixed, [max(h, min(2, n)) for h, n in zip(hard, natural, strict=True)], hard, room, say)
@@ -2682,8 +2708,8 @@ class Layout:
             return None
         fam = self.family(kv.get("font") or self.fonts.get("body", "native"))
         size = str(kv.get("size") or "")
-        if fam.lower() == "native" and not size:
-            return None
+        if fam.lower() == "native" and (not size or self.stretch(size)):
+            return None  # 1x2, 2x1: the printer font's own cells, stretched (_NativeInk)
         doc_px = rasterfont.px_for(self.size, self.p, 20)  # an unreadable size= falls back to the document's
         px = rasterfont.px_for(size or self.size, self.p, doc_px, self.n, self.said_at(t, "size=" if size else "font="))
         if fam.lower() == "native":
@@ -2768,7 +2794,10 @@ class Layout:
         border = 1 if style == "grid" else 0
         used = sum(widths) + gaps + border
         extra = f"+{gaps} gap{'s' if gaps != 1 else ''}" + (" +1 border" if border else "")
-        unit = "" if ink.native else f" in {ink.fam} {ink.px}px columns"
+        if ink.native:
+            unit = "" if ink.wh == (1, 1) else f" in printer-font {ink.wh[0]}x{ink.wh[1]} columns"
+        else:
+            unit = f" in {ink.fam} {ink.px}px columns"
         total = f"{used} along the paper" if turned else f"{used} of {lay.room}"
         what = "turned table, column widths" if turned else "column widths"
         self.n.add("L108", f"{what}{unit}: {' · '.join(names)} ({extra} = {total})", t.line,
@@ -2896,7 +2925,7 @@ class Layout:
         place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))  # a cut one: none
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") or not auto else 0
         self.table_note(t, head, widths, ink, lay, style, turned=False)
-        geo = _Geo.of(t, style, ink, widths, self.W, indent * self.p.cell[0] + ink.dots(shift))
+        geo = _Geo.of(t, style, ink, widths, self.W, ink.lead_dots(indent) + ink.dots(shift))
         hush = replace(lay, quiet=why in ("squeezed", "cut"))
         heads, rows = self.table_rows(t, head, body, widths, ink, hush)
         every = [*heads, *(ln for g in rows for ln in g)]
@@ -3156,16 +3185,23 @@ class Layout:
         kind, t = piece[0], geo.t
         if kind == "rule":
             return BitmapRow(imaging.divider(self.W, piece[1], 2, pad=piece[2]), t.line, "divider")
-        if kind == "line" and geo.ink.native:
-            cells = _cut(self.lead(indent) + [Cell(" ")] * shift + piece[1].cells, self.cols)
+        ink = geo.ink
+        if kind == "line" and ink.native:
+            lead = self.table_lead(ink, indent)
+            cells = _cut(lead + [Cell(" ")] * shift + piece[1].cells, self.cols // ink.wh[0])
             reason = self.native_ok(cells)
-            return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
+            row = TextRow(cells, ink.wh, "left", t.line, native=not reason, reason=reason)
+            if ink.wh[0] == 1 or not self.bars_in(indent):
+                return row
+            # a stretched line cannot hold a 1x │: the quote bars are drawn into it, as text_block does
+            return BitmapRow(self.draw_bars(self.em.render_row(row, self.W), indent, 0), t.line, "text",
+                             [TextRow([*self.lead(indent), *cells[len(lead):]], (1, 1), "left", t.line)])  # fmt: skip
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
-        wide = not geo.ink.native and maps is None
-        if geo.ink.native:
-            view = [TextRow(_cut([*self.lead(indent), *[Cell(" ")] * shift, *ln.view], self.cols), (1, 1), "left",
-                            t.line) for ln in lines]  # fmt: skip
+        wide = not ink.native and maps is None
+        if ink.native:
+            view = [TextRow(_cut([*self.table_lead(ink, indent), *[Cell(" ")] * shift, *ln.view],
+                                 self.cols // ink.wh[0]), ink.wh, "left", t.line) for ln in lines]  # fmt: skip
         elif wide:  # a smaller font (more character columns than the paper's) or letters the map has no room for:
             view = [TextRow([*self.lead(indent), *ln.view], (1, 1), "left", t.line) for ln in lines]  # its own grid
         else:  # the same or a larger font: a map of the paper, every letter in it
@@ -3173,6 +3209,11 @@ class Layout:
         band = kind == "image" and "band" in piece[3].split()
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]), wide_view=wide)  # fmt: skip
+
+    def table_lead(self, ink, indent: int) -> list[Cell]:
+        """What comes before a native table line: the quote bars at 1x; stretched wider (2x1), blank cells as wide
+        as the indent (the bars are drawn: table_row)."""
+        return self.lead(indent) if ink.wh[0] == 1 else [Cell(" ")] * ink.lead(indent)
 
     def paper_map(self, ln: _TLine, geo: _Geo, indent: int) -> list[Cell] | None:
         """A line of a standing table drawn in a raster font (the same or a larger font than the printer's), as the
@@ -3587,16 +3628,18 @@ class _Geo:
 
 
 class _NativeInk:
-    """A table in the printer font: a column is one character."""
+    """A table in the printer font: a column is one character, `wh` times as wide and tall as at 1x (size=1x2
+    keeps the columns, each line twice as tall; 2x1 has half the columns)."""
 
     native = True
     scale = 1  # measure units per column
 
-    def __init__(self, lay: Layout):
+    def __init__(self, lay: Layout, wh: tuple[int, int] = (1, 1)):
         self.em = lay.em
-        self.unit = lay.p.cell[0]
-        self.line_h = lay.em.row_height(TextRow([Cell(" ")]))
-        self.text_h = lay.p.cell[1]
+        self.wh = wh
+        self.unit = lay.p.cell[0] * wh[0]
+        self.line_h = lay.em.row_height(TextRow([Cell(" ")], wh))
+        self.text_h = lay.p.cell[1] * wh[1]
 
     measure = staticmethod(columns)
 
@@ -3610,8 +3653,15 @@ class _NativeInk:
         """The whole columns that fit in d dots."""
         return d // self.unit
 
+    def lead(self, indent: int) -> int:
+        """The columns an indent of `indent` 1x columns (a quote, a list) takes: as many, or fewer wider ones."""
+        return -(-indent // self.wh[0])
+
+    def lead_dots(self, indent: int) -> int:
+        return self.lead(indent) * self.unit
+
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
-        return self.em.render_row(TextRow(ln.cells, (1, 1), "left", t.line), width).convert("L")
+        return self.em.render_row(TextRow(ln.cells, self.wh, "left", t.line), width).convert("L")
 
 
 @functools.lru_cache(maxsize=4096)
@@ -3677,6 +3727,10 @@ class _FontInk:
     def from_dots(self, d: int) -> int:
         """The whole columns (each as wide as the font's "0") that fit in d dots."""
         return d * 64 // self.scale
+
+    def lead_dots(self, indent: int) -> int:
+        """Dots an indent of `indent` printer-font columns (a quote, a list) takes."""
+        return indent * self.lay.p.cell[0]
 
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
         """One line of the table in the font: each cell's text aligned in its columns (mode L)."""

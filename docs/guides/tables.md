@@ -19,11 +19,11 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
 
 ## Columns
 
-- The second line sets each column's alignment, as in any Markdown: `---` left, `--:` right, `:-:` centre.
+- The second line sets each column's alignment: `---` left, `--:` right, `:-:` centre.
 - Each column is as wide as its text, **one column of space** between columns. The table fills the paper: the
   widest text column (left-aligned, with letters) takes the rest; `.compact` keeps it narrow (`.center`, `.right`).
-- The printer font has 32 columns on 58 mm paper and 48 on 80 mm, the spaces included: 4 columns on 58 mm leave
-  29 for text. A cell wraps at its spaces; a word longer than an `auto` column is cut (`L101`).
+- 4 columns on 58 mm leave 29 of the printer font's 32 for text; 80 mm has 48. A cell wraps at its spaces; a
+  word longer than an `auto` column is cut (`L101`).
 - In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`; `font=` and `size=` go to the whole table.
 
 ## Tables without a title row
@@ -67,8 +67,6 @@ One word on the line under the table: `{style=receipt}`.
 | `header-invert` | white titles on a black band, no rule | the titles as an image |
 | `zebra` | every other row on light grey dots | the grey rows as images |
 
-Without titles: no title band or rule, in any style.
-
 ## Smaller letters: `font=` and `size=`
 
 `{font=Terminus size=16px}` draws the table as an image in that font (bundled: Terminus, Spleen, IBM Plex Mono,
@@ -85,8 +83,9 @@ as wide as the font's `0` (a proportional font lines up by the dot). Columns per
 | IBM Plex Mono 16px | 40 | 60 |
 | Spleen 24px (the printer font's look) | 31 | 47 |
 
-`size=` alone uses Terminus (`2x`, `3x`: the printer font's look). Below a font's tested minimum: `F201`; not
-found: `F203`; `header-invert` titles under 20px: `F204`.
+`size=` alone uses Terminus (`2x`, `3x`: the printer font's look; `1x2`, `2x1`: the printer font itself,
+stretched: 32 or 16 columns on 58 mm). Below a font's tested minimum: `F201`; not found: `F203`; `header-invert`
+titles under 20px: `F204`.
 
 ## Turned tables
 
