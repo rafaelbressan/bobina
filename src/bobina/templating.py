@@ -54,6 +54,7 @@ RESERVED = {
     "align",
     "image",
     "tasks",
+    "literal_asterisks",
     "counters",
     "allow",
     "template",

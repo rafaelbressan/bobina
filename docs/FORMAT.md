@@ -4,8 +4,8 @@ Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
 **✓ implemented** (covered by tests) or **◇ planned** (part of the format, not implemented yet;
 using it gives the note `M103` or `M102`, never an error).
 
-A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
-or Obsidian) and maps predictably onto narrow, low-resolution printers.
+A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (GitHub and Obsidian
+read it) and maps predictably onto narrow, low-resolution printers.
 
 ## 0. Principles
 
@@ -27,7 +27,7 @@ File extension: **`.bob.md`** (canonical); `.bob` is accepted. Encoding: UTF-8.
 ---
 bob: 1                         # format version (informational for now)
 profile: mtp-ii-58             # printer profile; the CLI or the printer config can override it
-locale: pt-BR                  # BCP 47: month names, numbers and money, all in it (`lang:` too); default: the machine's (§7.1)
+locale: pt-BR                  # BCP 47 (`lang:` too): dates, numbers, money; default: the machine's (§7.1)
 timezone: America/Sao_Paulo    # IANA; default: the system zone
 align: left                    # default alignment: left | center | right | justify
 size: normal                   # default text size (§5)
@@ -66,6 +66,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
 | `\*`, `\#` … | CommonMark escapes: the character is printed literally |
+| `****TOTAL****` | printed with its asterisks (`M106`) |
 
 ## 3. Attributes `{…}` ✓
 
@@ -257,7 +258,7 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
 - A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
   `.dither`, `.threshold` or `threshold=60%` choose.
 - `rotate=` any angle, then `mirror=x|y|xy` (`.mirror`: x): fitted whole (`I110`). `caption="…"`/`caption=alt`: a line under.
-- Images above 40 megapixels are refused (`I101`), unreadable ones give `I101` and the rest prints.
+- Images above 40 megapixels or unreadable: `I101`, the rest prints.
 
 ### 6.6 Text ✓
 
@@ -314,7 +315,7 @@ Available: front-matter variables, template fields, `now` and `today` (time zone
 | `titlecase` | by the document language: `{{ "arroz DA fazenda" \| titlecase }}` → Arroz da Fazenda (`en`: Bread of the Day) |
 | `deaccent` | `{{ "São João" \| deaccent }}` → Sao Joao |
 | `camel`, `pascal`, `snake`, `kebab`, `slug` | `{{ "Arroz da Fazenda" \| snake }}` → arroz_da_fazenda (accents removed) |
-| `smallcaps` | `{{ "Arroz" \| smallcaps }}` → Aʀʀᴏᴢ (Unicode small capitals: printed as an image line, `F301`; accented letters stay lowercase) |
+| `smallcaps` | `{{ "Arroz" \| smallcaps }}` → Aʀʀᴏᴢ (an image line, `F301`) |
 
 Number filters read what a person types: `24.90`, `24,90`, `R$ 1.890,00`, `3 dias`. A value that is not a number
 or is ambiguous (`1234.567`, `3 5`) gives `M202`: `currency`/`number`/`percent` print it as typed, `int`/`float`
@@ -517,6 +518,8 @@ Nudges:
 | `M103` | note | attribute not implemented yet (ignored) |
 | `M104` | note | a `{…}` after a table's title row: GitHub shows the table as text |
 | `M105` | warning | a `:::` block is never closed |
+| `M106` | note | 4+ asterisks printed as written (front matter `literal_asterisks: false`: bold) |
+| `M107` | note | `***text***` is bold italic |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed (not the author's value) |
@@ -531,7 +534,7 @@ Nudges:
 | `M153` | warning | data values lost: a row with more fields than the header, or values under an empty header |
 | `M154` | warning | the data header repeats a column name (the last one is used) |
 | `M155` | note | a data source was renamed because a column has its name |
-| `M156` | note | an option has no effect here (`--sheet` on a CSV, `--repeat` with `--data`) |
+| `M156` | note | an option has no effect here (`--sheet` on a CSV) |
 | `M157` | warning | `--set` replaces a data column of the same name in every row |
 | `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco` |
 | `M159` | warning | two data columns would get the same usable name; the first keeps it |

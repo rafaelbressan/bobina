@@ -241,10 +241,12 @@ def build(
     row: int | None = None,
     locale=None,
     image_dirs: tuple[str, ...] | None = None,
+    literal_asterisks: bool = True,
 ) -> Result:
     """locale: the machine's locale for a document without locale: (a tag, or the CLI's locales.Machine, which
     infers and saves it on first use); None: such a document is English. image_dirs: the only folders the
-    document's images are read from (--sandbox, the MCP server); None: anywhere."""
+    document's images are read from (--sandbox, the MCP server); None: anywhere. literal_asterisks: config.toml's
+    setting (four or more asterisks print as written); the document's literal_asterisks: wins."""
     nudges = Nudges()
     fields = templating.clean_data(fields, nudges)  # no data value fakes bobina's own marks
     meta, body, fm_lines = templating.split_front_matter(source)
@@ -306,7 +308,18 @@ def build(
                 e.nudge.message = f"template {template_name}{where}: {e.nudge.message}"
                 e.nudge.line = None
             raise
-        doc = parse(rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, values=rendered.values)
+        stars = meta.get("literal_asterisks", literal_asterisks)
+        if not isinstance(stars, bool):
+            own = "literal_asterisks" in doc_keys
+            where = "" if own else f"template {template_name}: "  # its front matter, not the document's
+            line = templating.front_matter_lines(source).get("literal_asterisks") if own else None
+            msg = f"{where}literal_asterisks: {stars!r}: write true or false"
+            nudges.add("M101", msg, line, "literal_asterisks: false")
+            stars = literal_asterisks
+        doc = parse(
+            rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, values=rendered.values,
+            literal_asterisks=stars,
+        )  # fmt: skip
         doc.meta_lines = templating.front_matter_lines(source)
     rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):

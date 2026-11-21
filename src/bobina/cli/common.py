@@ -721,6 +721,7 @@ def _build(args, source, base_dir, counters=None, machine=None):
             if getattr(args, "sandbox", False)
             else None,
             locale=machine or locales.Machine(),  # the locale of a document without locale:
+            literal_asterisks=cfg.get("literal_asterisks", True) is not False,
             **({"counters": counters} if counters is not None else {}),
         )
     except KeyError as e:

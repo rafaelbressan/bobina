@@ -183,6 +183,76 @@ def _icons_rule(state) -> None:
                 child.content = out.replace("a\x01", PH_OPEN).replace("\x02a", PH_CLOSE)
 
 
+STAR_RUN = 4  # asterisks in a row from which they are decoration (****TOTAL****), never emphasis
+STAR_QUOTE = re.compile(rf"\*{{{STAR_RUN},}}(?:[^*]*?\*{{{STAR_RUN},}})?")  # a run, with its text and closing run
+_LITERAL_STARS: contextvars.ContextVar[bool] = contextvars.ContextVar("bobina_literal_stars", default=True)
+
+
+def _star_run_rule(state, silent: bool) -> bool:
+    """Four or more asterisks in a row print as written: receipts frame text with them (****EXTRATO****), and in
+    CommonMark they only make bold inside bold. Runs before emphasis, so it never sees them; an escaped \\* is
+    taken first by the escape rule. Off with literal_asterisks: false (front matter or config.toml)."""
+    pos = state.pos
+    if state.src[pos] != "*" or not _LITERAL_STARS.get():
+        return False
+    end = pos
+    while end < state.posMax and state.src[end] == "*":
+        end += 1
+    if end - pos < STAR_RUN:
+        return False
+    if not silent:
+        state.push("text", "", 0).content = state.src[pos:end]
+    state.pos = end
+    return True
+
+
+def _stars_rule(state) -> None:
+    """Lists, for M106 and M107, the asterisk runs kept as written and the ***text*** read as bold italic (an em
+    and a strong opened by the same three asterisks): env["stars"] holds (line, kind, text). A run left in a text
+    token is one _star_run_rule kept (an escaped one is still text_special here); a token's meta does not survive
+    the attrs plugin, so the text is read."""
+    keep = _LITERAL_STARS.get()
+    for tok in state.tokens:
+        if tok.type != "inline" or not tok.children:
+            continue
+        line = tok.map[0] if tok.map else 0
+        kids = tok.children
+        for i, child in enumerate(kids):
+            if child.type in ("softbreak", "hardbreak"):
+                line += 1
+            elif keep and child.type == "text" and (m := STAR_QUOTE.search(ATTR_TAIL.sub("", child.content))):
+                said = m.group(0) if len(m.group(0)) <= 40 else m.group(0)[:39] + "…"  # the run, not the line
+                state.env.setdefault("stars", []).append((line, "run", said))
+            elif child.type in ("em_open", "strong_open") and child.markup in ("*", "**"):
+                # ***text*** alone: both opened by the same asterisks, one text, both closed together
+                seq = [k for k in kids[i + 1 : i + 8] if k.type != "text" or k.content][:4]  # emphasis leaves ""
+                outer = child.type.removesuffix("_open")
+                inner = "strong" if outer == "em" else "em"
+                shape = [f"{inner}_open", "text", f"{inner}_close", f"{outer}_close"]
+                if [k.type for k in seq] == shape and seq[0].markup in ("*", "**"):
+                    state.env.setdefault("stars", []).append((line, "bold-italic", seq[1].content))
+
+
+def _star_notes(found: list[tuple[int, str, str]], nudges: Nudges, off: int) -> None:
+    """One note for the runs printed as asterisks (M106), one for ***text*** read as bold italic (M107): at the
+    first line, the others named in the message."""
+    for kind, code in (("run", "M106"), ("bold-italic", "M107")):
+        hits = [(ln + 1 + off, text) for ln, k, text in found if k == kind]
+        if not hits:
+            continue
+        lines = sorted({ln for ln, _ in hits})
+        more = f" (also line{'s' if len(lines) > 2 else ''} {', '.join(map(str, lines[1:]))})" if len(lines) > 1 else ""
+        if code == "M106":
+            msg = f"{hits[0][1]} printed as asterisks, not bold{more}"
+            hint = "for bold, write **text**; literal_asterisks: false in the front matter reads them as Markdown"
+        else:
+            words = hits[0][1].strip()
+            esc = "\\*\\*\\*"
+            msg = f"***{words}*** prints {words} in bold italic, without the asterisks{more}"
+            hint = f"to print the asterisks, write {esc}{words}{esc}"
+        nudges.add(code, msg, lines[0], hint)
+
+
 DIV_LINE = re.compile(r"(:{3,})(?:(?=\{)|\s+|$)(.*)")  # ::: {…}, ::: word, or a line of colons only (a closer)
 
 
@@ -211,6 +281,8 @@ def _md(icons: bool = True) -> MarkdownIt:
     md.enable(["table", "strikethrough"])
     md.use(attrs_plugin, spans=True)
     md.block.ruler.before("fence", "fenced_div", _div_rule, {"alt": ["paragraph", "reference", "blockquote", "list"]})
+    md.inline.ruler.before("emphasis", "star_run", _star_run_rule)
+    md.core.ruler.before("text_join", "stars", _stars_rule)
     if icons:
         md.core.ruler.before("text_join", "icons", _icons_rule)
     return md
@@ -610,13 +682,17 @@ def parse(
     base_dir: str = ".",
     meta: dict | None = None,
     values: list | None = None,
+    literal_asterisks: bool = True,
 ) -> Document:
     """values: the render's values (Rendered.values): those rendered as Markdown that are not the author's own are
-    spliced in after the document is parsed, so they never meet its source (_Splice)."""
+    spliced in after the document is parsed, so they never meet its source (_Splice). literal_asterisks: four or
+    more asterisks in a row print as written (_star_run_rule)."""
     token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text)))
+    stars = _LITERAL_STARS.set(literal_asterisks)
     try:
         return _parse(text, nudges, line_offset, base_dir, meta)
     finally:
+        _LITERAL_STARS.reset(stars)
         _SPLICE.reset(token)
 
 
@@ -638,6 +714,7 @@ def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dic
     doc = Document(meta=meta or {}, base_dir=base_dir)
     doc.blocks = _blocks(root.children, nudges, line_offset, src)
     _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
+    _star_notes(env.get("stars", []), nudges, line_offset)
     return doc
 
 

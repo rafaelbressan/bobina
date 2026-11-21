@@ -169,6 +169,12 @@ FIX = {
         "Add a line of colons only (:::) where the block should end: the message lists what it holds now. A line of "
         "colons always closes the innermost open block."
     ),
+    "M106": (
+        "Nothing to fix when the asterisks are a decoration (****EXTRATO****). For bold, write **text**. To read "
+        "every run as Markdown: literal_asterisks: false in the front matter, or bobina config set "
+        "literal_asterisks off."
+    ),
+    "M107": "Nothing to fix for bold italic. To print the asterisks, escape them: \\*\\*\\*TOTAL\\*\\*\\*.",
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
     "M121": "Raw blocks cannot come from a value that is not the author's own: put them in the document.",
     "M122": (

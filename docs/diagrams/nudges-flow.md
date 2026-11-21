@@ -165,6 +165,8 @@ from this list.
 | `M103` | note | attribute not implemented yet (ignored) |  |
 | `M104` | note | a {…} after a table's title row: GitHub and Obsidian show that table as text |  |
 | `M105` | warning | a ::: block is never closed |  |
+| `M106` | note | four or more asterisks printed as asterisks, not bold (literal_asterisks) |  |
+| `M107` | note | ***text*** read as bold italic: the asterisks do not print |  |
 | `M120` | note | field rendered as Markdown |  |
 | `M121` | warning | raw block removed from a variable |  |
 | `M122` | warning | image removed (not the author's value) |  |
