@@ -22,6 +22,7 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
 - The second line sets each column's alignment: `---` left, `--:` right, `:-:` centre.
 - Each column is as wide as its text, **one column of space** between columns. The table fills the paper: the
   widest text column (left-aligned, with letters) takes the rest; `.compact` keeps it narrow (`.center`, `.right`).
+  Too wide: a title wider than its column's values wraps first (at spaces, `.`, `(`), then the text.
 - 4 columns on 58 mm leave 29 of the printer font's 32 for text; 80 mm has 48. A cell wraps at its spaces; a
   word longer than an `auto` column is cut (`L101`).
 - In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`. Under the table, `font=`, `size=`, `.bold`,
@@ -70,9 +71,9 @@ One word on the line under the table: `{style=receipt}`.
 
 ## Smaller letters: `font=` and `size=`
 
-`{font=Terminus size=16px}` draws the table as an image in that font (bundled: Terminus, Spleen, IBM Plex Mono,
-Atkinson Hyperlegible, Barlow Condensed, DejaVu Sans; sizes as in [FORMAT §5](../FORMAT.md#5-sizes-)). A column is
-as wide as the font's `0` (a proportional font lines up by the dot). Columns per line, spaces included:
+`{font=Terminus size=16px}` draws the table as an image in that font ([fonts](../FORMAT.md#4-fonts-),
+[sizes](../FORMAT.md#5-sizes-)), a column as wide as its `0` (a proportional font lines up by the dot). Columns
+per line, spaces included:
 
 | Font | 58 mm (384 dots) | 80 mm (576 dots) |
 |---|---|---|

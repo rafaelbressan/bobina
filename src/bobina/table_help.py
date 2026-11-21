@@ -43,7 +43,8 @@ STRETCHED = "size=1x2, 2x1: the printer font itself, twice as tall (its columns)
 
 COLUMN = {
     "width=": "auto (the default: the auto columns share what is left, and the widest text column, left-aligned "
-    "with letters, takes the rest of the paper), 7ch (columns of the table's font), "
+    "with letters, takes the rest of the paper; too wide for it, long titles wrap first), 7ch (columns of the "
+    "table's font), "
     "20mm, 30% (of the text room), 96 (dots). A column with a width wraps its text inside it and cuts a longer "
     "word at its edge, without a warning",
     "prefix=": '"R$ " before every body value: never in the title row, never in an empty cell',

@@ -111,12 +111,15 @@ def _groups(cells: list[Cell]) -> list[list[Cell]]:
 
 def _pieces(word: list[Cell]) -> list[list[Cell]]:
     """A word in the pieces a table cell may wrap between: after . - / between two letters (VL.|TOTAL, e-|mail),
-    never inside a number (18,00, 15/11)."""
+    before a ( after a letter (UNIT|(R$)), never inside a number (18,00, 15/11)."""
     out, start = [], 0
     for k in range(1, len(word) - 1):
         if word[k].ch in ".-/" and word[k - 1].ch.isalpha() and word[k + 1].ch.isalpha():
             out.append(word[start : k + 1])
             start = k + 1
+        elif word[k].ch == "(" and word[k - 1].ch.isalpha() and k > start:
+            out.append(word[start:k])
+            start = k
     return [*out, word[start:]]
 
 
@@ -2595,6 +2598,9 @@ class Layout:
         natural = [max([0, *(ink.units(c) for c in col)]) for col in cols]
         longest = [_longest(col, ink.units) for col in cols]
         in_body = [_longest(col[1:] if head else col, ink.units) for col in cols]  # a header word gives way first
+        # what a column needs for its body cells whole and its title wrapped, never cut: a title wraps first
+        titled = [min(n, max([_longest(col[:1], ink.units), *(ink.units(c) for c in col[1:])])) if head else n
+                  for n, col in zip(natural, cols, strict=True)]  # fmt: skip
         if ink.native:  # the printer font's columns, fewer when stretched wider (2x1)
             room = self.cols // ink.wh[0] - ink.lead(indent)
         else:
@@ -2619,7 +2625,7 @@ class Layout:
         if orientation == "vertical" and not indent:
             return self.table_turned(t, head, body, natural, style, ink, lay)
         # each way of printing it says its own problems; only the one that prints is heard
-        floors = (longest, in_body)
+        floors = (longest, in_body, titled)
         standing, said = self.trial(
             lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink, lay)
         )
@@ -2901,10 +2907,12 @@ class Layout:
         return preview.heights(rows, self.p, self.em)
 
     def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, style: str, ink, lay) -> list:
-        """Columns as wide as their text; when the paper is narrower, the widest gives way first, down to its longest
-        word (`longest`: with the header's, else the body's only, else the body's with its longest words cut), so a
-        header word gives way before any data word: a cut word is said (L101). A column given a width keeps it and
-        the others share the rest; widths wider than the paper shrink in proportion, the others keeping 2 (L107)."""
+        """Columns as wide as their text; when the paper is narrower, a title wider than its column's body wraps
+        first (the widest first, down to its body cells whole: `longest[2]`), then the widest gives way, down to its
+        longest word (`longest`: with the header's, else the body's only, else the body's with its longest words
+        cut), so a header word gives way before any data word: a cut word is said (L101). A column given a width
+        keeps it and the others share the rest; widths wider than the paper shrink in proportion, the others keeping
+        2 (L107)."""
         auto = [i for i, f in enumerate(lay.fixed) if f is None]
         widths, most, why = _fit_fixed(lay, cap)
         if why:
@@ -2999,17 +3007,18 @@ class Layout:
 
     @staticmethod
     def share(natural: list[int], longest, cap: int, most: list[int] | None = None, hard=None) -> list[int]:
-        """The widths of the auto columns in `cap`: as wide as their text, the widest giving way first (see
-        table_standing), down to 2, then to their hard minimum (1; 2 with a wide character) when the paper has no
-        more room. most: what each may take at most (a squeezed table)."""
+        """The widths of the auto columns in `cap`: as wide as their text; a title wider than its body wraps first
+        (down to the body: longest[2]), then the widest gives way (see table_standing), down to 2, then to their
+        hard minimum (1; 2 with a wide character) when the paper has no more room. most: what each may take at most
+        (a squeezed table)."""
         widths = [min(n, m) for n, m in zip(natural, most, strict=True)] if most else list(natural)
-        whole, data = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
+        whole, data, titled = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
         kept = next((f for f in (whole, data) if sum(f) <= cap), None)
         if kept is None:  # not even the data's words fit: only the longest of them give way, the rest stay whole
             kept = list(data)
             while kept and sum(kept) > cap and max(kept) > 2:
                 kept[kept.index(max(kept))] -= 1
-        for floor in (kept, [2] * len(widths), hard or [1] * len(widths)):
+        for floor in (titled, kept, [2] * len(widths), hard or [1] * len(widths)):
             while sum(widths) > cap:  # 2: a wide character always fits its column; then: nothing else fits
                 wider = [i for i, w in enumerate(widths) if w > floor[i]]
                 if not wider:
