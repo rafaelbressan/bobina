@@ -87,8 +87,8 @@ class BitmapRow:
     kind: str = "image"
     text_rows: list | None = None  # for text drawn as an image (inverted bands): shown as text in views
     untested: tuple[str, ...] = ()  # features not tested on paper it draws (features.py, "zebra"): note P301
-    wide_view: bool = False  # a table in a smaller font whose text rows need more columns than the paper: the
-    # terminal views widen their frame to hold them (view.width)
+    wide_view: bool = False  # a table or text in a smaller font whose text rows need more columns than the paper:
+    # the terminal views widen their frame to hold them (view.width)
     box: Boxed | None = None  # a ::: box: the views draw its frame and its content (view.box_lines)
     columns: Columned | None = None  # a row of :::: {.columns}: the views draw them side by side (view.columns_lines)
     code_spans: tuple = ()  # (top, bottom, kind) of each code drawn in it: a turned label never resamples or cuts them

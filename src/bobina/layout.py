@@ -278,12 +278,11 @@ class Layout:
 
     def view_with_bars(self, cells: list[Cell], gutter: int, rtl: bool = False) -> list[Cell]:
         """What the terminal views show for a row printed as an image: its words after the bars (before them, right
-        to left), within the paper's columns."""
+        to left), every letter (a smaller font has more of them than the paper's columns: the views widen)."""
         lead = self.lead(gutter)
         if not any(c.ch == QUOTE_BAR for c in lead):
             return cells
-        room = max(0, self.cols - gutter)
-        return [*cells[:room], *reversed(lead)] if rtl else [*lead, *cells[:room]]
+        return [*cells, *reversed(lead)] if rtl else [*lead, *cells]
 
     # ------------------------------------------------------------ helpers
     def document_size(self, meta: dict) -> str:
@@ -590,15 +589,17 @@ class Layout:
         im, texts = rasterfont.render_block(
             toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl
         )
+        room = self.W - indent * self.p.cell[0] - indent_dots - (pimg.width if pimg else 0)  # render_block's
         view_rows = [
             TextRow(
-                self.view_with_bars(self.view_cells(t), indent, rtl),
+                self.view_with_bars(self.view_cells(t, room), indent, rtl),
                 (1, 1),
                 "left" if align == "justify" else align,
                 line,
             )  # fmt: skip
             for t in texts
         ]
+        wide = any(r.columns() > self.cols for r in view_rows)  # a smaller font: the views widen to its lines
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
@@ -612,19 +613,20 @@ class Layout:
                     "use bold and ≥ 20px",
                     "R2-12",
                 )
-            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows)]
-        return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows)]
+            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows,
+                              wide_view=wide)]  # fmt: skip
+        return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows, wide_view=wide)]
 
-    def view_cells(self, toks) -> list[Cell]:
-        """A line of drawn text as cells for the terminal views, within the paper's columns: inverted words stay
-        inverted (the rest of a drawn line is plain, as on paper)."""
-        out, used = [], 0
+    def view_cells(self, toks, room: int) -> list[Cell]:
+        """A line of drawn text as cells for the terminal views, every letter the paper shows (in a smaller font,
+        more than the paper's columns: the views widen), a word longer than the line's `room` dots cut where the
+        paper cuts it. Inverted words stay inverted (the rest of a drawn line is plain, as on paper)."""
+        out, x = [], 0
         for t in toks:
-            for ch in t.text:
-                used += 2 if is_wide(ch) else 1
-                if used > self.cols:
-                    return out
-                out.append(Cell(ch, wide=is_wide(ch), invert=t.invert))
+            w = t.width()
+            shown = t.text if x + w <= room else t.text[: max(0, room - x) * len(t.text) // max(1, w)]
+            out += [Cell(ch, wide=is_wide(ch), invert=t.invert) for ch in shown]
+            x += w
         return out
 
     def text_block(

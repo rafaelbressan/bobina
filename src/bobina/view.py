@@ -48,8 +48,9 @@ def use_color(stream=sys.stdout) -> bool:
     return stream.isatty() and not colors_off()
 
 
-def braille(im: Image.Image, cell=(12, 24)) -> list[str]:
-    """Mode '1' image -> braille lines, one char per native cell."""
+def braille(im: Image.Image, cell=(12, 24), specks: bool = False) -> list[str]:
+    """Mode '1' image -> braille lines, one char per native cell. specks: a line of ink too small for a dot (a
+    dotted rule's 2x2 dots) as one dot in every other cell, where it is: lighter than a dashed one, never blank."""
     g = im.convert("L")
     cw, ch = cell
     cols = (g.width + cw - 1) // cw
@@ -64,7 +65,9 @@ def braille(im: Image.Image, cell=(12, 24)) -> list[str]:
         for c in range(cols):
             code = 0
             for x, y, bit in BRAILLE:
-                if px[c * 2 + x, r * 4 + y] < 190:  # >= ~25% ink in the 6x6 block
+                if specks and (c % 2 or x or code):
+                    continue
+                if px[c * 2 + x, r * 4 + y] < (255 if specks else 190):  # >= ~25% ink in the 6x6 block
                     code |= bit
             line.append(chr(0x2800 + code) if code else " ")
         out.append("".join(line))
@@ -105,8 +108,8 @@ def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
 
 
 def width(rows, profile) -> int:
-    """The view's columns: the paper's, or more when a table drawn in a smaller font needs more character columns
-    than the paper has (BitmapRow.wide_view): the frame grows to its widest line, so every cell shows whole."""
+    """The view's columns: the paper's, or more when a table or text drawn in a smaller font needs more character
+    columns than the paper has (BitmapRow.wide_view): the frame grows to its widest line, so every letter shows."""
     wide = [tr.columns() for r in rows if isinstance(r, BitmapRow) and r.wide_view for tr in r.text_rows or []]
     wide += [r.box.left + 2 + _box_view(r.box, profile)[2] for r in rows if isinstance(r, BitmapRow) and r.box]
     wide += [_columns_view(r.columns, profile)[1] for r in rows if isinstance(r, BitmapRow) and r.columns]
@@ -114,8 +117,8 @@ def width(rows, profile) -> int:
 
 
 def fit(row: TextRow, cols: int) -> TextRow:
-    """A line of drawn text in the frame's `cols` columns: as it is, or cut with "…" (a raster paragraph in a small
-    font can have more letters per line than the frame has columns; a table's lines widen the frame instead)."""
+    """A line of drawn text in the frame's `cols` columns: as it is, or cut with "…" (text in a smaller font widens
+    the frame instead: BitmapRow.wide_view)."""
     if row.columns() * row.scale[0] <= cols:
         return row
     kept, used = [], 0
@@ -162,12 +165,12 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             for tr in r.text_rows:
                 out += [ln[:cols] + more for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
         elif isinstance(r, BitmapRow) and r.text_rows:
-            for tr in r.text_rows:
-                tr = tr if r.wide_view else fit(tr, frame)  # a wide table's cells are never cut
-                wide = tr.columns() * tr.scale[0] > cols
+            trs = r.text_rows if r.wide_view else [fit(tr, frame) for tr in r.text_rows]  # wide_view: never cut
+            room = max([cols, *(tr.columns() * tr.scale[0] for tr in trs)])  # a smaller font's paper line: wider
+            for tr in trs:
                 if r.kind == "band":  # white on black on paper, from edge to edge
                     tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
-                ls = text_lines(tr, frame, color) if wide else [ln + more for ln in text_lines(tr, cols, color)]
+                ls = [ln + " " * (frame - room) for ln in text_lines(tr, room, color)]
                 out += [f"\x1b[7m{ln}\x1b[0m" if color and r.kind == "band" else ln for ln in ls]
         elif isinstance(r, RawRow):
             out.append(f"[raw: {len(r.data)} bytes, not previewed]".center(cols) + more)
@@ -177,7 +180,10 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             em = em or Emulator(profile)
             im = preview.row_image(r, profile, em)
             if im is not None:
-                out += [ln.ljust(frame) for ln in braille(im, profile.cell)]
+                ls = braille(im, profile.cell)
+                if getattr(r, "kind", "") == "divider" and not "".join(ls).strip():  # a dotted rule: dots too small
+                    ls = braille(im, profile.cell, specks=True)
+                out += [ln.ljust(frame) for ln in ls]
     return out
 
 
