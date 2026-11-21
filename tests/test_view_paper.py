@@ -65,3 +65,26 @@ def test_the_dotted_rule_between_table_rows_shows():
     lines = shown("| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n{style=lines}\n")
     between = lines[[k for k, ln in enumerate(lines) if ln.startswith("1")][0] + 1]
     assert between.strip() and all(0x2800 <= ord(ch) <= 0x28FF or ch == " " for ch in between)
+
+
+def test_a_proportional_font_at_the_same_size_keeps_the_papers_columns():
+    """Narrow letters put more than 32 of them on a line, but the font is not smaller than the printer's: the frame
+    stays the paper's, the long line cut with …."""
+    doc = "illicit little lilies fill the hill with lilting light in idle times till it is still"
+    lines = shown(doc + ' {font="Atkinson Hyperlegible"}\n\nlinha nativa\n')
+    assert len(lines[0]) == 32 and lines[1].endswith("…") and any(ln.rstrip() == "linha nativa" for ln in lines)
+
+
+def test_a_word_wider_than_the_paper_is_cut_where_its_letters_end_on_paper():
+    from dataclasses import replace
+
+    from bobina import rasterfont
+    from bobina.rows import BitmapRow
+
+    word = "i" * 40 + "W" * 40  # narrow letters, then wide ones: not a cut in proportion to the letters
+    res = build(word + ' {font="Atkinson Hyperlegible" size=24px}\n', profile_name="mtp-ii-58")
+    (row,) = [r for r in res.rows if isinstance(r, BitmapRow)]
+    shown = "".join(c.ch for c in row.text_rows[0].cells)
+    tok = rasterfont.Tok(word, rasterfont.resolve("Atkinson Hyperlegible").path, 24)
+    assert shown.startswith("i" * 40 + "W") and word.startswith(shown)
+    assert replace(tok, text=shown).width() <= 384 < replace(tok, text=word[: len(shown) + 1]).width()

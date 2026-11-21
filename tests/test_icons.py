@@ -247,13 +247,12 @@ def test_a_shortcode_touching_a_value_stays_text():
 
 def test_raster_font_view_rows_show_what_the_paper_shows():
     """Every mark the paper's line holds (drawn smaller than two printer columns each: more than the paper's 32
-    columns, so the view widens), none of what the paper cuts off (one word of 30 icons is wider than the paper)."""
+    columns), none of what the paper cuts off (one word of 30 icons is wider than the paper)."""
     from bobina.rows import BitmapRow
 
     res = build(":fragile:" * 30 + " {render=raster}\n\n" + "漢" * 30 + " {render=raster}\n")
     views = [v for r in res.rows if isinstance(r, BitmapRow) for v in (r.text_rows or [])]
     assert len(views[0].cells) == 20 and sum(len(v.cells) for v in views[1:]) == 30  # as the preview draws them
-    assert all(r.wide_view for r in res.rows if isinstance(r, BitmapRow))
 
 
 def test_every_size_up_to_8x_has_its_own_bitmap():

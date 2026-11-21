@@ -617,7 +617,7 @@ class Layout:
             )  # fmt: skip
             for t in texts
         ]
-        wide = any(r.columns() > self.cols for r in view_rows)  # a smaller font: the views widen to its lines
+        wide = self.smaller_font(toks) and any(r.columns() > self.cols for r in view_rows)  # the views widen
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
@@ -642,10 +642,19 @@ class Layout:
         out, x = [], 0
         for t in toks:
             w = t.width()
-            shown = t.text if x + w <= room else t.text[: max(0, room - x) * len(t.text) // max(1, w)]
-            out += [Cell(ch, wide=is_wide(ch), invert=t.invert) for ch in shown]
+            k = len(t.text)
+            while k and x + w > room and replace(t, text=t.text[:k]).width() > room - x:
+                k -= 1  # the letters whose advance ends on the paper (render_block draws past it, cut off)
+            out += [Cell(ch, wide=is_wide(ch), invert=t.invert) for ch in t.text[:k]]
             x += w
         return out
+
+    def smaller_font(self, toks) -> bool:
+        """Text drawn in a smaller font than the printer's: a digit narrower than a printer column (Terminus 16px: 8
+        dots of 12), so its lines can hold more letters than the paper's columns and the views widen for them. A
+        proportional font at the same size or larger keeps the paper's columns (a long line cut with …)."""
+        drawn = [t for t in toks if t.text.strip() and not t.icon]
+        return bool(drawn) and all(replace(t, text="0").width() < self.p.cell[0] for t in drawn)
 
     def text_block(
         self,
