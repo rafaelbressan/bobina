@@ -241,14 +241,16 @@ class Tok:
         return int(round(w + (self.px * 0.1 if self.italic and not self.space else 0)))
 
 
-def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
+def draw_tok(t: Tok, ascent: int, line_h: int, line_px: int = 0) -> Image.Image:
+    """A token drawn on a line whose letters rise `ascent` dots above the baseline, `line_h` tall. line_px: the
+    biggest size on the line; an inverted token smaller than it (a span's size=) gets a box of its own height."""
     w = max(1, t.width())
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
     fa, fd = t.font.getmetrics()
     if t.invert:
         top, bottom = 0, line_h - 1
-        if ascent - fa > 2 or line_h - (ascent + fd) > 2:  # beside bigger letters (a span's size=): its own height
+        if t.px < line_px:  # beside bigger letters (a span's size=): its own letters' height on the baseline
             top, bottom = ascent - fa, ascent + fd - 1
         d.rectangle((0, top, w - 1, bottom), fill=0)
     ink = 255 if t.invert else 0
@@ -524,7 +526,8 @@ def render_block(
         row = Image.new("L", (width, h), 255)
         x0 = 0 if rtl else indent + pw  # right to left: indent and bullet on the right
         avail = width - indent - pw
-        parts = [draw_tok(t, ascent, ascent + descent) for t in ln]
+        line_px = max([t.px for t in ln if not t.space] or [0])
+        parts = [draw_tok(t, ascent, ascent + descent, line_px) for t in ln]
         used = sum(p.width for p in parts)
         gaps = [k for k, t in enumerate(ln) if t.space]
         extra = {}

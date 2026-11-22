@@ -26,12 +26,6 @@ FEATURES = {
         "tested_on_paper": False,
         "evidence": "",
     },
-    "mixed-sizes": {
-        "title": "letters of several sizes on one printer-font line (a span's size=: GS ! changed mid-line)",
-        "where": "native lines with a span of its own size (Total: [R$ 42,00]{size=large})",
-        "tested_on_paper": False,
-        "evidence": "",
-    },
     "box": {
         "title": "boxes (::: {.box}): a frame around blocks, its title and grey, printed as one image",
         "where": "documents with ::: {.box} (docs/guides/layout.md)",

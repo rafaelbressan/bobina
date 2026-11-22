@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import cache
 
 from fontTools.ttLib import TTFont
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from . import icons, paths
 from .rows import Cell, TextRow
@@ -36,6 +36,8 @@ class Emulator:
         self.font_name = profile.get("native.emulation_font", "spleen-12x24.otf")
         self.font = _font(self.font_name, self.ch)
         self._glyphs: dict[tuple[str, bool], Image.Image] = {}
+        ink = ImageOps.invert(self.glyph("H", False)).getbbox()
+        self.baseline = ink[3] if ink else self.ch  # dots from the top of a 1x cell to the foot of its letters
 
     def has_glyph(self, ch: str) -> bool:
         return ord(ch) in _cmap(self.font_name) or any(ord(ch) in _cmap(f) for f in FALLBACKS)
@@ -138,13 +140,15 @@ class Emulator:
 
     def render_row(self, row: TextRow, width: int) -> Image.Image:
         """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. A row whose spans have their
-        own size draws each run at its size, all on one baseline: the foot of the tallest (as the printer does)."""
-        parts = [self._scaled(cells, row.tracking, *s) for s, cells in row.runs()] or [self._scaled([], 0, *row.scale)]
-        tall = max(p.height for p in parts)
-        li = Image.new("L", (sum(p.width for p in parts), tall), 255)
+        own size (never native) draws each run at its size, all standing on one baseline."""
+        runs = row.runs() or [(row.scale, [])]
+        parts = [(s[1], self._scaled(cells, row.tracking, *s)) for s, cells in runs]
+        tall = max(p.height for _, p in parts)
+        base = self.baseline * max(sh for sh, _ in parts)  # the room below it taken once, from the tallest run
+        li = Image.new("L", (sum(p.width for _, p in parts), tall), 255)
         x = 0
-        for p in parts:
-            li.paste(p, (x, tall - p.height))
+        for sh, p in parts:
+            li.paste(p, (x, base - self.baseline * sh))
             x += p.width
         h = self.row_height(row)
         out = Image.new("L", (width, h), 255)

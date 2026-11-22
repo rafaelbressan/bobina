@@ -137,7 +137,8 @@ def fit(row: TextRow, cols: int) -> TextRow:
         kept.append(c)
         used += w
     last = kept[-1] if kept else row.cells[0]
-    return TextRow([*kept, type(last)(**{**last.__dict__, "ch": "…", "wide": False})], row.scale, row.align)
+    dots = type(last)(**{**last.__dict__, "ch": "…", "wide": False, "scale": None})  # at the row's size: as reserved
+    return TextRow([*kept, dots], row.scale, row.align)
 
 
 def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: int | None = None) -> list[str]:

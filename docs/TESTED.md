@@ -16,7 +16,6 @@ there with the evidence (printer, date, what was printed), and the mark and the 
 | `--marks` cut and tear lines | ✅ MTP-II, 08/11 | any profile, when asked |
 | Label by label (`--step`): one send per label, the Bluetooth link closed while you tear | ✅ MTP-II, 13/11 (3 labels, 20 s and 60 s idle between them: each whole, above the tear bar) | any print of several labels at a terminal |
 | native text through code pages (ESC t) | ⚠ not tested on paper | profiles with `encoding = "codepage"` (most imported profiles) |
-| letters of several sizes on one printer-font line (a span's size=: GS ! changed mid-line) | ⚠ not tested on paper | native lines with a span of its own size (`Total: [R$ 42,00]{size=large}`) |
 | automatic cutter (GS V) where a label ends (not between --compact labels: glued on purpose) | ⚠ not tested on paper | profiles with `cutter = "full"` or `"partial"` |
 | native barcodes (GS k) on an imported profile | ⚠ not tested on paper | imported profiles whose printer has barcode commands |
 | the light grey dots behind table text (style=zebra, .shade on a cell or row) | ✅ MTP-II, 16/11 (four patterns: 2-dot squares every 4 dots chosen; grid strokes of 2 dots) | tables with `style=zebra` or `.shade` ([guides/tables.md](guides/tables.md), [table-cells](guides/table-cells.md)) |

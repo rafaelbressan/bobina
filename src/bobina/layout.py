@@ -29,6 +29,7 @@ CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # never let text carry prin
 SIZE_RE = rasterfont.SIZE_RE
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
+GS_MAX = 8  # the largest multiplier GS ! takes, in width and in height
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
@@ -782,8 +783,13 @@ class Layout:
 
         def sized(r: Run) -> tuple[int, int] | None:  # a span's size= as the line's size= maps it (F303, M101)
             if r.size not in sizes:
-                sizes[r.size] = self.scale_for(r.size, line)
-                self.jagged(sizes[r.size], line)
+                own = self.scale_for(r.size, line)
+                if not all(1 <= k <= GS_MAX for k in own):  # GS ! takes 1 to 8 times: the span keeps the line's
+                    self.n.add("M101", f"size={r.size} on a span: the printer font takes 1x to {GS_MAX}x",
+                               line, "2x, 3x, 1x2 or a name: small, normal, large, title, huge")  # fmt: skip
+                    own = scale
+                self.jagged(own, line)
+                sizes[r.size] = own
             return None if sizes[r.size] == scale else sizes[r.size]
 
         cells = self.cells_from_runs(runs, extra, sized)
@@ -833,6 +839,8 @@ class Layout:
                 line_scale = own.pop()
                 cells_line = [replace(c, scale=None) for c in cells_line]
             reason = self.native_ok(cells_line)
+            if not reason and any(c.scale for c in cells_line):  # GS ! would stand them on their cells' feet, not
+                reason = "sizes"  # on one baseline: drawn in the printer font's look, each run on the line's baseline
             if reason.startswith("glyph"):
                 self.n.add(
                     "F301",
@@ -867,13 +875,21 @@ class Layout:
                     self.draw_bars(self.em.render_row(r, self.W), gutter, 0),
                     line,
                     "text",
-                    [TextRow([*self.lead(gutter), *r.cells[indent:]], (1, 1), "left", line)],
+                    [self.quoted_view(r, indent, gutter)],
                 )
                 for r in rows
             ]
         if quoted:  # a span's size= makes a line taller than its │: the bars drawn its whole height, as at 2x
             return [self.tall_quoted(r, gutter) if r.height() > r.scale[1] else r for r in rows]
         return rows
+
+    def quoted_view(self, row: TextRow, indent: int, gutter: int) -> TextRow:
+        """What the views show for a quoted line wider than 1x (its bars drawn into it): its letters at 1x after
+        the bars; with spans of their own size, every letter at its size (the line's letters at the line's)."""
+        cells = row.cells[indent:]
+        if row.mixed():
+            cells = [c if c.scale else replace(c, scale=row.scale) for c in cells]
+        return TextRow([*self.lead(gutter), *cells], (1, 1), "left", row.line)
 
     def tall_quoted(self, row: TextRow, gutter: int) -> BitmapRow:
         """A quoted line taller than its 1x │ (a span's own size): printed as an image with the quote bars drawn

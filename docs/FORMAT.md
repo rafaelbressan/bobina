@@ -72,7 +72,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 - at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, its line and those above back to the previous `{…}`
-- on a span: `Total: [R$ 42,00]{.bold size=large}` (only the span grows; ⚠ not tested on paper)
+- on a span: `Total: [R$ 42,00]{.bold size=large}` (only the span grows; the line prints as an image)
 - on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
 

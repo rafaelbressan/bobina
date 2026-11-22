@@ -19,7 +19,7 @@ class Cell:
     italic: bool = False
     strike: bool = False
     wide: bool = False  # occupies two columns (CJK, drawn checkbox)
-    scale: tuple[int, int] | None = None  # its own GS ! size (a span's size=); None: the row's
+    scale: tuple[int, int] | None = None  # its own size, a printer multiplier (a span's size=); None: the row's
 
 
 def columns(cells: list[Cell]) -> int:
@@ -54,11 +54,11 @@ class TextRow:
         return sum((2 if c.wide else 1) * self.scale_of(c)[0] for c in self.cells)
 
     def height(self) -> int:
-        """Lines at 1x the row takes: its tallest cell's height (the others sit on the same baseline, at its foot)."""
+        """Lines at 1x the row takes: its tallest cell's height (the others stand on its baseline)."""
         return max([self.scale[1], *(c.scale[1] for c in self.cells if c.scale)])
 
     def runs(self) -> list[tuple[tuple[int, int], list[Cell]]]:
-        """The cells in runs of one size, left to right: each is printed (GS !) and drawn at its own size."""
+        """The cells in runs of one size, left to right: each is drawn at its own size (such a row is never native)."""
         out: list[tuple[tuple[int, int], list[Cell]]] = []
         for c in self.cells:
             s = self.scale_of(c)

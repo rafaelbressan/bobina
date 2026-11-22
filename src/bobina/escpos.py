@@ -58,30 +58,20 @@ def qr(data: str, module: int, ecc: str) -> bytes:
     return k(b"1A2\x00") + k(b"1C" + bytes([module])) + k(b"1E" + bytes([e])) + k(b"1P0" + d) + k(b"1Q0")
 
 
-def size(scale: tuple[int, int]) -> bytes:
-    """GS ! n: the printer font's width and height multipliers."""
-    return GS + b"!" + bytes([((scale[0] - 1) << 4) | (scale[1] - 1)])
-
-
 def text_row(row: TextRow, em: Emulator) -> bytes:
-    """One line in the printer font. A span with its own size changes GS ! where it starts and back where it ends:
-    the printer puts the line's letters on one baseline, and ESC 3 makes the line as tall as its tallest letter."""
+    sw, sh = row.scale
     out = bytearray()
     if row.upside_down:
         out += ESC + b"{\x01"
     out += ESC + b"3" + bytes([em.row_height(row)])
     out += ESC + b"a" + bytes([ALIGN.get(row.align, 0)])
-    scale = row.scale
-    out += size(scale)
+    out += GS + b"!" + bytes([((sw - 1) << 4) | (sh - 1)])
     if row.tracking:
         out += ESC + b" " + bytes([min(255, row.tracking)])
     state = (False, False, False)
     pages = em.p.codepages() if em.p.get("encoding") == "codepage" else ()
     page = None
     for c in row.cells:
-        if row.scale_of(c) != scale:  # ⚠ not tested on paper: features.py "mixed-sizes"
-            scale = row.scale_of(c)
-            out += size(scale)
         st = (c.bold, c.underline, c.invert)
         if st != state:
             if st[0] != state[0]:
