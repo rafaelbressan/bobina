@@ -101,7 +101,9 @@ def test_a_crop_outside_the_image_or_empty_prints_it_whole_and_says_so(tmp_path,
 def test_a_crop_that_is_not_four_numbers_is_said_and_ignored(tmp_path, crop):
     quadrants(tmp_path / "q.png", black=(0,))
     res = run(tmp_path, f"crop={crop}")
-    assert [m for m in said(res, "M101") if m.startswith("crop=")] == [f"crop={crop}"]
+    assert [m for m in said(res, "M101") if m.startswith("crop=")] == [
+        f"crop={crop} is not a value it takes: the image prints whole"
+    ]
     assert picture(res).size == (W, W // 2)
 
 
@@ -198,7 +200,10 @@ def test_an_unknown_mask_names_the_shapes_and_prints_the_image_whole(tmp_path):
     black(tmp_path / "q.png")
     res = run(tmp_path, "mask=star")
     assert [(n.message, n.suggestion) for n in res.nudges if n.code == "M101"] == [
-        ("mask=star is not a shape: the image prints whole", "mask=circle, mask=ellipse or mask=rounded radius=3mm")
+        (
+            "mask=star is not a value it takes: the image prints whole",
+            "mask=circle, mask=ellipse or mask=rounded radius=3mm",
+        )
     ]
     assert ink(picture(res)) == 1.0
 

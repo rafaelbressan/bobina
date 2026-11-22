@@ -253,7 +253,9 @@ def test_a_body_cell_brace_with_only_an_id_or_nothing_stays_text():
 @pytest.mark.parametrize("value", ["abc", "-3ch", "0", "0ch", "0.5ch", "9 ch"])
 def test_an_unreadable_width_is_said_and_the_column_is_auto(value):
     res = build(f'| A {{width="{value}"}} | B |\n|---|---|\n| x | y |\n')
-    assert said(res, "M101") == [f"width={value}"]  # as object_width says it, with the column's units
+    assert said(res, "M101") == [
+        f"width={value} is not a value it takes: auto, the default"
+    ]  # as object_width says it, with the column's units
     hint = next(n.suggestion for n in res.nudges if n.code == "M101")
     assert hint.startswith("auto, 7ch, 20mm, 30% (of the text room)")
     assert notes(res) == ["column widths: A 30 · B 1 (+1 gap = 32 of 32)"]  # auto: as wide as the plain table

@@ -19,7 +19,7 @@ from PIL import Image, ImageChops, ImageDraw
 
 from . import datasource, icons, imaging, rasterfont, templating
 from .model import Attrs, Run, Table
-from .nudges import SecurityError
+from .nudges import SecurityError, not_a_value
 from .rows import BitmapRow, FeedRow
 
 TYPES = ("line", "bar", "area", "sparkline")
@@ -534,7 +534,12 @@ class Chart:
     def aggregate(self) -> str:
         how = str(self.a.kv.get("aggregate", "sum"))
         if how not in AGGREGATES:
-            self.n.add("M101", f"aggregate={how}", self.at("aggregate="), "sum (the default), max or mean")
+            self.n.add(
+                "M101",
+                not_a_value("aggregate", how, "summed, the default"),
+                self.at("aggregate="),
+                "sum (the default), max or mean",
+            )
             return "sum"
         return how
 
@@ -620,7 +625,12 @@ class Chart:
         across = w or room
         orient = str(kv.get("orientation", "horizontal"))
         if orient not in ("horizontal", "vertical", "auto"):
-            lay.n.add("M101", f"orientation={orient}", self.at("orientation="), "horizontal (the default) or vertical")
+            lay.n.add(
+                "M101",
+                not_a_value("orientation", orient, "across the paper, the default"),
+                self.at("orientation="),
+                "horizontal (the default) or vertical",
+            )
             orient = "horizontal"
         if orient == "vertical" and self.indent:
             lay.n.add("M101", "orientation=vertical: only a chart outside quotes and lists turns",
@@ -647,7 +657,12 @@ class Chart:
     def turned_labels(self) -> bool:
         given = str(self.a.kv.get("y-labels", "rotated"))
         if given not in ("rotated", "horizontal"):
-            self.n.add("M101", f"y-labels={given}", self.at("y-labels="), "rotated (the default) or horizontal")
+            self.n.add(
+                "M101",
+                not_a_value("y-labels", given, "turned along the axis, the default"),
+                self.at("y-labels="),
+                "rotated (the default) or horizontal",
+            )
             return True
         return given == "rotated"
 
@@ -741,7 +756,12 @@ class Chart:
             return int(g)
         if not getattr(self, "_said_x", False):
             self._said_x = True
-            self.n.add("M101", f"x-labels={given}", self.at("x-labels="), "all, ends or a number (4: about 4)")
+            self.n.add(
+                "M101",
+                not_a_value("x-labels", given, "as many as fit, the default"),
+                self.at("x-labels="),
+                "all, ends or a number (4: about 4)",
+            )
         return None
 
     def legend_rows(self, font: Font, W: int) -> list:

@@ -67,3 +67,7 @@ A test fails until each step is done, so nothing is forgotten when the CLI grows
 Add it to `CATALOG` (`src/bobina/nudges.py`), say what to do in `FIX` (`src/bobina/problem_help.py`) and add it to
 the table in `docs/FORMAT.md`, then run `python tools/gen_problem_docs.py` (the flow diagram and docs/problems/).
 `tests/test_docs.py` and `tests/test_problem_help.py` check them.
+
+An attribute given a value it does not take says what prints instead: `not_a_value("valign", given, "the default")`
+(`src/bobina/nudges.py`) reads `valign=up is not a value it takes: the default`, and the suggestion lists the values.
+A message that is only `valign=up` fails `tests/test_nudge_wording.py`.

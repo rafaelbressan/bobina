@@ -15,7 +15,7 @@ from . import charts, icons, imaging, preview, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
 from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
-from .nudges import Nudges, SecurityError
+from .nudges import Nudges, SecurityError, not_a_value
 from .rows import BarcodeRow, BitmapRow, Boxed, Cell, Column, Columned, FeedRow, QRRow, RawRow, TextRow, columns
 from .templating import PH_RE, RESERVED_CHARS, Rendered
 
@@ -995,7 +995,7 @@ class Layout:
             if not math.isfinite(ang):  # nan, inf: no turn PIL can draw (it raised)
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"rotate={rot}", line, "0, 90, 180, 270 or degrees")
+            self.n.add("M101", not_a_value("rotate", rot, "not turned"), line, "0, 90, 180, 270 or degrees")
             return 0.0
         if ang % 90 and not image:
             self.n.add("B102", f"rotate={ang:g}: slanted strokes look jagged at {self.p.dpi} dpi", line,
@@ -1169,7 +1169,7 @@ class Layout:
         title = " ".join(self.text(raw).split())
         how = a.kv.get("title-style", "border")
         if how not in TITLE_STYLES:
-            self.n.add("M101", f"title-style={how}", line, "border, inside or band")
+            self.n.add("M101", not_a_value("title-style", how, "border, the default"), line, "border, inside or band")
             how = "border"
         if "title-style" in a.kv and not title:
             self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
@@ -1389,7 +1389,10 @@ class Layout:
         wrap = a.kv.get("wrap", "nowrap")
         if wrap not in WRAPS:
             self.n.add(
-                "M101", f"wrap={wrap}", line, "nowrap (squeezed side by side: the default), wrap or wrap-reverse"
+                "M101",
+                not_a_value("wrap", wrap, "nowrap, the default"),
+                line,
+                "nowrap (squeezed side by side: the default), wrap or wrap-reverse",
             )
             wrap = "nowrap"
         valign = self.valign(a, line, "top")
@@ -1426,7 +1429,7 @@ class Layout:
             return default
         if given in VALIGNS:
             return VALIGNS[given]
-        self.n.add("M101", f"valign={given}", line, "top, middle or bottom")
+        self.n.add("M101", not_a_value("valign", given, "the default"), line, "top, middle or bottom")
         return default
 
     def column_gap(self, a: Attrs, line: int) -> int:
@@ -1442,7 +1445,7 @@ class Layout:
             return 0
         dots, _ = self.trial(lambda: self.object_width(given, line, GAP_HINT))  # said below, as gap=
         if dots is None:
-            self.n.add("M101", f"gap={given}", line, GAP_HINT)
+            self.n.add("M101", not_a_value("gap", given, "a gap of one column"), line, GAP_HINT)
             return 1
         return round(dots / self.p.cell[0])
 
@@ -1681,7 +1684,7 @@ class Layout:
         ignored (block() does not turn the label again)."""
         given = a.kv.get("orientation", "horizontal")
         if given not in ("horizontal", "vertical"):
-            self.n.add("M101", f"orientation={given}", line,
+            self.n.add("M101", not_a_value("orientation", given, "across the paper, the default"), line,
                        "horizontal (across the paper: the default) or vertical (along the roll)")  # fmt: skip
             given = "horizontal"
         if given == "vertical" and indent:  # a quote's bar or a list's indent cannot follow a turned label
@@ -2051,7 +2054,9 @@ class Layout:
         (no uneven bars)."""
         return max(1, min(hi, int(min(target, self.W) // units))) if target else default
 
-    def object_width(self, value, line: int, hint: str = OBJECT_WIDTH_HINT) -> int | None:
+    def object_width(
+        self, value, line: int, hint: str = OBJECT_WIDTH_HINT, then: str = "the default width"
+    ) -> int | None:
         """width= on any object (image, QR, barcode, Data Matrix, PDF417, pay, contact): full, half, third, 50%,
         30mm or dots (200, 200px). None when absent or unreadable (M101, with `hint`: a table column's says ch)."""
         if value is None or str(value).strip() == "":
@@ -2069,7 +2074,7 @@ class Layout:
             if w < 1:
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"width={value}", line, hint)
+            self.n.add("M101", not_a_value("width", value, then), line, hint)
             return None
         return w
 
@@ -2086,7 +2091,9 @@ class Layout:
             return self.object_align(attrs)
         if given in ("left", "center", "right"):
             return given
-        self.n.add("M101", f"caption-align={given}", line, "left, center or right")
+        self.n.add(
+            "M101", not_a_value("caption-align", given, "aligned like what it is under"), line, "left, center or right"
+        )
         return self.object_align(attrs)
 
     def caption_for(self, attrs, line: int, rows: list, auto: str = "", alt: str | None = None) -> list:
@@ -2123,7 +2130,7 @@ class Layout:
         """align= on an object or a box that is not a placement: said (object_align then uses the default)."""
         given = attrs.kv.get("align")
         if given is not None and given not in ("left", "center", "right", "justify"):
-            self.n.add("M101", f"align={given}", line, "left, center or right")
+            self.n.add("M101", not_a_value("align", given, "the default"), line, "left, center or right")
 
     def qr(self, f: Fence, resolved: bool = False) -> list:
         """A QR code, and under it the caption= line if there is one (1 mm of air: glued, it reads as part of it)."""
@@ -2743,7 +2750,7 @@ class Layout:
             return None
         spec = imaging.parse_crop(given)
         if spec is None:
-            self.n.add("M101", f"crop={given}", line, CROP_HINT)
+            self.n.add("M101", not_a_value("crop", given, "the image prints whole"), line, CROP_HINT)
         return spec
 
     def raster_crop(self, spec, attrs, size: tuple[int, int], line: int):
@@ -2785,7 +2792,7 @@ class Layout:
         given = attrs.kv.get("mask")
         shape = None if given is None else str(given).strip().lower()
         if shape is not None and shape not in imaging.MASKS:
-            self.n.add("M101", f"mask={given} is not a shape: the image prints whole", line,
+            self.n.add("M101", not_a_value("mask", given, "the image prints whole"), line,
                        "mask=circle, mask=ellipse or mask=rounded radius=3mm")  # fmt: skip
             shape = None
         if "radius" in attrs.kv and shape != "rounded":
@@ -2803,7 +2810,12 @@ class Layout:
             if not (math.isfinite(n) and n >= 0):
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"radius={given}", line, "3mm, 12 (dots) or 10% (of the shorter side)")
+            self.n.add(
+                "M101",
+                not_a_value("radius", given, "10% of the shorter side, the default"),
+                line,
+                "3mm, 12 (dots) or 10% (of the shorter side)",
+            )
             n, unit = float(MASK_RADIUS.removesuffix("%")), "%"
         return round(short * n / 100) if unit == "%" else self.p.mm_to_dots(n) if unit == "mm" else round(n)
 
@@ -2828,7 +2840,9 @@ class Layout:
         axes = str(value).strip().lower()
         if axes in MIRRORS:
             return MIRRORS[axes]
-        self.n.add("M101", f"mirror={value}", line, "x (left-right), y (top-bottom) or xy (both)")
+        self.n.add(
+            "M101", not_a_value("mirror", value, "not mirrored"), line, "x (left-right), y (top-bottom) or xy (both)"
+        )
         return False, False
 
     def treatment(self, im, attrs, vector: bool, line: int, src: str) -> tuple[str, int | None]:
@@ -2844,7 +2858,12 @@ class Layout:
                 if not 0 < pct < 100:
                     raise ValueError
             except ValueError:
-                self.n.add("M101", f"threshold={given}", line, "a percentage from 1% to 99% (higher: more black)")
+                self.n.add(
+                    "M101",
+                    not_a_value("threshold", given, "the default cut"),
+                    line,
+                    "a percentage from 1% to 99% (higher: more black)",
+                )
                 return "threshold", None
             return "threshold", round(255 * pct / 100)
         if attrs.has("threshold"):
@@ -2854,7 +2873,12 @@ class Layout:
         if "dither" in attrs.kv:
             name = str(attrs.kv["dither"])
             if name not in imaging.DITHERS:
-                self.n.add("M101", f"dither={name}", line, "floyd-steinberg, atkinson, bayer or threshold")
+                self.n.add(
+                    "M101",
+                    not_a_value("dither", name, "floyd-steinberg, the default"),
+                    line,
+                    "floyd-steinberg, atkinson, bayer or threshold",
+                )
             kind = imaging.DITHERS.get(name, "fs")
             return kind, 128 if kind == "threshold" else None
         if vector:
@@ -2942,7 +2966,10 @@ class Layout:
         orientation = t.attrs.kv.get("orientation", "auto")
         if orientation not in ("auto", "horizontal", "vertical"):
             self.n.add(
-                "M101", f"orientation={orientation}", self.said_at(t, "orientation="), "auto, horizontal or vertical"
+                "M101",
+                not_a_value("orientation", orientation, "auto, the default"),
+                self.said_at(t, "orientation="),
+                "auto, horizontal or vertical",
             )
             orientation = "auto"
         if indent and orientation == "vertical":  # a quote's bar or a list's indent cannot follow a turned table
@@ -3081,10 +3108,10 @@ class Layout:
         if m:
             n = math.floor(float(m.group(1)))
             if n < 1:
-                self.n.add("M101", f"width={width}", line, COLUMN_WIDTH_HINT)
+                self.n.add("M101", not_a_value("width", width, "auto, the default"), line, COLUMN_WIDTH_HINT)
                 return None
             return n
-        dots = self.object_width(width, line, COLUMN_WIDTH_HINT)
+        dots = self.object_width(width, line, COLUMN_WIDTH_HINT, "auto, the default")
         if dots is None:
             return None
         if width in FRACTIONS:

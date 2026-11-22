@@ -242,6 +242,12 @@ def problems_header(errors: int, warnings: int, notes: int, printed: str) -> str
     return ", ".join(bits) + (f" — {printed}" if printed else "")
 
 
+def not_a_value(key: str, given, then: str) -> str:
+    """The message of an attribute given a value it does not take: what was written, and what prints instead (the
+    suggestion lists the values it takes). One wording, so a reader never meets a bare 'valign=up'."""
+    return f"{key}={given} is not a value it takes: {then}"
+
+
 class Nudges(list):
     """The problems of a job. The notes only bobina check says (CHECK_ONLY) are kept apart, in check_only, where
     they are made: whatever lists or shows the problems never sees them, unless it asks (Result.visible_nudges)."""
