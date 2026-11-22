@@ -665,14 +665,14 @@ def marks_setting(args, cfg: dict) -> str:
     return getattr(args, "marks", None) or config_keys.read(cfg, "marks", say=err)  # a typo there: a note
 
 
-def build(args, source, base_dir, counters=None, machine=None):
+def build(args, source, base_dir, counters=None, machine=None, data=None):
     """machine: the job's locales.Machine (one for all the parts of a job); None: a new one, so each rebuild of
-    bobina edit reads config.toml again."""
+    bobina edit reads config.toml again. data: read_data's result, when the caller has read it (--per-row)."""
     if counters is not None or not getattr(args, "reserve_counters", False):
-        return _build(args, source, base_dir, counters, machine)
+        return _build(args, source, base_dir, counters, machine, data)
     store = counter_store(args)  # a print: numbers reserved now, given back if the build fails
     try:
-        return _build(args, source, base_dir, store, machine)
+        return _build(args, source, base_dir, store, machine, data)
     except BaseException:
         store.release()
         raise
@@ -693,7 +693,7 @@ def sandbox_dirs(cfg: dict, base_dir: str, doc_folder: bool = True) -> tuple[str
     return tuple(([base_dir] if doc_folder else []) + dirs)
 
 
-def _build(args, source, base_dir, counters=None, machine=None):
+def _build(args, source, base_dir, counters=None, machine=None, data=None):
     from .. import locales
 
     cfg = config.load()
@@ -701,7 +701,7 @@ def _build(args, source, base_dir, counters=None, machine=None):
     copies, repeat = getattr(args, "copies", 1), getattr(args, "repeat", 1)
     if (copies is not None and copies < 1) or (repeat is not None and repeat < 1):
         raise Fail(USAGE, "--copies and --repeat must be 1 or more", problem="E304")
-    data_rows, per_row, notes = read_data(args)
+    data_rows, per_row, notes = data or read_data(args)
     try:
         b = engine.build_batch(
             source,
@@ -743,14 +743,19 @@ def _build(args, source, base_dir, counters=None, machine=None):
                 continue  # (the job may use the header itself or its alias: Categoria -> categoria)
         b.first.nudges.add(code, msg, None, hint)
     b.source_text = source
-    from ..templating import given_names
-
-    # what {{ }} can use (a.price for a named source; a header with spaces only as row['Unit Price']): bobina check
-    names = (n for r in data_rows or [] for n in given_names(r))
-    b.data_columns = [n for n in dict.fromkeys(names) if IDENT_PATH.fullmatch(n) and n not in NOT_A_NAME]
+    b.data_columns = data_columns(data_rows)
     specs = getattr(args, "data", None) or []
     b.data_specs = [*([specs] if isinstance(specs, str) else specs), *(getattr(args, "join", None) or [])]
     return b
+
+
+def data_columns(data_rows) -> list[str]:
+    """What {{ }} can use (a.price for a named source; a header with spaces only as row['Unit Price']): bobina
+    check lists them."""
+    from ..templating import given_names
+
+    names = (n for r in data_rows or [] for n in given_names(r))
+    return [n for n in dict.fromkeys(names) if IDENT_PATH.fullmatch(n) and n not in NOT_A_NAME]
 
 
 IDENT_PATH = re.compile(r"[A-Za-z_]\w*(\.[A-Za-z_]\w*)?")
@@ -858,44 +863,131 @@ def _load_job(args, store):
 
     machine = locales.Machine()  # one per job: its parts and their rows say its locale note once
     failed: list[tuple[Nudge, int]] = []  # every part is built; all problems are reported together
-    for g, a in items:
-        label = f"part {g + 1} ({_short(a.target)})" if many else ""
-        try:
-            s, b, origin = _read_one(a)
-            a.doc_folder = origin not in ("stdin", "inline")  # --sandbox: stdin and inline text have no folder
-            if getattr(a, "ask", False):
-                cache = args.__dict__.setdefault("_asked", {})  # an edit-and-rebuild keeps the answers
-                if (g, a.target) not in cache:
-                    if label:
-                        err(f"— {label}")
-                    cache[(g, a.target)] = ask_fields(a, s, b)
-                a.asked = cache[(g, a.target)]
-            res = build(a, s, b, counters=store, machine=machine)
-        except Fail as e:
-            if not many:
-                raise
-            n = e.problems()[0]  # message and hint split, the same shape as a single-part error
-            n.source, n.part, n.file = label, g + 1, _short(a.target)
-            failed.append((n, e.code))
-            continue
-        except SecurityError as e:
-            if not many:
-                raise
-            e.nudge.source, e.nudge.part, e.nudge.file = label, g + 1, _short(a.target)
-            failed.append((e.nudge, SECURITY))
-            continue
+
+    def where(g, a):
+        return f"part {g + 1} ({_short(a.target)})" if many else ""
+
+    def record(e, g, a):
+        """A part that failed: its problem, said with the part and file, joins the others."""
+        if isinstance(e, SecurityError):
+            n, code = e.nudge, SECURITY
+        else:
+            n, code = e.problems()[0], e.code  # message and hint split, the same shape as a single-part error
+        n.source, n.part, n.file = where(g, a), g + 1, _short(a.target)
+        failed.append((n, code))
+
+    def read(g, a):
+        s, b, origin = _read_one(a)
+        a.doc_folder = origin not in ("stdin", "inline")  # --sandbox: stdin and inline text have no folder
+        if getattr(a, "ask", False):
+            cache = args.__dict__.setdefault("_asked", {})  # an edit-and-rebuild keeps the answers
+            if (g, a.target) not in cache:
+                if where(g, a):
+                    err(f"— {where(g, a)}")
+                cache[(g, a.target)] = ask_fields(a, s, b)
+            a.asked = cache[(g, a.target)]
+        return s, b, origin
+
+    def label_nudges(res, g, a):
         for r in res.results:
             for n in [*r.nudges, *r.notes]:
-                if label and not n.source:
-                    n.source, n.part, n.file = label, g + 1, _short(a.target)
-        store = res.first.rendered.counters if res.first.rendered else store  # counters continue
+                if many and not n.source:
+                    n.source, n.part, n.file = where(g, a), g + 1, _short(a.target)
+
+    def data_source(res, g, a):
         cols = getattr(res, "data_columns", [])  # bobina check lists them, per part and its data files
-        res.data_sources = [{"part": g + 1, "document": _short(a.target), "data": res.data_specs, "columns": cols}]
-        res.data_sources = res.data_sources if cols else []
-        compact = getattr(a, "compact", None)
+        return [{"part": g + 1, "document": _short(a.target), "data": res.data_specs, "columns": cols}] if cols else []
+
+    def per_row(g, part):
+        """--per-row: for each data row, every file of the part in turn (pote 1, tampa 1, pote 2 …); the files of
+        one row share its seq numbers. -> (one batch for the part, its first file), or None when it failed."""
+        docs = []
+        for a in part:
+            try:
+                docs.append((a, *read(g, a)))
+            except (Fail, SecurityError) as e:
+                record(e, g, a)
+        if len(docs) < len(part):
+            return None
+        a0 = docs[0][0]
+        try:
+            rows, row_copies, notes = read_data(a0)
+            keep = [(r, c) for r, c in zip(rows, row_copies or [1] * len(rows), strict=True) if c > 0]
+            if not keep:
+                raise Fail(USAGE, "every data row asks 0 copies (--copies-from): nothing to print", problem="E304")
+            total = sum(c for _, c in keep) * len(docs) * (getattr(a0, "copies", 1) or 1)
+            if total > 1000:
+                raise Fail(USAGE, f"job too large: {total} labels (max 1000); split it with --rows", problem="E305")
+        except (Fail, SecurityError) as e:
+            record(e, g, a0)
+            return None
+        results, which, firsts = [], [], {}
+        a = a0
+        try:
+            for k, (row, c) in enumerate(keep):
+                group = []
+                for j, (a, s, b, _origin) in enumerate(docs):
+                    store.share_row(k)
+                    one = ([row], None, list(notes) if k == 0 else [])  # the data notes once per file
+                    res = build(a, s, b, counters=store, machine=machine, data=one)
+                    label_nudges(res, g, a)
+                    firsts.setdefault(j, res)
+                    group.append((j, res.first))
+                results += [r for _, r in group] * c  # --copies-from: the row's documents again, together
+                which += [j for j, _ in group] * c
+        except (Fail, SecurityError) as e:
+            record(e, g, a)
+            return None
+        finally:
+            store.share_row(None)
+        joined = engine.Batch(results, getattr(a0, "copies", 1) or 1)  # --copies: the whole part again
+        joined.source_text = docs[0][1]
+        joined.label_docs, joined.doc_stems = which, [file_stem(d[3]) for d in docs]
+        cols = data_columns(rows)
+        for res in firsts.values():
+            res.data_columns = cols
+        joined.data_sources = [d for j, (a, *_) in enumerate(docs) for d in data_source(firsts[j], g, a)]
+        return joined, docs[0]
+
+    useless = {
+        "data": ("--per-row does nothing without --data: it takes turns between documents row by row",
+                 "add --data FILE, or leave --per-row out"),
+        "one": ("--per-row does nothing with one document: it takes turns between the documents of its part",
+                "give them in one part: bobina print a.bob.md b.bob.md --data rows.csv --per-row"),
+    }  # fmt: skip
+    parts: dict[int, list] = {}
+    for g, a in items:
+        parts.setdefault(g, []).append(a)
+    interleaved = False
+    for g, part in parts.items():
+        compact = getattr(part[0], "compact", None)
         compact = compact if compact is not None else compact_all
-        built.append((res, g, compact, s, b, origin))
-        first_src = first_src or (s, b, origin)
+        asks_per_row = getattr(part[0], "per_row", False)
+        if asks_per_row and len(part) > 1 and getattr(part[0], "data", None):
+            got = per_row(g, part)
+            if got:
+                res, (_a, s, b, origin) = got
+                built.append((res, g, compact, s, b, origin))
+                first_src = first_src or (s, b, origin)
+                interleaved = True
+            continue
+        for a in part:
+            try:
+                s, b, origin = read(g, a)
+                res = build(a, s, b, counters=store, machine=machine)
+            except (Fail, SecurityError) as e:
+                if not many:
+                    raise
+                record(e, g, a)
+                continue
+            if asks_per_row and a is part[0]:  # a note, not an error: the labels print as without it
+                msg, hint = useless["one" if getattr(a, "data", None) else "data"]
+                res.first.nudges.add("M156", msg, None, hint)
+            label_nudges(res, g, a)
+            store = res.first.rendered.counters if res.first.rendered else store  # counters continue
+            res.data_sources = data_source(res, g, a)
+            built.append((res, g, compact, s, b, origin))
+            first_src = first_src or (s, b, origin)
     if failed:
         warnings = [n for r, *_ in built for n in r.visible_nudges()]
         shown = [n for n, _ in failed] + warnings
@@ -904,11 +996,16 @@ def _load_job(args, store):
         raise Fail(code, "\n".join(nudge_block(shown, stopped())), problem="MULTI", items=shown)
     metas, n = [], 0
     for res, g, _c, _s, _b, origin in built:  # per label: where it came from (export names, reports)
-        stem = file_stem(origin)
-        for i, r in enumerate(res.results * res.copies, 1):
+        docs = getattr(res, "label_docs", None)  # --per-row: the files take turns
+        stems = getattr(res, "doc_stems", None) or [file_stem(origin)]
+        seen: dict[int, int] = {}
+        for k, r in enumerate(res.results * res.copies):
+            j = docs[k % len(docs)] if docs else 0
+            seen[j] = seen.get(j, 0) + 1  # {i}: the number inside its document
             n += 1
-            metas.append({"n": n, "i": i, "part": g + 1, "file": stem, "fields": getattr(r, "fields", {})})
-    if len(built) == 1:
+            meta = {"n": n, "i": seen[j], "part": g + 1, "file": stems[j], "fields": getattr(r, "fields", {})}
+            metas.append({**meta, "per_row": True} if docs else meta)
+    if len(built) == 1 and not interleaved:
         res, _, compact, s, b, origin = built[0]
         res.compact = compact
         res.label_meta = metas

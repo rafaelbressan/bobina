@@ -165,13 +165,14 @@ bobina print jar.bob.md --data kitchen.csv --compact \
 **Rules** (like ffmpeg: options belong to the part they are written in; the specific beats the general):
 
 1. A **part** is everything between two `--then`: one or more files and their options (`--data`, `--where`,
-   `--copies-from`, `--set`, `--ask`, `--page` …). The options apply to every file of that part.
+   `--copies-from`, `--set`, `--ask`, `--page` …). The options apply to every file of that part; with `--per-row`
+   its files take turns for each data row.
 2. `--compact` / `--no-compact` set a part; `--compact-all` is the default for every part. Both flags in one part
    is an error.
 3. **Joins**: inside a compact part, labels are glued at a ✂ cut. Between two parts there is a ✂ cut only if
    **both** are compact; otherwise the paper feeds to the tear bar. The end of the job always feeds.
 4. Job options (the table below) may be written in any part. Counters (`{{ seq.x }}`) continue across parts and
-   files; copies of a row repeat its number.
+   files; copies of a row, and with `--per-row` its files, repeat its number.
 
 The terminal preview always draws where one label ends: `┄┄ ⟶ ┄┄` where the
 paper goes to the tear bar, `✂ ┄┄┄` at a cut.
@@ -188,12 +189,13 @@ no length, and the confirmation screen says which ones go on paper.
 | `a b --then c --then d --compact` | A ⟶ B ⟶ C ⟶ D ⟶ (D's neighbour is not compact) |
 | `a b --then c --no-compact --then d --compact-all` | A ✂ B ⟶ C ⟶ D ⟶ |
 | `jar --data kitchen.csv --compact --then jar --data laundry.xlsx` | jar 1 ✂ jar 2 ✂ jar 3 ⟶ jar 4 ⟶ jar 5 ⟶ |
+| `jar lid --data kitchen.csv --per-row --compact` | jar 1 ✂ lid 1 ✂ jar 2 ✂ lid 2 ⟶ |
 
 **Which options belong where** (tested in `tests/test_strip_rules.py`):
 
 | Kind | Options | Rule |
 |---|---|---|
-| Part | `--set`, `--data`, `--sheet`, `--rows`, `--where`, `--copies-from`, `--repeat`, `--copies`, `--ask`, `--page`, `--plain`, `--allow-net`, `--allow`, `--compact`/`--no-compact` | apply to the files of the part they are written in, never to the next part |
+| Part | `--set`, `--data`, `--sheet`, `--rows`, `--where`, `--copies-from`, `--per-row`, `--repeat`, `--copies`, `--ask`, `--page`, `--plain`, `--allow-net`, `--allow`, `--compact`/`--no-compact` | apply to the files of the part they are written in, never to the next part |
 | Job flag | `--compact-all`, `--sandbox`, `--yes`, `--dry-run`, `--strict`, `-q`, `--json`, `--no-color`, `--step`/`--no-step` | may be written in any part, apply to the whole job |
 | Job default | `--set-all KEY=VALUE`, `--allow-all CODES` | every part gets them; a part's own `--set`/`--allow` wins |
 | Job value | `--printer`, `--profile`, `-o`, `--editor`, `--marks` | one value per job; two different values are an error |

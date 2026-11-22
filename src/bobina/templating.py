@@ -452,7 +452,18 @@ class CounterStore:
         self._before: dict[str, object] = {}  # reserve mode: the file's value before this job's first number
         self._wrote: dict[str, int] = {}  # the value this job left in the file
         self._contiguous: dict[str, bool] = {}  # no other job took numbers between this job's reservations
+        self._row: object = None  # --per-row: the data row whose documents share their numbers (share_row)
+        self._row_values: dict[str, list[int]] = {}
+        self._row_read: dict[str, int] = {}
         self.done = False
+
+    def share_row(self, row) -> None:
+        """--per-row: the next document belongs to data row `row`, and the documents of one row read the same
+        numbers, in the order they ask for them (pote #1, tampa #1), as copies of a row repeat its number. A new
+        row takes new numbers; None stops sharing."""
+        if row != self._row:
+            self._row, self._row_values = row, {}
+        self._row_read = {}
 
     def declare(self, decl: dict | None) -> None:
         """A later part of the job (--then) brings its own counters: add them. The same counter declared
@@ -497,6 +508,19 @@ class CounterStore:
         return out, v
 
     def _next_values(self, name: str, n: int) -> list[int]:
+        if self._row is None:
+            return self._take(name, n)
+        shared = self._row_values.setdefault(name, [])  # what an earlier document of this row took
+        at = self._row_read.get(name, 0)
+        out = shared[at : at + n]
+        if len(out) < n:  # this document asks more than the ones before it: new numbers, shared from now on
+            new = self._take(name, n - len(out))
+            shared += new
+            out += new
+        self._row_read[name] = at + n
+        return out
+
+    def _take(self, name: str, n: int) -> list[int]:
         start = int(self.cfg(name).get("start", 1))
         used = self.used.setdefault(name, [])
         if not self.reserve:

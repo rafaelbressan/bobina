@@ -163,6 +163,17 @@ In the design, a column without a prefix works when only one source has it; the 
   (`--where b.category=grocery`).
 - Values from every source are printed literally, and only the command line chooses the files.
 
+## 6. Two designs per row (`--per-row`)
+
+A jar label and its lid, one pair per row:
+
+```sh
+bobina print jar-label.bob.md lid.bob.md --data pantry.csv --per-row --compact
+```
+
+Jar 1 ✂ lid 1 ✂ jar 2 ✂ lid 2 … (without `--per-row`: every jar, then every lid). The files of a row share its
+`{{ seq.x }}` number. `--copies-from` repeats a row's pair in place; `--copies N` repeats the whole run.
+
 ## Column names
 
 A blank in the design is written like a variable: letters, digits and `_`. Headers that are not written that way

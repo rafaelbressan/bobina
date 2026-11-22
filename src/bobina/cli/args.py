@@ -118,6 +118,7 @@ bobina help data — one label per row (guide: docs/guides/batch-printing.md)
   … --rows 2-5                                           data rows 2 to 5 (1 = first after the header)
   … --data a=prices.xlsx --join b=catalog.json --on name   two sources: {{ a.price }} {{ b.id }}
   … --set unit=kg                                        one value for every label
+  bobina print jar.bob.md lid.bob.md --data rows.csv --per-row   jar 1, lid 1, jar 2, lid 2 … (a row: one seq)
   bobina check label.bob.md --data rows.csv              paper length, problems and the data columns
   bobina preview label.bob.md --data rows.csv -o 'labels/{column}.png'   one PNG per label ({n} {i} too)
 
@@ -490,6 +491,16 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--allow-net": ["--internet", "--net", "--network", "--online", "--web"],
     "--sandbox": ["--untrusted", "--safe-mode", "--seguro", "--isolado", "--confined"],
     "--copies-from": ["--qty-column", "--quantidade", "--qtd", "--copies-column"],
+    "--per-row": [
+        "--interleave",
+        "--intercalar",
+        "--alternate",
+        "--alternar",
+        "--by-row",
+        "--row-by-row",
+        "--por-linha",
+        "--collate",
+    ],
     "--set-all": ["--set-every", "--global-set"],
     "--json": ["--machine"],
     "--last": ["--ultimo", "--reprint", "--repeat-last"],
@@ -696,6 +707,11 @@ def make_parser():
             "--where", action="append", metavar="COL=VAL", help="--data: keep rows where COL=VAL, COL!=VAL or COL~=TEXT"
         )
         p.add_argument("--copies-from", metavar="COL", help="--data: copies of each row from this column (0 skips)")
+        p.add_argument(
+            "--per-row",
+            action="store_true",
+            help="--data with several files: each row's documents in turn (a 1, b 1, a 2, b 2), sharing its seq",
+        )
         p.add_argument("--repeat", type=int, default=1, metavar="N", help="N renders, each with new counter values")
         p.add_argument("--copies", type=int, default=1, metavar="N", help="N identical copies")
         p.add_argument("--ask", action="store_true", help="ask the missing template fields on the terminal")
