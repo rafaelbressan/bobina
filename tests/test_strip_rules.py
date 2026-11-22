@@ -322,3 +322,39 @@ def test_per_row_problems_name_the_file(kit, capsys):
 
     code = cli.main(["check", "pote.bob.md", "nope.bob.md", "--data", "cozinha.csv", "--per-row"])
     assert code != cli.OK and "part 1 (nope.bob.md): file not found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("per_row", [[], ["--per-row"]])
+def test_per_row_reports_every_broken_document(kit, capsys, per_row):
+    from bobina import cli
+
+    (kit / "mau.bob.md").write_text("{% include 'x' %}\n")
+    (kit / "mau2.bob.md").write_text("{{ x.y( }}\n")
+    (kit / "div.bob.md").write_text("Div {{ 10 // (n|int) }}\n")  # fails only on cafe's row (n=0), the third
+    cli.main(["check", "pote.bob.md", "mau.bob.md", "mau2.bob.md", "--data", "cozinha.csv", *per_row])
+    e = capsys.readouterr().err
+    assert e.startswith("2 errors") and "(mau.bob.md)" in e and "(mau2.bob.md)" in e
+    cli.main(["check", "div.bob.md", "mau.bob.md", "pote.bob.md", "--data", "cozinha.csv", *per_row])
+    e = capsys.readouterr().err
+    assert e.startswith("2 errors") and "(div.bob.md): template error" in e and "(mau.bob.md)" in e
+
+
+def test_check_names_the_document_of_each_data_columns_line(kit, capsys):
+    from bobina import cli
+
+    cli.main(["check", "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row"])
+    out = capsys.readouterr().out
+    assert "data columns, part 1 (pote.bob.md: cozinha.csv): item, n" in out
+    assert "data columns, part 1 (tampa.bob.md: cozinha.csv): item, n" in out
+
+
+def test_again_after_several_documents_points_to_last(kit, capsys):
+    from bobina import cli
+
+    assert cli.main(["printer", "add", "loja", "--path", str(kit / "printer.bin")]) == cli.OK
+    argv = ["print", "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row", "--yes", "--quiet"]
+    assert cli.main(argv) == cli.OK
+    capsys.readouterr()
+    assert cli.main(["print", "--again", "--yes"]) == cli.USAGE
+    e = capsys.readouterr().err
+    assert "a job of several documents (--then, several files or --per-row) can be reprinted as is with --last" in e

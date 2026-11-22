@@ -342,7 +342,8 @@ def print_last(args, rec=None):
         if last.get("origin") == "(chain)":
             raise Fail(
                 USAGE,
-                "--again re-renders one document; a --then job can be reprinted as is with --last",
+                "--again re-renders one document; a job of several documents (--then, several files or --per-row) "
+                "can be reprinted as is with --last",
                 problem="E105",
             )
         args.target = None
@@ -519,7 +520,7 @@ def cmd_check(args):
     else:
         for line in summary(res):
             print(line.strip())
-        many = len({d["part"] for d in sources}) > 1 or any(d["part"] > 1 for d in sources)
+        many = len(sources) > 1 or any(d["part"] > 1 for d in sources)  # several documents: each line names its
         for d in sources:
             files = ", ".join(_file_name(s) for s in d["data"])
             where = f", part {d['part']} ({d['document']}: {files})" if many else f" ({files})"

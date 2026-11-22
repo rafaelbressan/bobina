@@ -900,14 +900,15 @@ def _load_job(args, store):
 
     def per_row(g, part):
         """--per-row: for each data row, every file of the part in turn (pote 1, tampa 1, pote 2 …); the files of
-        one row share its seq numbers. -> (one batch for the part, its first file), or None when it failed."""
+        one row share its seq numbers. -> (one batch for the part, its first file), or None when it failed. Every
+        file's problem is reported: a file that fails leaves the turns and the others are still built."""
         docs = []
         for a in part:
             try:
                 docs.append((a, *read(g, a)))
             except (Fail, SecurityError) as e:
                 record(e, g, a)
-        if len(docs) < len(part):
+        if not docs:
             return None
         a0 = docs[0][0]
         try:
@@ -921,32 +922,37 @@ def _load_job(args, store):
         except (Fail, SecurityError) as e:
             record(e, g, a0)
             return None
-        results, which, firsts = [], [], {}
-        a = a0
+        results, which, firsts, broken = [], [], {}, set()
         try:
             for k, (row, c) in enumerate(keep):
                 group = []
                 for j, (a, s, b, _origin) in enumerate(docs):
+                    if j in broken:
+                        continue
                     store.share_row(k)
                     one = ([row], None, list(notes) if k == 0 else [])  # the data notes once per file
-                    res = build(a, s, b, counters=store, machine=machine, data=one)
+                    try:
+                        res = build(a, s, b, counters=store, machine=machine, data=one)
+                    except (Fail, SecurityError) as e:
+                        record(e, g, a)
+                        broken.add(j)
+                        continue
                     label_nudges(res, g, a)
                     firsts.setdefault(j, res)
                     group.append((j, res.first))
                 results += [r for _, r in group] * c  # --copies-from: the row's documents again, together
                 which += [j for j, _ in group] * c
-        except (Fail, SecurityError) as e:
-            record(e, g, a)
-            return None
         finally:
             store.share_row(None)
+        if not results:
+            return None  # (a file that failed leaves the job failed; the others' warnings are still shown)
         joined = engine.Batch(results, getattr(a0, "copies", 1) or 1)  # --copies: the whole part again
         joined.source_text = docs[0][1]
         joined.label_docs, joined.doc_stems = which, [file_stem(d[3]) for d in docs]
         cols = data_columns(rows)
         for res in firsts.values():
             res.data_columns = cols
-        joined.data_sources = [d for j, (a, *_) in enumerate(docs) for d in data_source(firsts[j], g, a)]
+        joined.data_sources = [d for j, res in sorted(firsts.items()) for d in data_source(res, g, docs[j][0])]
         return joined, docs[0]
 
     useless = {
