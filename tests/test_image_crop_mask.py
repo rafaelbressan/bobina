@@ -458,3 +458,104 @@ def test_a_turned_tables_colour_view_is_cut_by_what_shows_never_inside_an_escape
     coloured = view.lines(res.rows, res.profile, color=True)
     assert [re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in coloured] == plain
     assert not any(re.search(r"\x1b(?!\[[0-9;]*m)", ln) for ln in coloured)
+
+
+# --- codes in inverted boxes: the second review ----------------------------------------------------------------
+
+
+def in_turned_label(body: str) -> str:
+    """`body` in an inverted box in the first of two turned columns."""
+    return (f":::: {{.columns orientation=vertical}}\n::: {{.column}}\n::: {{.box .invert}}\n{body}\n:::\n:::\n"
+            "::: {.column}\nx\n:::\n::::\n")  # fmt: skip
+
+
+def code_rows(rows) -> list[BitmapRow]:
+    """The code rows anywhere in these rows (in boxes and columns), as laid out before they were drawn in."""
+    out = []
+    for r in rows:
+        if isinstance(r, BitmapRow) and r.box is not None:
+            out += code_rows(r.box.rows)
+        elif isinstance(r, BitmapRow) and r.columns is not None:
+            out += [x for c in r.columns.columns for x in code_rows(c.rows)]
+        elif isinstance(r, BitmapRow) and r.kind in ("qr", "barcode", "datamatrix", "pdf417"):
+            out.append(r)
+    return out
+
+
+@pytest.mark.parametrize(
+    "code", ["```datamatrix {module=40}\nhello world 1234\n```", "```pdf417 {module=6}\nhello\n```"]
+)
+def test_a_code_in_an_inverted_box_in_a_turned_label_fits_the_label_with_its_tile(code):
+    res = build(in_turned_label(code))
+    assert not [n for n in res.nudges if "cut across" in n.message], [n.message for n in res.nudges]
+    assert len([r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "columns"]) == 1  # one label
+
+
+@pytest.mark.parametrize("kind,body,kv", [("barcode", "AB12", {"height": "380"}),
+                                         ("datamatrix", "hello world 1234", {"module": "40"}),
+                                         ("pdf417", "hello", {"module": "6", "ratio": "20"})])  # fmt: skip
+def test_a_code_in_an_inverted_box_fits_a_turned_labels_height_with_its_tile(kind, body, kv):
+    from bobina.layout import Layout
+    from bobina.model import Attrs, Fence
+    from bobina.nudges import Nudges
+
+    res = build("x\n")
+    lay = Layout(res.profile, res.doc, None, Nudges())
+    lay.dark, lay.tall_max = True, 200  # in an inverted box, in a turned label 200 dots tall
+    (row,) = lay.fence(Fence(line=1, attrs=Attrs(set(), dict(kv)), kind=kind, content=body), 0)
+    assert row.keep and row.image.height <= 200
+
+
+def test_a_code39_in_an_inverted_box_in_a_turned_label_keeps_10_modules_beside_its_drawn_bars():
+    from bobina import codes as barcodes
+
+    res = build(in_turned_label("```barcode {type=code39 text=none}\nABC\n```"))  # mtp-ii-58: Code39 2:1 natively
+    (r,) = code_rows(res.rows)
+    x0, _, x1, _ = r.keep[0]
+    tile = r.image.convert("L").crop(r.keep[0])
+    inked = tile.point(lambda v: 255 - v).getbbox()
+    module = (inked[2] - inked[0]) / len(barcodes.bars("code39", "ABC", 3)[0])  # drawn 3:1 by bobina
+    assert module >= 1 and "Q115" not in codes(res)
+    assert inked[0] >= 10 * module and (x1 - x0) - inked[2] >= 10 * module
+
+
+def test_a_pdf417_in_an_inverted_box_in_a_turned_label_gets_its_margin_once():
+    res = build(in_turned_label("```pdf417\nhello\n```"))
+    (r,) = code_rows(res.rows)
+    x0, _, x1, _ = r.keep[0]
+    inked = r.image.convert("L").crop(r.keep[0]).point(lambda v: 255 - v).getbbox()
+    module = inked[1] / 4  # 4 modules above it
+    assert inked[0] == 10 * module == (x1 - x0) - inked[2]  # 10 modules beside its bars, not 10 and 4 more
+    assert "Q115" not in codes(res)
+
+
+def test_a_barcode_without_a_preview_encoder_gets_its_tile_too():
+    res = build("::: {.box .invert}\n```barcode {type=code93}\nABC\n```\n:::\n")
+    assert "Q105" in codes(res) and said(res, "Q114")
+    (r,) = code_rows([r for r in res.rows])
+    assert r.keep and r.image.convert("L").crop(r.keep[0]).getextrema() == (0, 255)
+
+
+def test_a_vertical_barcode_in_an_inverted_box_wants_no_white_beside_it():
+    res = build("::: {.box .invert}\n```barcode {orientation=vertical width=full}\nABCDEFGH\n```\n:::\n")
+    assert "Q115" not in codes(res) and said(res, "Q114")
+
+
+@pytest.mark.parametrize(
+    "code,start,end",
+    [("```barcode {module=3}\nABC-1234\n```", 3, 2), ("```datamatrix {module=20}\nhello\n```", 20, 18)],
+)
+def test_a_module_made_smaller_for_the_tile_is_said(code, start, end):
+    res = build(f"::: {{.box .invert}}\n{code}\n:::\n")
+    (msg,) = said(res, "Q104")
+    assert f"module {start} made {end} so that its white margin fits the inverted box" in msg
+
+
+@pytest.mark.parametrize("nest", ["box", "columns"])
+def test_the_colour_view_shows_a_code_plain_in_a_box_or_columns_inside_an_inverted_box(nest):
+    inner = (f"::: {{.box}}\n{QR}\n:::" if nest == "box" else
+             f":::: {{.columns}}\n::: {{.column}}\n{QR}\n:::\n::: {{.column}}\nx\n:::\n::::")  # fmt: skip
+    res = build(f"::::: {{.box .invert}}\n{inner}\n:::::\n")
+    out = view.lines(res.rows, res.profile, color=True)
+    plain = [ln.split("\x1b[27m")[1].split("\x1b[0;7m")[0] for ln in out if "\x1b[27m" in ln]
+    assert sum("⣿" in p for p in plain) >= 3  # the code's lines: plain over its tile, inside the reversed box

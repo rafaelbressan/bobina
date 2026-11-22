@@ -2231,7 +2231,7 @@ class Layout:
         if self.dark_lost:  # turned with its label: the margin stays, but the box turns it white on black
             self.n.add("Q115", f"a {name} in turned columns inside an inverted box prints white on black: it may not "
                        "scan", line, "put the code outside the inverted box")  # fmt: skip
-        elif w < want:
+        elif w < want and side:
             self.n.add("Q115", f"a {name} in an inverted box: {max(0, (w - core) // 2) // mod} modules of white beside "
                        f"it, {side} wanted ({want} dots, the room has {self.W})", line,
                        "a smaller module= or width=, or the code outside the box")  # fmt: skip
@@ -2349,7 +2349,7 @@ class Layout:
             mod = self.feed_module(kind, units, mod, f.line)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
             im = codes.image(kind, data, mod, height, text, self.em, wide=3)  # drawn by bobina, as a vertical one
-            over = im.height - self.tall_max
+            over = im.height + (2 * 2 * mod if self.dark else 0) - self.tall_max  # an inverted box's tile: 2 modules
             if over > 0:  # shorter bars to fit the label's height, their widths untouched
                 im = codes.image(kind, data, mod, max(1, height - over), text, self.em, wide=3)
                 if height - over < BAR_MIN_DOTS:
@@ -2357,7 +2357,8 @@ class Layout:
                                "too short to scan reliably", f.line, "text=none, or take the barcode out of the turned "
                                "columns")  # fmt: skip
             if self.dark:
-                return [self.code_tile(im, "barcode", align, f.line, mod, quiet // mod, 2, units * mod)]
+                drawn = len(codes.bars(kind, data, 3)[0]) * mod  # the bars as drawn here, 3:1 (units: the firmware's)
+                return [self.code_tile(im, "barcode", align, f.line, mod, quiet // mod, 2, drawn)]
             padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
             padded.paste(im, (quiet, 0))
             return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
@@ -2384,7 +2385,7 @@ class Layout:
             im = codes.image(kind, data, mod, bar_len, text, self.em, wide=3).rotate(-90, expand=True)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
             if self.dark:  # its quiet zones at its ends, above and below
-                out = self.code_tile(im, "barcode", align, f.line, mod, 4, quiet // mod)
+                out = self.code_tile(im, "barcode", align, f.line, mod, 0, quiet // mod)
             else:
                 padded = Image.new("1", (im.width, im.height + 2 * quiet), 1)
                 padded.paste(im, (0, quiet))
@@ -2399,11 +2400,15 @@ class Layout:
                     "or orientation=horizontal (it would be cut) — or use a QR code",
                 )
             return [out]
+        quiet = int(self.p.get("barcode.quiet_modules", 10))
         if self.dark and pattern:  # bars as the preview draws them, the thinnest that scan if the tile needs it
-            lo, quiet = int(self.p.get("barcode.min_module", 2)), int(self.p.get("barcode.quiet_modules", 10))
+            asked, lo = mod, int(self.p.get("barcode.min_module", 2))
             while mod > lo and (units + 2 * quiet) * mod > self.W:
                 mod -= 1
             too_wide = units * mod > self.W
+            if mod < asked:
+                self.n.add("Q104", f"{kind}: module {asked} made {mod} so that its white margin fits the inverted box",
+                           f.line, "a wider box, or less data")  # fmt: skip
         if too_wide:
             self.n.add(
                 "Q104",
@@ -2411,9 +2416,10 @@ class Layout:
                 f.line,
                 "orientation=auto prints it vertically",
             )
-        if self.dark and pattern:
-            im = codes.image(kind, data, mod, height, text, self.em)
-            return [self.code_tile(im, "barcode", align, f.line, mod, quiet, 2, units * mod)]
+        if self.dark:  # the bars (or the preview's placeholder) on their tile
+            row = BarcodeRow(kind, data, mod, height, text, align, f.line)
+            im = preview.barcode_image(row, self.em)
+            return [self.code_tile(im, "barcode", align, f.line, mod, quiet, 2, units * mod if pattern else 0)]
         return [BarcodeRow(kind, data, mod, height, text, align, f.line)]
 
     def feed_module(self, kind: str, units: int, mod: int, line: int) -> int:
@@ -2451,6 +2457,7 @@ class Layout:
             return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)),
                                         0 if self.dark else 4)  # fmt: skip
 
+        side = 4  # modules of white beside it in an inverted box (code_tile)
         try:
             im = draw(mod)
             if target:  # the largest integer module whose code fits the asked width
@@ -2461,9 +2468,9 @@ class Layout:
                 if kind == "datamatrix" and mod < lo:
                     self.n.add("Q101", f"width={f.attrs.kv['width']} gives datamatrix module {mod}", f.line,
                                f"a larger width or less data (module ≥ {lo})")  # fmt: skip
-            stepped = False
-            while self.tall_max and im.height > self.tall_max and mod > 1:  # a turned label: whole modules
-                mod, stepped = mod - 1, True
+            stepped, ends = False, 4 if self.dark else 0  # an inverted box's tile: 4 modules above and below
+            while self.tall_max and im.height + 2 * ends * mod > self.tall_max and mod > 1:  # a turned label: whole
+                mod, stepped = mod - 1, True  # modules
                 im = draw(mod)
             if stepped and kind == "datamatrix" and mod < int(self.p.get("qr.min_module_raster", 4)):
                 self.n.add("Q101", f"datamatrix module {mod}, to fit the turned label's height", f.line,
@@ -2473,14 +2480,18 @@ class Layout:
                 turned = self.feed_module(kind, units, mod, f.line)
                 if turned != mod:
                     mod, im = turned, draw(turned)
-                quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
-                padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
-                padded.paste(im, (quiet, 0))
-                im = padded
-            lo = min(mod, 4 if kind == "datamatrix" else 2)
-            while self.dark and self.tall_max is None and mod > lo and im.width + 8 * mod > self.W:  # its tile:
-                mod -= 1  # 4 modules each side
+                side = int(self.p.get("barcode.quiet_modules", 10))  # beside its bars (the tile's, in an inverted box)
+                if not self.dark:
+                    padded = Image.new("1", (im.width + 2 * side * mod, im.height), 1)
+                    padded.paste(im, (side * mod, 0))
+                    im = padded
+            asked, lo = mod, min(mod, 4 if kind == "datamatrix" else 2)
+            while self.dark and mod > lo and im.width + 2 * side * mod > self.W:  # its tile beside it
+                mod -= 1
                 im = draw(mod)
+            if mod < asked:
+                self.n.add("Q104", f"{kind}: module {asked} made {mod} so that its white margin fits the inverted box",
+                           f.line, "a wider box, a smaller width= or less data")  # fmt: skip
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -2493,7 +2504,7 @@ class Layout:
             )
             im = im.crop((0, 0, self.W, im.height))
         if self.dark:
-            return [self.code_tile(im, kind, align, f.line, mod, 4)]
+            return [self.code_tile(im, kind, align, f.line, mod, side)]
         return [BitmapRow(imaging.place(im, self.W, align), f.line, kind)]
 
     def pay(self, f: Fence) -> list:
