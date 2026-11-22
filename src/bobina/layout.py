@@ -145,7 +145,9 @@ def word_tokens(cells: list[Cell], pieces: bool = False) -> list[tuple[list[Cell
 def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list[Cell]]:
     """Greedy word wrap of word_tokens into lines of at most cap columns (cap - hang after the first): the spaces
     before a word that starts a line are dropped. A word longer than a line is cut, never between the two columns
-    of a wide character; split(word, room) is called once for each word that was cut (to say it: L101). A wide
+    of a wide character: right after the last / ? & = - _ . # that leaves the line at least half full
+    (rasterfont.soft_break: an address reads gov.|br/consulta?|chave=…), else at the last letter that fits;
+    split(word, room) is called once for each word that was cut (to say it: L101). A wide
     character on a line narrower than itself is put there whole (it sticks out: nothing to cut). measure: how wide
     cells are, in the unit of cap (columns; a table in a raster font measures in its own unit)."""
     lines: list[list[Cell]] = []
@@ -166,6 +168,13 @@ def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list
                 take += measure(word[k : k + 1])
                 k += 1
             k = max(k, 1)  # a wide character on a line of one column: on a line of its own, never lost
+            text = "".join(c.ch for c in word)
+            for j in range(k, 0, -1):  # the last soft place that leaves the line at least half full
+                if 2 * measure(word[:j]) < avail:
+                    break
+                if rasterfont.soft_break(text, j):
+                    k = j
+                    break
             lines.append(word[:k])
             word, avail = word[k:], cap - hang
             ww = measure(word)
@@ -373,8 +382,7 @@ class Layout:
         """Greedy word wrap on columns; `hang` columns already used on continuation lines."""
 
         def split(word, at):
-            self.n.add("L101", f"word '{''.join(icons.shown(c.ch) for c in word)[:20]}…' split at {at} columns", line,
-                       "shorten it or use a smaller size")  # fmt: skip
+            self.said_cut("".join(c.ch for c in word), f"{at} columns", line, "shorten it or use a smaller size")
 
         lines: list[list[Cell]] = []
         para: list[Cell] = []
@@ -385,6 +393,13 @@ class Layout:
             else:
                 para.append(c)
         return lines + wrap_words(word_tokens(para), cap, hang, split)
+
+    def said_cut(self, word: str, at: str, line: int, hint: str) -> None:
+        """L101 for a word longer than the line, cut to fill lines (`at`: the line's width, as it is counted); an
+        address is better carried by a QR code."""
+        if "://" in word or "www." in word:
+            hint += "; a ```qr block carries the address whole"
+        self.n.add("L101", f"word '{''.join(icons.shown(ch) for ch in word)[:20]}…' split at {at}", line, hint)
 
     def native_ok(self, cells: list[Cell]) -> str:
         """'' if the line can be printed natively, else the reason."""
@@ -604,8 +619,17 @@ class Layout:
             )
         if not toks:
             return []
+
+        def split(word, room):  # a word wider than the line, cut: its width in columns of its font (its digit)
+            t = next((t for t in word if not t.icon), word[0])
+            cols = room // max(1, replace(t, text="0", icon="").width())
+            name = f"{fam} {t.px}px"  # the block's font: a word in a run of another font= is rare
+            smaller = "use a smaller size (size=12px) or " if t.px > 12 else ""
+            self.said_cut("".join(x.text for x in word), f"{cols} columns in {name}", line,
+                          f"{smaller}add a space or a hyphen to the word")  # fmt: skip
+
         im, texts = rasterfont.render_block(
-            toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl
+            toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl, split=split
         )
         room = self.W - indent * self.p.cell[0] - indent_dots - (pimg.width if pimg else 0)  # render_block's
         view_rows = [
@@ -652,9 +676,12 @@ class Layout:
     def smaller_font(self, toks) -> bool:
         """Text drawn in a smaller font than the printer's: a digit narrower than a printer column (Terminus 16px: 8
         dots of 12), so its lines can hold more letters than the paper's columns and the views widen for them. A
-        proportional font at the same size or larger keeps the paper's columns (a long line cut with …)."""
-        drawn = [t for t in toks if t.text.strip() and not t.icon]
-        return bool(drawn) and all(replace(t, text="0").width() < self.p.cell[0] for t in drawn)
+        proportional font at the same size or larger keeps the paper's columns (a long line cut with …). An icon
+        (two columns in the views) counts when it is drawn narrower than two printer columns."""
+        drawn = [t for t in toks if t.text.strip()]
+        cell = self.p.cell[0]
+        return bool(drawn) and all(t.width() < 2 * cell if t.icon else replace(t, text="0").width() < cell
+                                   for t in drawn)  # fmt: skip
 
     def text_block(
         self,

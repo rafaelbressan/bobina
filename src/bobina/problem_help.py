@@ -54,7 +54,10 @@ FIX = {
         "have no effect."
     ),
     # L layout
-    "L101": "Add a space or a hyphen to the long word, or use a smaller size.",
+    "L101": (
+        "Add a space or a hyphen to the long word, or use a smaller size; an address prints whole as a QR code "
+        "(```qr```)."
+    ),
     "L102": "Nothing to fix: check the length on the confirmation screen before printing.",
     "L103": "Shorten the line or use a smaller size for the preformatted block.",
     "L104": "Use shorter lines or a smaller size in the rotated block.",

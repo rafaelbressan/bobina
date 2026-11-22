@@ -309,8 +309,8 @@ def _unspaced(text: str) -> bool:
 
 
 def _breaks(text: str) -> list[int]:
-    """Offsets where a line may break inside `text`: before a letter, never before a combining mark, after a
-    virama (conjunct) or after a vowel written before its consonant."""
+    """Offsets where a line may break inside `text`: before a letter, never before a combining mark or a skin
+    tone, after a virama (conjunct) or after a vowel written before its consonant."""
     import unicodedata
 
     out = []
@@ -318,10 +318,67 @@ def _breaks(text: str) -> list[int]:
         a, b = text[i - 1], text[i]
         if unicodedata.category(b).startswith("M") or b in "\u200c\u200d" or a in "\u200c\u200d":
             continue
-        if unicodedata.combining(a) == 9 or a in PREPOSED:
+        if unicodedata.combining(a) == 9 or a in PREPOSED or "\U0001f3fb" <= b <= "\U0001f3ff":
             continue
         out.append(i)
     return out
+
+
+SOFT_AFTER = frozenset("/?&=-_.#")  # a word longer than the line is cut right after one of these when it can
+
+
+def soft_break(text: str, at: int) -> bool:
+    """Whether a word cut at offset `at` of its `text` is cut where an address reads well: right after / ? & = - _
+    . or # (consulta?|chave=\u2026, gov.|br/\u2026), never between two of them (https:/|/), nor after a . between digits
+    (19.|90 is a decimal; a - between digits, a date or a range, is a fine place). The cut itself is wrap_words'
+    and layout_lines': they prefer the last such place that leaves the line at least half full."""
+    if not 0 < at < len(text) or text[at - 1] not in SOFT_AFTER or text[at] in SOFT_AFTER:
+        return False
+    return not (text[at - 1] == "." and at > 1 and text[at - 2].isdigit() and text[at].isdigit())
+
+
+def _cut(u: list[Tok], room: int) -> tuple[list[Tok], list[Tok]]:
+    """A word (a token and the parts glued to it) wider than a line, cut in two: the head that fills `room` dots,
+    cut at the last soft_break that leaves the line at least half full, else at the last letter that fits (never
+    inside a cluster, an icon or a wide character: _breaks). Nothing fits (one letter or icon wider than the line):
+    that one alone, so nothing is lost; nothing left to cut (one letter or icon): the word whole and no rest."""
+    text = "".join(t.text for t in u)
+    places: list[tuple[int, int, int]] = []  # (token, offset in it, offset in text) of each place that fits
+    x = g = 0
+    for i, t in enumerate(u):
+        if i:
+            places.append((i, 0, g))
+        tw = t.width()
+        if x + tw > room:
+            for o in _breaks(t.text):
+                if x + dataclasses.replace(t, text=t.text[:o]).width() > room:
+                    break
+                places.append((i, o, g + o))
+            break
+        x, g = x + tw, g + len(t.text)
+    if not places:  # the first letter (or icon) alone
+        o = next(iter(_breaks(u[0].text)), 0)
+        if o:
+            places.append((0, o, o))
+        elif len(u) > 1:
+            places.append((1, 0, len(u[0].text)))
+        else:
+            return u, []
+    i, o, _ = places[-1]
+    for p in reversed(places):
+        head = u[: p[0]] + ([dataclasses.replace(u[p[0]], text=u[p[0]].text[: p[1]])] if p[1] else [])
+        if 2 * sum(t.width() for t in head) < room:
+            break
+        if soft_break(text, p[2]):
+            i, o = p[0], p[1]
+            break
+    if not o:
+        return u[:i], [dataclasses.replace(u[i], glue=False), *u[i + 1 :]]
+    t = u[i]
+    return [*u[:i], dataclasses.replace(t, text=t.text[:o])], [
+        dataclasses.replace(t, text=t.text[o:], glue=False),
+        *u[i + 1 :],
+    ]
 
 
 def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
@@ -337,7 +394,10 @@ def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
 
 
-def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
+def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[list[Tok]]:
+    """Tokens wrapped at their spaces into lines `width` dots wide (`width - hang` after the first). A word wider
+    than a whole line is cut to fill lines (_cut), never drawn past the paper; split(word, room) is called once for
+    each word that was cut (to say it: L101)."""
     units: list[list[Tok]] = []  # words: a token and the glued parts after it
     for t in toks:
         if t.glue and units and not units[-1][0].brk and not units[-1][-1].space:
@@ -381,6 +441,16 @@ def layout_lines(toks: list[Tok], width: int, hang: int) -> list[list[Tok]]:
                 cw -= cur.pop().width()
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
+        whole, room = u, avail
+        while tw > avail:  # a word wider than a whole line: cut to fill lines
+            head, rest = _cut(u, avail)
+            if not rest:  # one letter or icon wider than the line: whole, it sticks out
+                break
+            lines.append(head)
+            u, avail = rest, width - hang
+            tw = sum(x.width() for x in u)
+        if u is not whole and split is not None:
+            split(whole, room)
         cur.extend(u)
         cw += tw
     while cur and cur[-1].space:
@@ -428,10 +498,12 @@ def render_block(
     prefix: Image.Image | None,
     indent: int = 0,
     rtl: bool = False,
+    split=None,
 ) -> tuple[Image.Image, list[list[Tok]]]:
-    """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views)."""
+    """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views);
+    split: layout_lines' (a word cut to fit the line)."""
     pw = prefix.width if prefix else 0
-    lines = layout_lines(toks, width - indent - pw, 0)
+    lines = layout_lines(toks, width - indent - pw, 0, split)
     imgs, texts = [], []
     for i, logical in enumerate(lines):
         ln = visual_order(logical, rtl)
