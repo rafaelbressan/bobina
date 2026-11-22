@@ -82,7 +82,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 |---|---|
 | `.left` `.center` `.right` `.justify` | alignment (justify spreads spaces on the character grid, or pixels in raster) |
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
-| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native) |
+| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black **⚠ not tested on paper.** |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
 | `.mono` | monospace (the printer font already is) |
 | `.compact` | tables: do not stretch |
@@ -185,8 +185,7 @@ ABC-123
 
 `type=code128` (default) `ean13 ean8 upca code39 code93 codabar itf` — native on the printer, with an exact
 preview. `module=` (minimum 2), `height=` dots (default 80), `text=below|above|both|none`, `width=` (module ≤ 6). `orientation=auto|horizontal|vertical`:
-`auto` turns a barcode wider than the paper into a **vertical** one along the paper, so it is never cut (`Q110`,
-a warning, since you may not want it); vertical barcodes are raster with module ≥ 4 along the paper and a
+`auto` turns a barcode wider than the paper into a **vertical** one along the paper, so it is never cut (`Q110`); vertical barcodes are raster with module ≥ 4 along the paper and a
 10-module white margin (measured: 2 and 3 did not scan). CODE39 gets the firmware's mod-43 check character in the
 bars (not in the text). 1–250 printable ASCII characters; types the profile does not support → `Q106`; weak types
 (ITF) → `Q107`.
@@ -202,7 +201,7 @@ One block for every payment scheme, with the same attributes: `to=` who receives
 `24,90`, in the scheme's currency), `ref=` your reference, `note=` text for the payer; a few schemes take an extra
 (`city=` Pix, `bic=` SEPA, `currency=` PayPal, `label=` other). `caption=auto|none|"text"`: `auto` prints a line
 under the code with the scheme and the amount (`Pix · R$ 10,00`), or the name. The QR attributes (`width=`,
-`module=`, `ecc=`) work too. Pix is one scheme like the others: `pay {scheme=pix to=… name=… city=…}`. Attributes
+`module=`, `ecc=`) work too. Attributes
 take `{{ }}`, so a receipt per row carries its own amount. Without `amount=` (or with 0) the code is open: the payer
 types it.
 
@@ -249,16 +248,18 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
 
 - Path relative to the document; `data:image/…;base64,…` embeds the image (≤ 10 MB).
 - Formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF; **SVG** and **PDF pages** (`page=N`, default 1) are
-  rendered straight at the target width (extras `bobina[svg]`, `bobina[pdf]`; missing → `I105`); they print as
+  rendered at the target width (extras `bobina[svg]`, `bobina[pdf]`; missing → `I105`); they print as
   line art unless `.dither` or `dither=`.
 - `https://` URLs only when the command line has `--allow-net` (`I103` otherwise); public hosts only,
-  no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
-- `width=` as on every object (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
-  `gamma=` (defaults from front matter `image:`, then the profile — tuned on printed ramps).
+  no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`).
+- `width=` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
+  `gamma=` (defaults: front matter `image:`, then the profile).
 - A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
   `.dither`, `.threshold` or `threshold=60%` choose.
-- `rotate=` any angle, then `mirror=x|y|xy` (`.mirror`: x): fitted whole (`I110`). `caption="…"`/`caption=alt`: a line under.
-- Images above 40 megapixels or unreadable: `I101`, the rest prints.
+- First `crop=x,y,w,h` (pixels as a viewer shows them, or `%`: `crop=0,0,25%,15%`; SVG/PDF: `%`; outside: `I111`),
+  `.invert` (black ↔ white), `rotate=` any angle, `mirror=x|y|xy` (`.mirror`: x), fitted whole (`I110`); last
+  `mask=circle|ellipse|rounded` (`radius=3mm`, `12`, `10%`): paper outside it, even with `.invert`.
+- `caption="…"`/`caption=alt`: a line under. Above 40 megapixels or unreadable: `I101`, the rest prints.
 
 ### 6.6 Text ✓
 
@@ -362,7 +363,7 @@ Previews, `check` and `--dry-run` only show the next values. A print reserves it
 prints never share one; a job not printed gives them back unless a later print took some after them, and a number
 is never printed twice ([guides/counters.md](guides/counters.md)). The CLI adds `--repeat N` (N
 renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them, and
-`bobina seq set NAME N` starts one at N, even before its first print.
+`bobina seq set NAME N` starts one at N.
 
 ### 7.4 Data is literal
 
@@ -401,7 +402,7 @@ labels:
 - Using one (`template: NAME`), its lookup, the built-ins, `template show`/`new`:
   [guides/templates.md](guides/templates.md).
 - `--ask` (on `print`, `check`, `preview`) asks the fields still missing on the terminal, in the order the
-  template declares them, showing `help`, `example` and the default (`[automatic]` for expressions);
+  template declares them, showing `help`, `example` and the default;
   `type: table` fields take one row per line (`item; qty; price`, empty line to finish). A document without
   `fields:` gets its undeclared `{{ variables }}` asked. Answers are data, exactly like `--set` (literal,
   never Markdown or template code); fields already set by the front matter, `--set` or `--data` columns are
@@ -491,14 +492,15 @@ Nudges:
 | `L114` | warning | turned label: a block cut across its lines |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
-| `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
-| `I104` | note | image fetched from the network (the server sees the print) |
+| `I103` | warning | network image skipped (`--allow-net` if trusted) |
+| `I104` | note | image fetched from the network |
 | `I105` | warning | PDF/SVG support not installed |
 | `I106` | warning | network source refused (private address, redirect, type, size) |
-| `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
+| `I107` | warning | a path with a space: write `![](<a b.png>)` |
 | `I108` | warning | image outside its folder and `image_dirs` (`--sandbox`, MCP) |
 | `I109` | note | an image read as a drawing (black and white) or a photo (dithered) |
 | `I110` | note | a slanted image prints smaller, to fit its corners |
+| `I111` | warning | `crop=` past the image's edges |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
 | `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |

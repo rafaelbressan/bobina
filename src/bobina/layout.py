@@ -51,12 +51,12 @@ TABLE_HINT = (
 OBJECT_WIDTH_HINT = "full, half, third, 50%, 30mm or dots (200)"
 BOX_LINES = ("solid", "dashed", "dotted", "double")  # a box's frame: the divider's lines
 TITLE_STYLES = ("border", "inside", "band")  # title-style=: on the top line (the default), first line, black band
-BOX_TAKES = (frozenset({"box", *BOX_LINES, "left", "center", "right", "shade", "flip"}),
+BOX_TAKES = (frozenset({"box", *BOX_LINES, "left", "center", "right", "shade", "flip", "invert"}),
              frozenset({"title", "title-style", "thickness", "width", "align", "rotate", "id"}))  # fmt: skip
 BLOCK_TAKES = (frozenset({"flip"}), frozenset({"rotate", "id"}))  # a ::: block that is not a box
 BOX_HINT = (
     'a box takes title="…" title-style=border|inside|band .solid .dashed .dotted .double thickness= width= .center '
-    ".right .shade (docs/guides/layout.md)"
+    ".right .shade .invert (docs/guides/layout.md)"
 )
 BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
 COLUMNS_TAKES = (frozenset({"columns", "flip"}),
@@ -192,6 +192,8 @@ def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
 _IMAGES_MAX = 64
 IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
+CROP_HINT = "x,y,width,height: pixels of the file or percentages, crop=0,0,25%,15%"
+MASK_RADIUS = "10%"  # mask=rounded without radius=: of the shorter side
 MIRRORS = {"x": (True, False), "y": (False, True), "xy": (True, True), "yx": (True, True)}
 OBJECTS = ("qr", "barcode", "pay", "contact", "datamatrix", "pdf417")  # and images: sized by width=, placed by .left…
 FRACTIONS = {"full": 1.0, "half": 1 / 2, "third": 1 / 3}  # width=full|half|third on every object
@@ -266,6 +268,7 @@ class Layout:
         self.within = ""  # "column": laid out in a column of :::: {.columns} (narrow)
         self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
+        self.dark = False  # laid out inside a ::: {.box .invert}: printed white on black
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -668,19 +671,19 @@ class Layout:
             for t in texts
         ]
         wide = self.smaller_font(toks) and any(r.columns() > self.cols for r in view_rows)  # the views widen
+        if (attrs.has("invert") or self.dark) and (px < int(self.p.get("raster.invert_min_px", 20)) or not bold):
+            self.n.add(  # white on black, in its own band or in an inverted box
+                "F204",
+                f"inverted text at {px}px{'' if bold else ' (not bold)'} closes up",
+                line,
+                "use bold and ≥ 20px",
+                "R2-12",
+            )
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
             band.paste(im.convert("L"), (0, m))
             band = self.draw_bars(band, indent, 0, rtl)  # black here: white once the band is inverted
-            if px < int(self.p.get("raster.invert_min_px", 20)) or not bold:
-                self.n.add(
-                    "F204",
-                    f"inverted text at {px}px{'' if bold else ' (not bold)'} closes up",
-                    line,
-                    "use bold and ≥ 20px",
-                    "R2-12",
-                )
             return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows,
                               wide_view=wide)]  # fmt: skip
         return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows, wide_view=wide)]
@@ -725,6 +728,10 @@ class Layout:
         level: int = 0,
     ) -> list:
         extra = dict(extra or {})
+        if self.dark and attrs.has("invert"):  # its band would print black on white in the box's black
+            self.n.add("M101", ".invert does nothing inside an inverted box: its text is white on black already",
+                       line, "remove .invert here")  # fmt: skip
+            attrs = Attrs(attrs.classes - {"invert"}, dict(attrs.kv))
         tracking = self.attr_dots(attrs, "tracking", line, 32) or 0
         leading = self.attr_dots(attrs, "leading", line, 200)
         raw_indent = str(attrs.kv.get("indent", ""))
@@ -1184,6 +1191,15 @@ class Layout:
         if t < asked:
             self.n.add("M101", f"thickness={a.kv['thickness']}: no room for that line in a {width // cw}-letter "
                        f"box, {t} dots used", line, "a wider box, or a thinner line")  # fmt: skip
+        dark = a.has("invert")  # all black, frame and room too; what it holds white
+        if dark and self.dark:
+            self.n.add("M101", ".invert does nothing on a box inside an inverted box: it is white on black already",
+                       line, "remove .invert here")  # fmt: skip
+            dark = False
+        elif dark and (drawn or "thickness" in a.kv):
+            names = [*(f".{s}" for s in drawn), *(["thickness="] if "thickness" in a.kv else [])]
+            self.n.add("M101", f"{' '.join(names)}: an inverted box has no line to draw, it is black to its edges",
+                       line, f"remove {' '.join(names)}")  # fmt: skip
         stroke = 3 * t if style == "double" else t
         side = _box_side(t, style, cw)
         inner = width - 2 * side
@@ -1194,7 +1210,7 @@ class Layout:
         top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
         title_y = max(0, top + stroke // 2 - ch // 2)
         ang = self.angle(a, line) % 360
-        outer = self.tall_max
+        outer, was_dark = self.tall_max, self.dark
         try:
             with self.narrow(inner):
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
@@ -1205,13 +1221,14 @@ class Layout:
                     above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
                                 title_y + ch + 2 if on_border else 0)  # fmt: skip
                     self.tall_max = max(1, outer - above - BOX_ROOM - stroke)  # (turned 90: its width; the cuts)
+                self.dark = was_dark or dark
                 rows = self.blocks(kids, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
                 pics = [preview.row_image(r, self.p, self.em) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
         finally:
-            self.tall_max = outer
+            self.tall_max, self.dark = outer, was_dark
         codes = _code_spans(rows, pics)
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
@@ -1236,12 +1253,16 @@ class Layout:
         else:
             y += BOX_ROOM
         height = y + stroke
-        im = imaging.frame(width, height, style, t, top).convert("L")
+        im = Image.new("L", (width, height), 255) if dark else imaging.frame(width, height, style, t, top).convert("L")
         for part, x, py in parts:
             im.paste(part, (x, py))
         if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
         shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
+        if dark:  # one black band from edge to edge, no white between its blocks; a band title stays as it is
+            im = ImageOps.invert(im)
+            for part, x, py in parts[:1] if band_im is not None else ():
+                im.paste(part, (x, py))
         if ang:
             exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
             im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
@@ -1263,10 +1284,11 @@ class Layout:
         full.paste(im, (place(im.width), 0))
         full = self.draw_bars(full, indent, 0)  # after the turn: the bars stay upright, beside the box
         marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
+        marks |= {"inverted-box"} if dark else set()
         lead = "".join(c.ch for c in self.lead(indent))
         left = min(place(im.width), indent * cw + room - width) // cw  # where it is, as far as it fits standing
         view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang,
-                     tuple(tops) if not ang and len(tops) == len(band) + len(rows) else ())  # fmt: skip
+                     tuple(tops) if not ang and len(tops) == len(band) + len(rows) else (), invert=dark)  # fmt: skip
         return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes), *raws]
 
     def box_width(self, a: Attrs, line: int, room: int) -> int:
@@ -2542,16 +2564,26 @@ class Layout:
         mark = len(self.n)  # the notes of this image, said again when its cached dots are reused
         ang = self.angle(attrs, line, image=True) % 360
         cos, sin = _turn(ang)
+        crop = self.crop_spec(attrs, line)
+        shape = self.mask_shape(attrs, line)
+        vbox = None  # a vector's crop=, in dots of the drawing as rendered
+
+        def opened(width: int):
+            return imaging.open_image(src, self.doc.base_dir, width=width, page=page, allow_net=self.net,
+                                      confine=self.image_dirs, draft=crop is None)  # fmt: skip
+
         try:
-            im = imaging.open_image(
-                src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
-            )
-            if ang and im.info.get("bobina.kind") == "vector":  # drawn again so the turned box is w dots wide: sharp
-                wide = min(4096, max(8, round(w / (cos + sin * im.height / max(1, im.width)))))
+            im = opened(max(8, w))
+            vector = im.info.get("bobina.kind") == "vector"
+            part = self.vector_crop(crop, attrs, line) if crop and vector else None  # fractions of the drawing
+            if vector and (ang or part):  # drawn again so that what prints (the part kept, turned) is w dots wide
+                fw, fh = (part[2] - part[0], part[3] - part[1]) if part else (1.0, 1.0)
+                aspect = im.height * fh / max(1, im.width * fw)
+                wide = min(4096, max(8, round(w / (cos + sin * aspect) / fw)))
                 if wide != im.width:
-                    im = imaging.open_image(
-                        src, self.doc.base_dir, width=wide, page=page, allow_net=self.net, confine=self.image_dirs
-                    )
+                    im = opened(wide)
+            if part:
+                vbox = tuple(round(f * n) for f, n in zip(part, (*im.size, *im.size), strict=True))
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []
@@ -2561,7 +2593,14 @@ class Layout:
         if im.info.get("bobina.host"):
             self.n.add("I104", f"fetched {im.info['bobina.host']}", line, "that server can see when you print")
         vector, host = im.info.get("bobina.kind") == "vector", im.info.get("bobina.host")
-        im = imaging.flatten(im)
+        im = imaging.flatten(im)  # as an image viewer shows it (EXIF turn): the pixels crop= counts
+        if crop and vector:
+            im = im.crop(vbox) if vbox else im
+        elif crop:
+            box = self.raster_crop(crop, attrs, im.size, line)
+            im = im.crop(tuple(round(v) for v in box)) if box else im
+        if attrs.has("invert"):  # black and white swapped, before the turn (its corners stay paper) and the mask
+            im = ImageOps.invert(im)
         across = im.width * cos + im.height * sin  # how wide the turned image is: what is fitted to the paper
         if ang % 90:
             right = im.width if cos >= sin else im.height  # the nearest right angle would fit this side
@@ -2581,11 +2620,83 @@ class Layout:
         gamma = float(attrs.kv.get("gamma", self.img.get("gamma", default_gamma)))
         align = self.object_align(attrs)
         bw = imaging.photo(im, max(8, w), gamma, kind, level=level, flat=True)
+        if shape:  # at the printed size: a clean edge, paper outside
+            bw = imaging.masked(bw, shape, self.mask_radius(attrs, bw.size, line) if shape == "rounded" else 0)
         placed = imaging.place(bw, self.W, align)
         notes = tuple((n.code, n.message, n.suggestion) for n in list(self.n)[mark:] if n.code != "I104")
         if key is not None:
             _remember(key, (host, placed, notes))
         return [BitmapRow(placed, line, "image")]
+
+    def crop_spec(self, attrs, line: int):
+        """crop=x,y,w,h parsed (imaging.parse_crop), or None: absent, or not four numbers (M101)."""
+        given = attrs.kv.get("crop")
+        if given is None:
+            return None
+        spec = imaging.parse_crop(given)
+        if spec is None:
+            self.n.add("M101", f"crop={given}", line, CROP_HINT)
+        return spec
+
+    def raster_crop(self, spec, attrs, size: tuple[int, int], line: int):
+        """The box crop= keeps of a photo `size` pixels big (as a viewer shows it); None: none of it is in the image,
+        printed whole. Partly outside: kept to the image. Both said (I111), with the image's size."""
+        box, clamped = imaging.crop_box(spec, size)
+        given, (W, H) = attrs.kv["crop"], size
+        if box is None:
+            self.n.add("I111", f"crop={given} is outside the {W}x{H} px image or has no size: printed uncropped", line,
+                       CROP_HINT)  # fmt: skip
+        elif clamped:
+            x0, y0, x1, y1 = (round(v) for v in box)
+            self.n.add("I111", f"crop={given} goes past the {W}x{H} px image: cut to {x0},{y0},{x1 - x0},{y1 - y0}",
+                       line, "x + width and y + height within the image's size")  # fmt: skip
+        return box
+
+    def vector_crop(self, spec, attrs, line: int):
+        """crop= of an SVG or PDF page, in percentages of the drawing (it has no pixels: it is drawn at the size it
+        prints), as fractions (left, top, right, bottom); None: printed whole (M101 for pixels, I111 outside)."""
+        given = attrs.kv["crop"]
+        if any(v and not pct for v, pct in spec):  # 0 is 0 in any unit
+            self.n.add("M101", f"crop={given}: an SVG or PDF is cropped in percentages: printed uncropped", line,
+                       "crop=0,0,50%,50% (the top-left quarter)")  # fmt: skip
+            return None
+        box, clamped = imaging.crop_box(spec, (100, 100))
+        if box is None:
+            self.n.add("I111", f"crop={given} is outside the drawing or has no size: printed uncropped", line,
+                       CROP_HINT)  # fmt: skip
+            return None
+        if clamped:
+            x0, y0, x1, y1 = box
+            self.n.add("I111", f"crop={given} goes past the drawing: cut to {x0:g}%,{y0:g}%,{x1 - x0:g}%,"
+                       f"{y1 - y0:g}%", line, "x + width and y + height within 100%")  # fmt: skip
+        return tuple(v / 100 for v in box)
+
+    def mask_shape(self, attrs, line: int) -> str | None:
+        """mask=circle|ellipse|rounded, or None (absent, or unknown: M101 with the shapes). radius= goes with
+        mask=rounded only (M101 otherwise)."""
+        given = attrs.kv.get("mask")
+        shape = None if given is None else str(given).strip().lower()
+        if shape is not None and shape not in imaging.MASKS:
+            self.n.add("M101", f"mask={given}", line, "circle, ellipse or rounded (radius=3mm)")
+            shape = None
+        if "radius" in attrs.kv and shape != "rounded":
+            self.n.add("M101", "radius= does nothing without mask=rounded", line, "mask=rounded radius=3mm")
+        return shape
+
+    def mask_radius(self, attrs, size: tuple[int, int], line: int) -> int:
+        """radius= of mask=rounded in dots: 12 (dots), 12px, 3mm, or 10% of the shorter side (the default)."""
+        short = min(size)
+        given = attrs.kv.get("radius")
+        text = str(MASK_RADIUS if given is None else given).strip().lower().replace(",", ".")
+        unit = next((u for u in ("%", "mm", "px", "dots") if text.endswith(u)), "")
+        try:
+            n = float(text.removesuffix(unit))
+            if not (math.isfinite(n) and n >= 0):
+                raise ValueError
+        except ValueError:
+            self.n.add("M101", f"radius={given}", line, "3mm, 12 (dots) or 10% (of the shorter side)")
+            n, unit = float(MASK_RADIUS.removesuffix("%")), "%"
+        return round(short * n / 100) if unit == "%" else self.p.mm_to_dots(n) if unit == "mm" else round(n)
 
     def turn(self, im, ang: float, attrs, line: int = 0) -> Image.Image:
         """The source turned clockwise by `ang` (rotate=, .flip), then mirrored (mirror=x|y|xy, .mirror = x), before

@@ -78,6 +78,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "",
     ),
     "I110": ("note", "a turned image prints smaller: its corners need room on the paper", ""),
+    "I111": ("warning", "crop= outside the image: cut to the image, or printed uncropped", ""),
     # E errors: the job stops, nothing prints (exit code in docs/CLI.md)
     "E101": ("error", "command line usage", ""),
     "E102": ("error", "this command takes one document", ""),

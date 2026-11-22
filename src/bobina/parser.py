@@ -91,7 +91,7 @@ TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)"
 
 TABLE_ONLY = frozenset({"style"})  # keys only a table's {…} line takes (style=receipt); elsewhere: unknown
 CAPTION_KEYS = frozenset({"caption", "caption-align"})  # images and codes: a line under them, placed on its own
-IMAGE_KEYS = CAPTION_KEYS | {"mirror"}  # mirror=x|y|xy: images only
+IMAGE_KEYS = CAPTION_KEYS | {"mirror", "crop", "mask", "radius"}  # images only (mirror=x|y|xy, mask=circle)
 CODES = ("qr", "barcode", "datamatrix", "pdf417")
 WORD_BLOCKS = {"contact"}  # blocks that take a word after their kind: ```contact whatsapp
 

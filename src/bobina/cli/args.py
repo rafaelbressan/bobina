@@ -45,7 +45,8 @@ TEXT
     a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
-  ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade} … ::: (docs/guides/layout.md)
+    crop=x,y,w,h (pixels of the file or %) mask=circle|ellipse|rounded radius=3mm .invert rotate=90 mirror=x
+  ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade .invert} … ::: (bobina help layout)
   :::: {.columns wrap=wrap valign=middle} ::: {.column width=40%} … ::: ::: {.column} … ::: ::::  (bobina help layout)
 
 OBJECTS (fenced blocks)
@@ -78,7 +79,7 @@ A line of three or more colons and {…} opens a block; a line of colons only cl
 outer block more colons (::::) so the file reads well, and close it with as many. Values need quotes only when
 they have a space.
 
-BOX: a frame around blocks
+BOX: a frame around blocks (.invert: the whole box black, what it holds white)
   ::: {.box title="TABLE" title-style=border|inside|band .dashed|.dotted|.double width=half .center .shade}
   # 109 {.center size=huge}
   :::

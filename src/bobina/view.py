@@ -198,6 +198,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
 
 
 FRAMES = {"solid": "─│┌┐└┘", "dashed": "╌╎┌┐└┘", "dotted": "┈┊┌┐└┘", "double": "═║╔╗╚╝"}  # a ::: box's line
+DARK_FRAME = "━┃┏┓┗┛"  # a ::: {.box .invert}: black to its edges (in colour, reversed too)
+REVERSE, RESET = "\x1b[7m", "\x1b[0m"
 
 
 def _box_view(b, profile):
@@ -213,10 +215,11 @@ def _box_view(b, profile):
 def box_lines(b, profile, color: bool = False) -> list[str]:
     """A ::: box where it is on the paper: ┌─ TITLE ─┐, what it holds between │ and │ (its own rows, drawn by
     lines() at the box's inner width: a box in a box too), └──┘; a turned one standing, under a ↻ mark. Each line
-    is b.left + 2 + the room _box_view gives columns wide."""
+    is b.left + 2 + the room _box_view gives columns wide. An inverted box: heavy lines and, in colour, reversed from
+    side to side (white on black, as a band of text is); a band inside it shows plain again."""
     from .layout import is_wide
 
-    h, v, tl, tr, bl, br = FRAMES.get(b.style, FRAMES["solid"])
+    h, v, tl, tr, bl, br = DARK_FRAME if b.invert else FRAMES.get(b.style, FRAMES["solid"])
     sub, inner, room = _box_view(b, profile)
     left = (b.cols - 2 - sub.columns) // 2  # a thick frame takes two letters each side: the content in the middle
     lead = b.lead + " " * (b.left - len(b.lead))
@@ -229,7 +232,12 @@ def box_lines(b, profile, color: bool = False) -> list[str]:
     out.append(cut if b.open_top else lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
     for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
         out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
-    return [*out, cut if b.open_bottom else lead + bl + h * room + br]
+    out.append(cut if b.open_bottom else lead + bl + h * room + br)
+    if not (b.invert and color):
+        return out
+    k = len(lead)
+    return [ln[:k] + REVERSE + ln[k:].replace(REVERSE, "\x1b[27m").replace(RESET, RESET[:-1] + ";7m") + RESET
+            for ln in out]  # fmt: skip
 
 
 def _columns_view(cv, profile):

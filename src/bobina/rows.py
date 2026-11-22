@@ -84,6 +84,7 @@ class Boxed:
     row_tops: tuple = ()  # dots from the top of the box's picture to each of its rows (a box cut across labels)
     open_top: bool = False  # a piece of a box cut across turned labels: no frame line on that side (┄ instead)
     open_bottom: bool = False
+    invert: bool = False  # ::: {.box .invert}: white on black on paper (the views reverse it, as a band)
 
 
 @dataclass

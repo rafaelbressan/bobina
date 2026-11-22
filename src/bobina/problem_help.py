@@ -107,6 +107,8 @@ FIX = {
     "I109": "Nothing to do if it looks right. Otherwise add {.dither} (photo look) or {.threshold} (black and"
     " white); {threshold=60%} sets the cut (higher: more black).",
     "I110": "Nothing to fix if it looks right; a right angle (90, 180, 270) keeps more of its size.",
+    "I111": "crop=x,y,width,height counts from the top-left corner, in pixels of the file (as an image viewer shows"
+    " them) or percentages; keep x + width and y + height within the image's size the message gives.",
     # E errors
     "E101": "Read the hint in the message and bobina COMMAND --help.",
     "E102": "Give this command one document.",

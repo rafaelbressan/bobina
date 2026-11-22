@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import io
 import math
+import re
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps
 
@@ -17,11 +18,18 @@ RASTER_FORMATS = ["PNG", "JPEG", "GIF", "BMP", "WEBP", "TIFF"]  # no EPS/PS: Pil
 
 
 def open_image(
-    src: str, base_dir: str, *, width: int | None = None, page: int = 1, allow_net: bool = False, confine=None
+    src: str,
+    base_dir: str,
+    *,
+    width: int | None = None,
+    page: int = 1,
+    allow_net: bool = False,
+    confine=None,
+    draft: bool = True,
 ):
     """Opens a photo, a PDF page or an SVG (rendered at `width` dots). Above MAX_IMAGE_PIXELS a raster is
     refused (Pillow alone only warns below 2x the limit). info['bobina.kind'|'bobina.host'] tell the caller
-    what it got. Raises sources.ImageError."""
+    what it got. draft=False: a JPEG keeps all its pixels (crop= counts them). Raises sources.ImageError."""
     import warnings
 
     from . import sources
@@ -36,8 +44,8 @@ def open_image(
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             try:
                 im = Image.open(io.BytesIO(s.data), formats=RASTER_FORMATS)
-                if width and im.format == "JPEG":  # decode at 1/2, 1/4 or 1/8 when that still covers the paper
-                    im.draft("L", (width, width))  # (square: any EXIF rotation keeps >= width)
+                if draft and width and im.format == "JPEG":  # decode at 1/2, 1/4 or 1/8 when it still covers
+                    im.draft("L", (width, width))  # the paper (square: any EXIF rotation keeps >= width)
                 im.load()
             except Image.DecompressionBombWarning:
                 raise sources.ImageError("I101", "image too large (decompression bomb guard)") from None
@@ -184,6 +192,60 @@ def photo(
         im = im.filter(ImageFilter.UnsharpMask(radius=1.5, percent=80, threshold=2))
         return dither(im, kind)
     return dither(im, kind, threshold_level(im) if level is None else level)
+
+
+MASKS = ("circle", "ellipse", "rounded")  # mask=: the shape kept; outside it is paper
+
+
+def parse_crop(text) -> tuple[tuple[float, bool], ...] | None:
+    """crop=x,y,w,h -> four (number, is a percentage): pixels (120, 120px) or % of the image's width (x, w) or height
+    (y, h), mixed as written. None when it is not four numbers."""
+    parts = [p for p in re.split(r"[,\s]+", str(text).strip().lower()) if p]
+    if len(parts) != 4:
+        return None
+    out = []
+    for p in parts:
+        pct = p.endswith("%")
+        try:
+            v = float(p[:-1] if pct else p.removesuffix("px"))
+        except ValueError:
+            return None
+        if not math.isfinite(v):
+            return None
+        out.append((v, pct))
+    return tuple(out)
+
+
+def crop_box(spec, size: tuple[float, float]) -> tuple[tuple[float, float, float, float] | None, bool]:
+    """(left, top, right, bottom) of crop= `spec` in an image of `size`, kept inside the image, and whether it had to
+    be (a box partly outside); None when nothing is left of it (outside the image, or no width or height)."""
+    W, H = size
+    x, y, w, h = (v * (H if i % 2 else W) / 100 if pct else v for i, (v, pct) in enumerate(spec))
+    if w <= 0 or h <= 0:
+        return None, False
+    asked = (x, y, x + w, y + h)
+    box = (max(0.0, x), max(0.0, y), min(float(W), x + w), min(float(H), y + h))
+    if box[2] - box[0] < 1 or box[3] - box[1] < 1:  # less than a pixel of the image in it
+        return None, False
+    return box, box != asked
+
+
+def masked(im: Image.Image, shape: str, radius: int = 0) -> Image.Image:
+    """A mode '1' image kept inside `shape` (MASKS), white (paper) outside it: a circle centred, as wide as the
+    shorter side; an ellipse touching the four sides; a rectangle with corners rounded by `radius` dots. Drawn at
+    the printed size without blending, so its edge is a clean line of dots (no grey to dither)."""
+    w, h = im.size
+    keep = Image.new("1", (w, h), 0)
+    d = ImageDraw.Draw(keep)
+    if shape == "circle":
+        s = min(w, h)
+        x0, y0 = (w - s) // 2, (h - s) // 2
+        d.ellipse((x0, y0, x0 + s - 1, y0 + s - 1), fill=1)
+    elif shape == "ellipse":
+        d.ellipse((0, 0, w - 1, h - 1), fill=1)
+    else:
+        d.rounded_rectangle((0, 0, w - 1, h - 1), radius=max(0, min(radius, min(w, h) // 2)), fill=1)
+    return Image.composite(im.convert("1"), Image.new("1", (w, h), 1), keep)
 
 
 # The light grey of a table's style=zebra rows: square dots of SHADE_DOT dots, every SHADE_STEP dots, every other

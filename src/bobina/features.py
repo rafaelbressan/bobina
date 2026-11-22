@@ -34,6 +34,12 @@ FEATURES = {
         "93,50) printed as the preview: frame whole, title cut into the border, band black, grey even; on the grey "
         "the thin top bar of a T fades (text on .shade: prefer bold)",
     },
+    "inverted-box": {
+        "title": "inverted boxes (::: {.box .invert}): one black band, what it holds printed white",
+        "where": "documents with ::: {.box .invert} (docs/guides/layout.md)",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
     "columns": {
         "title": "columns side by side (:::: {.columns}), each row of them printed as one image",
         "where": "documents with :::: {.columns} (docs/guides/layout-columns.md)",
