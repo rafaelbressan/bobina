@@ -269,6 +269,7 @@ class Layout:
         self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
         self.dark = False  # laid out inside a ::: {.box .invert}: printed white on black
+        self.dark_lost = False  # ... and in turned columns there: a code's tile is turned with them, not kept
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -1008,18 +1009,23 @@ class Layout:
         pics = [preview.row_image(r, self.p, self.em) for r in rows]
         im = self.stacked(pics, self.W)
         codes = _code_spans(rows, pics)
+        keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         box = ImageOps.invert(im).getbbox()
         if box:
             im = im.crop(
                 (max(0, box[0] - 4), max(0, box[1] - 4), min(im.width, box[2] + 4), min(im.height, box[3] + 4))
             )
             codes = tuple((a - max(0, box[1] - 4), b - max(0, box[1] - 4), k) for a, b, k in codes)
+            dx, dy = -max(0, box[0] - 4), -max(0, box[1] - 4)
+            keep, darks = _moved(keep, dx, dy), _moved(darks, dx, dy)
+        size = im.size
         im = im.rotate(
             -ang,
             expand=True,
             fillcolor=255,  # minus: clockwise, like CSS
             resample=Image.NEAREST if ang % 90 == 0 else Image.BICUBIC,
         )
+        keep, darks = self.turned_rects(keep, size, ang, line), _turned_rects(darks, size, ang) or ()
         if im.width > self.W:
             self.n.add(
                 "L104",
@@ -1027,12 +1033,16 @@ class Layout:
                 line,
                 "shorten the lines or use rotate=90/270",
             )
-            im = im.crop(((im.width - self.W) // 2, 0, (im.width - self.W) // 2 + self.W, im.height))
+            cut = (im.width - self.W) // 2
+            im = im.crop((cut, 0, cut + self.W, im.height))
+            keep, darks = _moved(keep, -cut, 0), _moved(darks, -cut, 0)
         align = attrs.kv.get("align") or next((x for x in ("left", "right", "center") if attrs.has(x)), "center")
         bw = im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
         marks = tuple(sorted({u for r in rows if isinstance(r, BitmapRow) for u in r.untested}))  # P301 stays
         spans = _turned_spans(codes, bw.height, ang)
-        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks, code_spans=spans)
+        at = max(0, {"left": 0, "right": self.W - bw.width}.get(align, (self.W - bw.width) // 2))
+        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks, code_spans=spans,
+                         keep=_moved(keep, at, 0), dark=_moved(darks, at, 0))  # fmt: skip
 
     def _block(self, b, indent: int) -> list:
         if isinstance(b, Heading):
@@ -1212,7 +1222,7 @@ class Layout:
         top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
         title_y = max(0, top + stroke // 2 - ch // 2)
         ang = self.angle(a, line) % 360
-        outer, was_dark = self.tall_max, self.dark
+        outer, was_dark, was_lost = self.tall_max, self.dark, self.dark_lost
         try:
             with self.narrow(inner):
                 self.dark = False  # the band is the box's own: inside an inverted box it prints the other way round
@@ -1224,15 +1234,16 @@ class Layout:
                     above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
                                 title_y + ch + 2 if on_border else 0)  # fmt: skip
                     self.tall_max = max(1, outer - above - BOX_ROOM - stroke)  # (turned 90: its width; the cuts)
-                self.dark = was_dark or dark
+                self.dark, self.dark_lost = was_dark or dark, was_lost and not dark  # its own tiles: kept here
                 rows = self.blocks(kids, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
                 pics = [preview.row_image(r, self.p, self.em) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
         finally:
-            self.tall_max, self.dark = outer, was_dark
+            self.tall_max, self.dark, self.dark_lost = outer, was_dark, was_lost
         codes = _code_spans(rows, pics)
+        keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
                        "put the raw block after the ::: line that closes the box")  # fmt: skip
@@ -1251,6 +1262,7 @@ class Layout:
             y += max(2, BOX_ROOM - lead, under)
             parts.append((body, side, y))
             codes = tuple((y + a, y + b, k) for a, b, k in codes)
+            keep, darks = _moved(keep, side, y), _moved(darks, side, y)
             tops += _tops(pics, y)
             y += body.height + max(2, BOX_ROOM - trail)
         else:
@@ -1266,21 +1278,24 @@ class Layout:
             plain, im = im, ImageOps.invert(im)
             for part, x, py in parts[:1] if band_im is not None else ():
                 im.paste(part, (x, py))
-            for a0, b0, kind in codes:  # a code stays black on white in its quiet zone: scanners read it
-                keep = _quiet_zone(plain, a0, b0, kind)
-                if keep:
-                    im.paste(plain.crop(keep), keep[:2])
-            if codes:
-                self.n.add("Q114", "a code in an inverted box prints black on white, in a white margin, so it scans",
+            for rect in keep:  # each code's white tile, laid out with its quiet zone (code_tile): black on white
+                im.paste(plain.crop(rect), rect[:2])
+            if keep:
+                self.n.add("Q114", "a code in an inverted box prints black on white, in its white margin, so it scans",
                            line, "put it outside the box for an unbroken band")  # fmt: skip
+            keep, darks = [], [(0, 0, width, height)]
         if ang:
             exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
+            size = im.size
             im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
             codes = _turned_spans(codes, im.height, ang)
+            keep, darks = self.turned_rects(keep, size, ang, line), _turned_rects(darks, size, ang) or []
             if im.width > room:
                 self.n.add("L104", f"turned box is {im.width} dots wide: cropped to {room}", line,
                            "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
-                im = im.crop(((im.width - room) // 2, 0, (im.width - room) // 2 + room, im.height))
+                cut = (im.width - room) // 2
+                im = im.crop((cut, 0, cut + room, im.height))
+                keep, darks = _moved(keep, -cut, 0), _moved(darks, -cut, 0)
         self.align_word(a, line)
         if a.kv.get("align") == "justify":  # spreads text; a box is only placed
             self.n.add("M101", "align=justify", line, "left, center or right")
@@ -1299,7 +1314,9 @@ class Layout:
         left = min(place(im.width), indent * cw + room - width) // cw  # where it is, as far as it fits standing
         view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang,
                      tuple(tops) if not ang and len(tops) == len(band) + len(rows) else (), invert=dark)  # fmt: skip
-        return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes), *raws]
+        at = place(im.width)
+        return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes,
+                          keep=_moved(keep, at, 0), dark=_moved(darks, at, 0)), *raws]  # fmt: skip
 
     def box_width(self, a: Attrs, line: int, room: int) -> int:
         """width= of a box, of the room it has (a quote's or a list's is narrower than the paper): full, half,
@@ -1383,10 +1400,11 @@ class Layout:
         aligns = [self.valign(c.attrs, c.line, valign) for c in cols]
         outer, self.wrapping = self.wrapping, wrap != "nowrap"
         if turned:
+            lost, self.dark_lost = self.dark_lost, self.dark_lost or self.dark  # turned: their tiles are not kept
             try:
                 return self.columns_turned(cols, asked, aligns, gap, wrap, a, line)
             finally:
-                self.wrapping = outer
+                self.wrapping, self.dark_lost = outer, lost
         try:
             rows = self.column_rows(cols, asked, room, gap, wrap, line)
             if wrap == "wrap-reverse":
@@ -1617,13 +1635,17 @@ class Layout:
         (by its ink: middle centres it on the tallest column's ink), the quote bars beside them."""
         cw = self.p.cell[0]
         widths, g = self.said_widths(asked, room, gap, a, line, "row")
-        parts, raws = [], []
+        parts, raws, rects = [], [], []
         for c, w in zip(cols, widths, strict=True):
             rows, raw, pics = self.laid_column(c, w)
             raws += raw
             im = self.stacked(pics, w * cw) if any(not isinstance(r, FeedRow) for r in rows) else None
             lead, trail = _blank_edges(im) if im is not None else (0, 0)
+            keep = _stacked_rects(rows, pics, "keep")
+            if keep:  # a code's white tile is part of it, never white to leave out
+                lead, trail = min(lead, *(r[1] for r in keep)), min(trail, *(im.height - r[3] for r in keep))
             parts.append((rows, im, lead, 0 if im is None else im.height - lead - trail, _code_spans(rows, pics)))
+            rects.append((keep, _stacked_rects(rows, pics, "dark")))
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a column: its bytes are sent after the columns",
                        raws[0].line, "put the raw block after the line of colons that closes the columns")  # fmt: skip
@@ -1637,10 +1659,11 @@ class Layout:
             ys.append(at - lead if h else 0)  # only the white above a column's ink goes past the top
         height = max(top + tall, *(y + im.height for (_, im, _, h, _), y in zip(parts, ys, strict=True) if h))
         full = Image.new("L", (self.W, height), 255)
-        x, views = indent * cw, []
-        for (rows, im, _, h, _), w, y, va in zip(parts, widths, ys, aligns, strict=True):
+        x, views, keep, darks = indent * cw, [], (), ()
+        for (rows, im, _, h, _), w, y, va, (k, dk) in zip(parts, widths, ys, aligns, rects, strict=True):
             if h:
                 full.paste(im, (x, y))
+                keep, darks = keep + _moved(k, x, y), darks + _moved(dk, x, y)
             views.append(Column(rows, w * cw, x // cw, max(0, y), va))
             x += (w + g) * cw
         full = self.draw_bars(full, indent, 0)
@@ -1648,8 +1671,8 @@ class Layout:
         lead = "".join(c.ch for c in self.lead(indent))
         view = Columned(views, lead)
         spans = tuple((y + a, y + b, k) for (*_, codes), y in zip(parts, ys, strict=True) for a, b, k in codes)
-        return [BitmapRow(_bw(full), line, "columns", untested=tuple(sorted(marks)), columns=view, code_spans=spans),
-                *raws]  # fmt: skip
+        return [BitmapRow(_bw(full), line, "columns", untested=tuple(sorted(marks)), columns=view, code_spans=spans,
+                          keep=keep, dark=darks), *raws]  # fmt: skip
 
     def columns_orientation(self, a: Attrs, line: int, indent: int) -> str:
         """orientation= on columns: horizontal (the default: across the paper) or vertical (along the roll, a label
@@ -1929,10 +1952,10 @@ class Layout:
         def free(y: int) -> bool:  # a row that cuts no code
             return not any(a < y < b for a, b, _ in spans)
 
-        blank = ImageOps.invert(ink) if framed and framed.invert else ink  # an inverted box: all black lines
+        darks = _moved(getattr(r, "dark", ()), -box[0], -box[1])  # inverted boxes: their blank lines are black
 
         def clean(y: int) -> bool:  # a blank line (inside a box's side lines), or a code's edge
-            return _white_row(blank, y, sides) or any(y in (a, b) for a, b, _ in spans)
+            return _blank_row(ink, y, sides, darks) or any(y in (a, b) for a, b, _ in spans)
 
         pieces, top, across, through = [], 0, False, []
         while ink.height - top > tall:
@@ -2122,6 +2145,8 @@ class Layout:
         mod = int(kv.get("module", self.p.get("qr.default_module", 4)))
         align = self.object_align(f.attrs)
         render = kv.get("render", "native" if self.p.get("qr.native") else "raster")
+        if self.dark:  # in an inverted box: an image on its white tile (a box is one image anyway)
+            render = "raster"
         if ecc == "L":
             self.n.add("Q102", "QR with ECC L", f.line, "use ecc=M")
         if ecc not in ("L", "M", "Q", "H"):
@@ -2147,7 +2172,8 @@ class Layout:
             render, m = "raster", imaging.qr_matrix(data, ecc, 0)  # an image: the smallest version, as any raster QR
             if "module" not in kv:  # no size asked: the printer's own module, as its codes, if it fits the paper
                 mod = max(1, min(fixed.dots, self.W // (len(m) + 4)))
-        units = len(m) + (0 if render == "native" else 4)  # an image carries its quiet zone, 2 modules each side
+        border = 4 if self.dark else 2  # an image carries its quiet zone; in an inverted box, a white tile of 4
+        units = len(m) + (0 if render == "native" else 2 * border)
         lo = int(self.p.get(f"qr.min_module_{render}", 4))
         cannot = units * lo > self.W  # even the smallest module that scans would not fit the paper
         less = f"less data or ecc=L (module {lo} would not fit the paper)"
@@ -2178,7 +2204,42 @@ class Layout:
                            less if cannot else hint)  # fmt: skip
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
+        if self.dark:
+            return [self.code_tile(imaging.qr_image(data, mod, ecc), "qr", align, f.line, mod, 4)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]
+
+    def turned_rects(self, keep, size: tuple[int, int], ang: float, line: int) -> tuple:
+        """Code tiles (BitmapRow.keep) turned with their block; at a slant they are lost: inside an inverted box the
+        codes print white on black (Q115)."""
+        turned = _turned_rects(keep, size, ang)
+        if turned is None:
+            self.n.add("Q115", f"a code turned rotate={ang:g} inside an inverted box prints white on black: it may not "
+                       "scan", line, "rotate=90, 180 or 270, or the code outside the inverted box")  # fmt: skip
+            return ()
+        return turned
+
+    def code_tile(self, code: Image.Image, kind: str, align: str, line: int, mod: int, side: int, ends: int = 4,
+                  core: int = 0) -> BitmapRow:  # fmt: skip
+        """A code laid out in an inverted box (self.dark): on a white tile with its quiet zone, `side` modules left and
+        right of its `core` (a barcode's bars: its text may be wider; all of it otherwise) and `ends` above and below,
+        the tile kept black on white when the box turns the rest white on black (BitmapRow.keep). Wider than the room:
+        the margin left is said (Q115) with the modules it has; in turned columns the tile cannot be kept (Q115)."""
+        name = {"qr": "QR code", "datamatrix": "Data Matrix", "pdf417": "PDF417"}.get(kind, "barcode")
+        core = core or code.width
+        want = max(code.width, core + 2 * side * mod)
+        w = min(self.W, want)
+        if self.dark_lost:  # turned with its label: the margin stays, but the box turns it white on black
+            self.n.add("Q115", f"a {name} in turned columns inside an inverted box prints white on black: it may not "
+                       "scan", line, "put the code outside the inverted box")  # fmt: skip
+        elif w < want:
+            self.n.add("Q115", f"a {name} in an inverted box: {max(0, (w - core) // 2) // mod} modules of white beside "
+                       f"it, {side} wanted ({want} dots, the room has {self.W})", line,
+                       "a smaller module= or width=, or the code outside the box")  # fmt: skip
+        tile = Image.new("1", (w, code.height + 2 * ends * mod), 1)
+        tile.paste(code, ((w - code.width) // 2, ends * mod))
+        x = max(0, {"left": 0, "right": self.W - w}.get(align, (self.W - w) // 2))
+        keep = () if self.dark_lost else ((x, 0, x + w, tile.height),)
+        return BitmapRow(imaging.place(tile, self.W, align), line, kind, keep=keep)
 
     def _fixed_native_qr(self, f: Fence, data: str, ecc: str, versions, target, fixed, align: str) -> QRRow | None:
         """The printer's own code on a fixed-module firmware (profile.FixedQR), for content that needs versions
@@ -2295,6 +2356,8 @@ class Layout:
                     self.n.add("Q108", f"bars {max(1, height - over)} dots tall, to fit the turned label's height: "
                                "too short to scan reliably", f.line, "text=none, or take the barcode out of the turned "
                                "columns")  # fmt: skip
+            if self.dark:
+                return [self.code_tile(im, "barcode", align, f.line, mod, quiet // mod, 2, units * mod)]
             padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
             padded.paste(im, (quiet, 0))
             return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
@@ -2320,18 +2383,27 @@ class Layout:
             # drawn by bobina, not by the firmware: the readable 3:1 Code39, whatever the printer's GS k does
             im = codes.image(kind, data, mod, bar_len, text, self.em, wide=3).rotate(-90, expand=True)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
-            padded = Image.new("1", (im.width, im.height + 2 * quiet), 1)
-            padded.paste(im, (0, quiet))
+            if self.dark:  # its quiet zones at its ends, above and below
+                out = self.code_tile(im, "barcode", align, f.line, mod, 4, quiet // mod)
+            else:
+                padded = Image.new("1", (im.width, im.height + 2 * quiet), 1)
+                padded.paste(im, (0, quiet))
+                out = BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")
             if orientation == "auto":  # the length of the image just drawn, quiet zones included
                 self.n.add(
                     "Q110",
                     f"{kind} '{data[:24]}' is {wide_dots} dots wide (paper {self.W}): "
-                    f"it will print VERTICALLY, about {padded.height / (self.p.dpi / 25.4):.0f} mm along the paper",
+                    f"it will print VERTICALLY, about {out.image.height / (self.p.dpi / 25.4):.0f} mm along the paper",
                     f.line,
                     "keep it (fine), set orientation=vertical to silence this, "
                     "or orientation=horizontal (it would be cut) — or use a QR code",
                 )
-            return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
+            return [out]
+        if self.dark and pattern:  # bars as the preview draws them, the thinnest that scan if the tile needs it
+            lo, quiet = int(self.p.get("barcode.min_module", 2)), int(self.p.get("barcode.quiet_modules", 10))
+            while mod > lo and (units + 2 * quiet) * mod > self.W:
+                mod -= 1
+            too_wide = units * mod > self.W
         if too_wide:
             self.n.add(
                 "Q104",
@@ -2339,6 +2411,9 @@ class Layout:
                 f.line,
                 "orientation=auto prints it vertically",
             )
+        if self.dark and pattern:
+            im = codes.image(kind, data, mod, height, text, self.em)
+            return [self.code_tile(im, "barcode", align, f.line, mod, quiet, 2, units * mod)]
         return [BarcodeRow(kind, data, mod, height, text, align, f.line)]
 
     def feed_module(self, kind: str, units: int, mod: int, line: int) -> int:
@@ -2370,10 +2445,11 @@ class Layout:
         align = self.object_align(f.attrs)
         target = self.object_width(f.attrs.kv.get("width"), f.line)
 
-        def draw(m):
+        def draw(m):  # in an inverted box without a margin of its own: code_tile gives it one
             if kind == "datamatrix":
-                return imaging.datamatrix_image(data, m)
-            return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)))
+                return imaging.datamatrix_image(data, m, 0 if self.dark else 2)
+            return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)),
+                                        0 if self.dark else 4)  # fmt: skip
 
         try:
             im = draw(mod)
@@ -2401,6 +2477,10 @@ class Layout:
                 padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
                 padded.paste(im, (quiet, 0))
                 im = padded
+            lo = min(mod, 4 if kind == "datamatrix" else 2)
+            while self.dark and self.tall_max is None and mod > lo and im.width + 8 * mod > self.W:  # its tile:
+                mod -= 1  # 4 modules each side
+                im = draw(mod)
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -2412,6 +2492,8 @@ class Layout:
                 "less data, smaller module or fewer columns",
             )
             im = im.crop((0, 0, self.W, im.height))
+        if self.dark:
+            return [self.code_tile(im, kind, align, f.line, mod, 4)]
         return [BitmapRow(imaging.place(im, self.W, align), f.line, kind)]
 
     def pay(self, f: Fence) -> list:
@@ -3634,31 +3716,47 @@ def _white_row(im: Image.Image, y: int, sides: int = 0) -> bool:
     return im.crop((sides, y, max(sides + 1, im.width - sides), y + 1)).getextrema()[0] >= 128
 
 
-def _quiet_zone(im: Image.Image, top: int, bottom: int, kind: str) -> tuple[int, int, int, int] | None:
-    """Where a code drawn in rows top..bottom of `im` (mode L) is, with its quiet zone around it: 10 modules beside
-    a barcode, 4 around a 2D code (a module: its narrowest bar), as far as the image goes; above and below, only over
-    blank rows (never over the text around it). None: no ink there."""
-    found = ImageOps.invert(im.crop((0, top, im.width, bottom))).getbbox()
-    if not found:
-        return None
-    x0, y0, x1, y1 = found[0], top + found[1], found[2], top + found[3]
-    px, module = im.load(), x1 - x0
-    for y in range(y0, y1, max(1, (y1 - y0) // 24)):
-        run = 0
-        for x in range(x0, x1 + 1):
-            if x < x1 and px[x, y] < 128:
-                run += 1
-            elif run:
-                module, run = min(module, run), 0
-    q = module * (10 if kind == "barcode" else 4)
-    x0, x1 = max(0, x0 - q), min(im.width, x1 + q)
-    strip = im.crop((x0, 0, x1, im.height))
-    for _ in range(q if kind != "barcode" else module * 2):
-        if y0 > 0 and _white_row(strip, y0 - 1):
-            y0 -= 1
-        if y1 < im.height and _white_row(strip, y1):
-            y1 += 1
-    return x0, y0, x1, y1
+def _stacked_rects(rows: list, pics: list, name: str) -> tuple:
+    """The rectangles (BitmapRow.keep or .dark) of rows stacked as compose() stacks them, in dots of the stack."""
+    out, y = [], 0
+    for r, im in zip(rows, pics, strict=True):
+        if im is None:
+            continue
+        out += [(x0, y0 + y, x1, y1 + y) for x0, y0, x1, y1 in getattr(r, name, ())]
+        y += im.height
+    return tuple(out)
+
+
+def _moved(rects, dx: int, dy: int) -> tuple:
+    return tuple((x0 + dx, y0 + dy, x1 + dx, y1 + dy) for x0, y0, x1, y1 in rects)
+
+
+def _turned_rects(rects, size: tuple[int, int], ang: float) -> tuple | None:
+    """Rectangles of a picture `size` big after it is turned `ang` degrees clockwise (expanded); None: not a right
+    angle, they no longer are rectangles."""
+    w, h = size
+    ang %= 360
+    if ang % 90:
+        return None if rects else ()
+    turn = {0: lambda x0, y0, x1, y1: (x0, y0, x1, y1), 90: lambda x0, y0, x1, y1: (h - y1, x0, h - y0, x1),
+            180: lambda x0, y0, x1, y1: (w - x1, h - y1, w - x0, h - y0),
+            270: lambda x0, y0, x1, y1: (y0, w - x1, y1, w - x0)}[int(ang)]  # fmt: skip
+    return tuple(turn(*r) for r in rects)
+
+
+def _blank_row(im: Image.Image, y: int, sides: int, darks=()) -> bool:
+    """_white_row, where an inverted box (darks: its rectangles) counts as blank when it is all black on that row."""
+    lo, hi = sides, max(sides + 1, im.width - sides)
+    over = [(max(lo, x0), min(hi, x1)) for x0, y0, x1, y1 in darks if y0 <= y < y1 and x0 < hi and x1 > lo]
+    if not over:
+        return _white_row(im, y, sides)
+    cuts = sorted({lo, hi, *(x for pair in over for x in pair)})
+    for a, b in zip(cuts, cuts[1:], strict=False):
+        if b > a:
+            least, most = im.crop((a, y, b, y + 1)).getextrema()
+            if (most > 127) if any(x0 <= a and b <= x1 for x0, x1 in over) else (least < 128):
+                return False
+    return True
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:

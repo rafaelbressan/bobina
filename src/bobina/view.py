@@ -177,8 +177,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
             out.append(TURNED_TABLE.center(frame, "┄")[:frame])
             for tr in r.text_rows:
-                standing = TextRow(tr.cells[:cols], tr.scale, "left")
-                out += [ln[:cols] + more for ln in text_lines(standing, cols, color, dark)]
+                standing = TextRow(_within(tr.cells, cols // tr.scale[0]), tr.scale, "left")  # cut before drawing
+                out += [ln + more for ln in text_lines(standing, cols, color, dark)]
         elif isinstance(r, BitmapRow) and r.text_rows:
             trs = r.text_rows if r.wide_view else [fit(tr, frame) for tr in r.text_rows]  # wide_view: never cut
             room = max([cols, *(tr.width() for tr in trs)])  # a smaller font's paper line: wider
@@ -198,7 +198,34 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
                 ls = braille(im, profile.cell)
                 if getattr(r, "kind", "") == "divider" and not "".join(ls).strip():  # a dotted rule: dots too small
                     ls = braille(im, profile.cell, specks=True)
-                out += [ln.ljust(frame) for ln in ls]
+                ls = [ln.ljust(frame) for ln in ls]
+                out += _kept(ls, r.keep, profile.cell) if color and dark and getattr(r, "keep", ()) else ls
+    return out
+
+
+def _within(cells: list, cols: int) -> list:
+    """The cells that fit in `cols` columns (a wide one takes 2)."""
+    out, used = [], 0
+    for c in cells:
+        used += 2 if c.wide else 1
+        if used > cols:
+            break
+        out.append(c)
+    return out
+
+
+def _kept(lines: list[str], rects, cell) -> list[str]:
+    """Braille lines of a row drawn in an inverted box, plain again over its codes' white tiles (BitmapRow.keep),
+    as on paper: the rest of the line stays reversed."""
+    cw, ch = cell
+    out = []
+    for i, ln in enumerate(lines):
+        spans = sorted(
+            {(round(x0 / cw), round(x1 / cw)) for x0, y0, x1, y1 in rects if y0 < (i + 1) * ch and y1 > i * ch}
+        )
+        for a, b in reversed(spans):
+            ln = ln[:a] + FLIP[True] + ln[a:b] + BASE[True] + ln[b:]
+        out.append(ln)
     return out
 
 

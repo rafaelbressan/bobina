@@ -49,6 +49,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "",
     ),
     "Q114": ("note", "a code in an inverted box keeps black on white, in a white margin (scanners need it)", ""),
+    "Q115": ("warning", "a code in an inverted box without its whole white margin, or white on black", ""),
     # L layout
     "L101": ("warning", "word longer than the line was split", ""),
     "L102": ("note", "long print", ""),

@@ -254,9 +254,9 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
   no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
 - `width=` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
   `gamma=` (defaults: front matter `image:`, then the profile).
-- A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
+- A drawing prints black and white, a photo dithered (`I109` says which);
   `.dither`, `.threshold` or `threshold=60%` choose.
-- In order: `crop=x,y,w,h` (pixels as a viewer shows, or `%`; SVG/PDF: `%`; `I111`), `.invert`, `rotate=` any
+- In order: `crop=x,y,w,h` (viewer pixels or `%`; SVG/PDF: `%`; `I111`), `.invert`, `rotate=` any
   angle, `mirror=x|y|xy` (`.mirror`: x), fitted whole (`I110`), `mask=circle|ellipse|rounded`
   (`radius=3mm|12|10%`): paper outside.
 - `caption="…"`/`caption=alt`: a line under. Above 40 megapixels or unreadable: `I101`, the rest prints.
@@ -476,7 +476,8 @@ Nudges:
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |
-| `Q114` | note | a code in an inverted box stays black on white |
+| `Q114` | note | code in an inverted box: black on white |
+| `Q115` | warning | … its margin short, or reversed |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
 | `L103` | warning | preformatted line longer than the paper was wrapped |

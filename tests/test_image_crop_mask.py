@@ -336,44 +336,88 @@ def test_the_colour_view_of_a_turned_inverted_box_leaves_its_mark_plain():
     assert out and "\x1b[7m" not in out[0]
 
 
-def code_margin(im: Image.Image, top: int, bottom: int) -> tuple[int, int]:
-    """In the middle row of a code drawn in rows top..bottom: (where the band's black stops on the left, where the
-    code's first black module is)."""
-    y = (top + bottom) // 2
-    row = [im.getpixel((x, y)) for x in range(im.width)]
-    white = row.index(255)
-    return white, row.index(0, white)
-
-
-def test_a_qr_code_in_an_inverted_box_stays_black_on_white_in_its_quiet_zone():
-    res = build(
-        "::: {.box .invert}\n**Pay here** {.center}\n\n```qr {width=half}\nhttps://example.com/pay/42\n```\n:::\n"
-    )
-    (said_q,) = said(res, "Q114")
-    assert "black on white" in said_q
-    (b,) = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "box"]
-    im = b.image.convert("L")
-    (top, bottom, kind) = b.code_spans[0]
-    assert kind == "qr"
-    edge, first = code_margin(im, top, bottom)
-    assert im.getpixel((2, (top + bottom) // 2)) == 0  # the band goes on beside it
-    code = im.crop((edge, top, W - edge, bottom))
-    x0, y0, _, _ = code.point(lambda v: 255 - v).getbbox()  # the modules
-    run = next(x for x in range(x0, code.width) if code.getpixel((x, y0)) == 255) - x0  # a finder's top: 7 modules
-    module = run / 7
-    assert module >= 3 and first - edge >= 4 * module  # 4 modules of paper before the code
-    assert code.getpixel((round(x0 + 3.5 * module), round(y0 + 3.5 * module))) == 0  # the finder's black centre
-    assert code.getpixel((round(x0 + 1.5 * module), round(y0 + 1.5 * module))) == 255  # inside its black ring
-
-
-def test_a_barcode_in_an_inverted_box_keeps_its_quiet_zone():
-    res = build("::: {.box .invert}\n```barcode {module=2}\nABC-123\n```\n:::\n")
-    assert said(res, "Q114")
+def tile(res) -> tuple[Image.Image, tuple[int, int, int, int], tuple[int, int, int, int]]:
+    """The inverted box's picture, the white tile of its first code as the paper shows it (in its rows, from the first
+    all-white column, its left margin, to the last), and the code's ink inside the tile."""
     (b,) = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "box"]
     im = b.image.convert("L")
     top, bottom, _ = b.code_spans[0]
-    edge, first = code_margin(im, top, bottom)
-    assert first - edge >= 10 * 2  # 10 modules of paper before the bars
+    rows = im.crop((0, top, im.width, bottom))
+    white = [x for x in range(im.width) if rows.crop((x, 0, x + 1, rows.height)).getextrema()[0] == 255]
+    t = (white[0], top, white[-1] + 1, bottom)  # from its first all-white column (its margin) to its last
+    inked = im.crop(t).point(lambda v: 255 - v).getbbox()
+    return im, t, inked
+
+
+def margins(t, inked) -> tuple[int, int, int, int]:
+    """White dots left, above, right and below the code inside its tile."""
+    w, h = t[2] - t[0], t[3] - t[1]
+    return inked[0], inked[1], w - inked[2], h - inked[3]
+
+
+def qr_module(im, t, inked) -> float:
+    """A QR's module in dots, from its finder pattern: 7 modules of black along its top."""
+    x0, y0 = t[0] + inked[0], t[1] + inked[1]
+    return (next(x for x in range(x0, im.width) if im.getpixel((x, y0)) == 255) - x0) / 7
+
+
+QR = "```qr\nhttps://example.com/pay/42\n```"
+
+
+def test_a_qr_code_beside_text_in_an_inverted_box_keeps_4_modules_of_white_and_the_text_stays_inverted():
+    src = (f"::: {{.box .invert}}\n:::: {{.columns}}\n::: {{.column width=50%}}\n{QR}\n:::\n::: {{.column}}\n"
+           "**Pay here** with your phone\n:::\n::::\n:::\n")  # fmt: skip
+    res = build(src)
+    assert len(said(res, "Q114")) == 1 and "Q115" not in codes(res)
+    im, t, inked = tile(res)
+    module = qr_module(im, t, inked)
+    assert module >= 3 and all(m >= 4 * module for m in margins(t, inked)), (module, margins(t, inked))
+    assert im.getpixel((t[0] + inked[0] + round(3.5 * module), t[1] + inked[1] + round(3.5 * module))) == 0
+    beside = im.crop((W // 2 + 12, t[1], W - 12, t[3]))  # the text's column, in the same rows
+    assert ink(beside) > 0.7  # still white letters on black: only the code's tile is black on white
+
+
+def test_a_paragraph_right_above_a_qr_code_leaves_it_4_modules_of_white():
+    res = build(f"::: {{.box .invert}}\n**Pay here** {{.center}}\n{QR}\n:::\n")
+    im, t, inked = tile(res)
+    module = qr_module(im, t, inked)
+    assert margins(t, inked)[1] >= 4 * module and margins(t, inked)[3] >= 4 * module
+    assert ink(im.crop((t[0], t[1] - 2, t[2], t[1]))) == 1.0  # the band goes on right above the tile
+
+
+def test_a_barcode_with_its_text_keeps_10_modules_of_white_beside_it():
+    res = build("::: {.box .invert}\n```barcode {module=2}\nABC-123\n```\n:::\n")
+    assert said(res, "Q114") and "Q115" not in codes(res)
+    im, t, inked = tile(res)
+    left, _, right, _ = margins(t, inked)
+    assert left >= 10 * 2 and right >= 10 * 2
+    text = im.crop((t[0] + inked[0], t[1] + inked[3] - 6, t[0] + inked[2], t[1] + inked[3]))
+    assert 0 < ink(text) < 0.6  # its human-readable line is inside the tile, black on white
+
+
+def test_a_barcode_too_wide_for_its_margin_says_how_many_modules_it_has():
+    src = "::: {.box .invert width=half}\n```barcode {module=2}\nAB12\n```\n:::\n"  # 158 dots of bars in 168
+    res = build(src)
+    (msg,) = said(res, "Q115")
+    assert msg.startswith("a barcode in an inverted box: 2 modules of white beside it, 10 wanted")
+    assert [n.severity for n in res.nudges if n.code == "Q115"] == ["warning"] and "Q114" in codes(res)
+
+
+def test_the_colour_view_shows_the_code_plain_and_the_band_beside_it_reversed():
+    res = build(f"::: {{.box .invert}}\n**Pay here** {{.center}}\n{QR}\n:::\n")
+    out = view.lines(res.rows, res.profile, color=True)
+    code = [ln for ln in out if "\x1b[27m" in ln]
+    assert all(ln.startswith("\x1b[7m") for ln in code)  # the QR's lines: plain over its tile, reversed around it
+    assert sum("⣿" in ln.split("\x1b[27m")[1].split("\x1b[0;7m")[0] for ln in code) >= 3
+
+
+def test_no_code_no_q114_and_a_code_in_turned_columns_in_an_inverted_box_is_a_warning():
+    assert "Q114" not in codes(build("::: {.box .invert}\nhello\n:::\n"))
+    src = f"::: {{.box .invert}}\n:::: {{.columns orientation=vertical}}\n::: {{.column}}\n{QR}\n:::\n::::\n:::\n"
+    res = build(src)
+    assert "Q114" not in codes(res)
+    (msg,) = set(said(res, "Q115"))
+    assert "turned columns inside an inverted box prints white on black" in msg
 
 
 def test_a_tall_inverted_box_in_a_turned_label_is_cut_between_its_lines():
@@ -396,3 +440,21 @@ def test_the_format_still_says_a_document_cannot_enable_the_network():
 
     fmt = (Path(__file__).resolve().parents[1] / "docs" / "FORMAT.md").read_text(encoding="utf-8")
     assert "A document cannot enable the network." in fmt.split("### 6.5 Images")[1].split("### 6.6")[0]
+
+
+def test_an_inverted_box_inside_a_plain_box_in_a_turned_label_is_cut_between_its_lines():
+    box = "::::: {.box}\n::: {.box .invert}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::\n:::::"
+    src = f":::: {{.columns orientation=vertical}}\n::: {{.column}}\n{box}\n:::\n::: {{.column}}\nx\n:::\n::::\n"
+    (n,) = [n for n in build(src).nudges if n.code in ("L112", "L114")]
+    assert n.code == "L112" and "between its lines" in n.message
+
+
+def test_a_turned_tables_colour_view_is_cut_by_what_shows_never_inside_an_escape():
+    import re
+
+    rows = "\n".join(f"| a long product name {i} | {i} | 9,99 |" for i in range(3))
+    res = build(f"| name | quantity | price |\n|---|---|---|\n{rows}\n{{orientation=vertical}}\n")
+    plain = view.lines(res.rows, res.profile)
+    coloured = view.lines(res.rows, res.profile, color=True)
+    assert [re.sub(r"\x1b\[[0-9;]*m", "", ln) for ln in coloured] == plain
+    assert not any(re.search(r"\x1b(?!\[[0-9;]*m)", ln) for ln in coloured)

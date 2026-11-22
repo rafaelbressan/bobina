@@ -435,14 +435,14 @@ def matrix_image(m, module: int, border: int = 2) -> Image.Image:
     return im
 
 
-def datamatrix_image(data: str, module: int) -> Image.Image:
+def datamatrix_image(data: str, module: int, border: int = 2) -> Image.Image:
     from ppf.datamatrix import DataMatrix
 
-    return matrix_image(DataMatrix(data).matrix, module)
+    return matrix_image(DataMatrix(data).matrix, module, border)
 
 
-def pdf417_image(data: str, module: int, ratio: int = 3, columns: int = 4) -> Image.Image:
+def pdf417_image(data: str, module: int, ratio: int = 3, columns: int = 4, padding: int = 4) -> Image.Image:
     import pdf417gen
 
     codes = pdf417gen.encode(data, columns=columns, security_level=2)
-    return pdf417gen.render_image(codes, scale=module, ratio=ratio, padding=4).convert("1", dither=Image.NONE)
+    return pdf417gen.render_image(codes, scale=module, ratio=ratio, padding=padding).convert("1", dither=Image.NONE)

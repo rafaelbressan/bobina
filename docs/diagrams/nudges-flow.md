@@ -246,6 +246,7 @@ from this list.
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, the rest prints, exit 9) |  |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |  |
 | `Q114` | note | a code in an inverted box keeps black on white, in a white margin (scanners need it) |  |
+| `Q115` | warning | a code in an inverted box without its whole white margin, or white on black |  |
 
 ### Images
 
