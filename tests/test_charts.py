@@ -68,15 +68,15 @@ def test_a_table_with_chart_prints_a_chart_instead_of_the_table():
     assert chart(res).height == 240  # 30 mm at 203 dpi
     assert not [c for c in codes(res) if c.startswith("M")]  # chart= and height= are known on a table's line
     (summary,) = said(res, "C101")
-    assert "8 points" in summary and "by date" in summary and "0, 800, 3500" in summary
+    assert "8 points" in summary and "by date" in summary and "0 · 800 · 3500" in summary
 
 
 def test_numbers_are_read_in_the_documents_locale():
     src = "---\nlocale: pt-BR\n---\n| dia | vendas |\n|---|--:|\n| Seg | R$ 1.240,50 |\n| Ter | 980 |\n{chart=bar}\n"
     (summary,) = said(build(src), "C101")
-    assert "values read: 1240.5, 980" in summary
+    assert "values read: 1240.5 · 980" in summary
     en = "| day | sales |\n|---|--:|\n| Mon | $1,240.50 |\n| Tue | 2.5 |\n{chart=bar}\n"
-    assert "values read: 1240.5, 2.5" in said(build(en), "C101")[0]
+    assert "values read: 1240.5 · 2.5" in said(build(en), "C101")[0]
 
 
 def test_a_value_that_is_not_a_number_leaves_its_row_out():
@@ -94,9 +94,9 @@ def test_repeated_labels_are_summed_and_aggregate_says_how():
     rows = "".join(f"| d{i % 5} | {i} |\n" for i in range(12))
     res = build(f"| day | n |\n|---|--:|\n{rows}{{chart=bar}}\n")
     assert said(res, "C107") == ["12 rows summed into 5 labels (repeated labels)"]
-    assert "values read: 15, 18, 9, 11, 13" in said(res, "C101")[0]  # d0: 0+5+10, d1: 1+6+11, d2: 2+7 …
+    assert "values read: 15 · 18 · 9 · 11 · 13" in said(res, "C101")[0]  # d0: 0+5+10, d1: 1+6+11, d2: 2+7 …
     res = build(f"| day | n |\n|---|--:|\n{rows}{{chart=bar aggregate=max}}\n")
-    assert "values read: 10, 11, 7, 8, 9" in said(res, "C101")[0]
+    assert "values read: 10 · 11 · 7 · 8 · 9" in said(res, "C101")[0]
     assert "M101" in codes(build(f"| day | n |\n|---|--:|\n{rows}{{chart=bar aggregate=median}}\n"))
 
 
@@ -266,7 +266,7 @@ def test_a_chart_from_a_file_picks_its_columns_by_title(tmp_path):
     (tmp_path / "vendas.csv").write_text(CSV, encoding="utf-8")
     res = build("| data | valor |\n|---|--:|\n{chart=bar data=vendas.csv}\n", base_dir=str(tmp_path))
     assert chart_rows(res) and said(res, "C107") == ["4 rows summed into 3 labels (repeated labels)"]
-    assert "values read: 530.5, 410, 380.75" in said(res, "C101")[0]
+    assert "values read: 530.5 · 410 · 380.75" in said(res, "C101")[0]
 
 
 def test_a_title_the_file_does_not_have_lists_its_columns(tmp_path):
@@ -352,3 +352,116 @@ def test_the_guides_examples_print_without_a_warning(tmp_path):
         res = build(block.split("```", 1)[0], base_dir=str(tmp_path))
         assert chart_rows(res) or any(r.columns for r in res.rows if isinstance(r, BitmapRow))
         assert not [n.code for n in res.nudges if n.severity in ("warning", "error")], block
+
+
+# ---------------------------------------------------------------------------------------------------- review fixes
+
+
+def runs(im, vertical: bool) -> list[int]:
+    """The length of every run of black dots along each column (vertical) or each row."""
+    px, out = im.load(), []
+    outer, inner = (im.width, im.height) if vertical else (im.height, im.width)
+    for a in range(outer):
+        n = 0
+        for b in range(inner):
+            black = px[(a, b) if vertical else (b, a)] == 0
+            if black:
+                n += 1
+            elif n:
+                out.append(n)
+                n = 0
+        if n:
+            out.append(n)
+    return out
+
+
+@pytest.mark.parametrize(
+    "attrs",
+    [
+        "{chart=line .no-axes}",
+        "{chart=line y-ticks=0 x-labels=0}",  # the axes too, no labels
+        "{chart=area .no-axes height=20mm}",
+        "{chart=sparkline}",
+    ],
+)
+def test_every_stroke_is_at_least_two_dots_thick_across_it(attrs):
+    two = SUPPLY.replace("| day | supply |\n|---|--:|", "| day | supply | b |\n|---|--:|--:|")
+    for src in (SUPPLY, "\n".join(f"{ln} {k % 4 * 9000} |" if ln.startswith("| ") and k > 1 else ln
+                                  for k, ln in enumerate(two.splitlines())) + "\n"):  # fmt: skip
+        im = chart(build(src + attrs + "\n"))
+        if "| b |" in src and "sparkline" not in attrs:
+            im = im.crop((0, 0, im.width, im.height - 31))  # the legend (25 + 2 + 4 dots): letters, not strokes
+        assert min(runs(im, True)) >= 2 and min(runs(im, False)) >= 2, attrs  # shallow and steep parts alike
+
+
+def test_a_sparkline_line_is_two_dots_tall_where_it_is_shallow():
+    im = chart(build("| | |\n|---|--:|\n| | 120000 |\n| | 180000 |\n| | 300000 |\n| | 749069 |\n{chart=sparkline}\n"))
+    px = im.load()
+    for x in (100, 200, 300):
+        col = [y for y in range(im.height) if px[x, y] == 0]
+        assert len(col) >= 2 and col[-1] - col[0] + 1 == len(col), x
+
+
+def test_a_yearless_feb_29_after_new_year_is_not_a_crash():
+    res = build("| d | n |\n|---|--:|\n| Dec 20 | 5 |\n| Feb 29 | 7 |\n| Mar 3 | 9 |\n{chart=line}\n")
+    assert chart_rows(res) and "evenly spaced" in said(res, "C101")[0]
+
+
+@pytest.mark.parametrize("attrs", ['{chart=line height=5mm title="Sales" }', "{chart=bar height=4px}"])
+def test_a_chart_with_no_room_for_a_drawing_prints_the_table(attrs):
+    src = "| d | a | b |\n|---|--:|--:|\n| x | 1 | 2 |\n| y | 3 | 4 |\n" + attrs + "\n"
+    res = build(src)
+    assert any("no room" in m for m in said(res, "C105")) and not chart_rows(res) and text_lines(res)
+
+
+def test_numbers_from_json_and_xlsx_are_a_programs_csv_text_follows_the_locale(tmp_path):
+    (tmp_path / "v.json").write_text('[{"d": "a", "v": 1.234}, {"d": "b", "v": 2}]', encoding="utf-8")
+    (tmp_path / "v.csv").write_text('d,v\na,"1.234,56"\nb,2\n', encoding="utf-8")
+    pt = "---\nlocale: pt-BR\n---\n| d | v |\n|---|--:|\n{chart=bar data=FILE}\n"
+    assert "values read: 1.234 · 2" in said(build(pt.replace("FILE", "v.json"), base_dir=str(tmp_path)), "C101")[0]
+    assert "values read: 1234.56 · 2" in said(build(pt.replace("FILE", "v.csv"), base_dir=str(tmp_path)), "C101")[0]
+
+
+def test_an_empty_cell_of_a_single_series_is_a_gap_at_its_label():
+    res = build("| d | n |\n|---|--:|\n| a | 1 |\n| b | |\n| c | 3 |\n{chart=line x-labels=all}\n")
+    assert "3 points" in said(res, "C101")[0] and "C103" not in codes(res)
+    out = "\n".join(view.lines(res.rows, res.profile))
+    assert " b " in out
+
+
+def test_last_with_table_prints_the_rows_of_the_points_the_chart_kept():
+    rows = "".join(f"| d{i % 5} | {i} |\n" for i in range(12))
+    res = build(f"| day | n |\n|---|--:|\n{rows}{{chart=bar last=2 .with-table}}\n")
+    labels = [ln.split()[0] for ln in text_lines(res)[1:]]
+    assert labels == ["d3", "d4", "d3", "d4"]  # rows 3, 4, 8, 9: the two labels kept, every row of each
+
+
+def test_a_title_wider_than_the_chart_wraps_and_a_word_too_long_is_cut_and_said():
+    res = build(SUPPLY + '{chart=line title="Daily supply of the token since the launch in January"}\n')
+    out = "\n".join(view.lines(res.rows, res.profile))
+    assert "Daily supply of the" in out and "January" in out and not said(res, "C105")
+    res = build(SUPPLY + '{chart=line width=half title="Supercalifragilisticexpialidocious"}\n')
+    assert any("title" in m and "…" in m for m in said(res, "C105"))
+    long = "| d | n |\n|---|--:|\n| November the seventeenth of this year | 5 |\n{chart=bar width=half}\n"
+    assert any("X label" in m and "…" in m for m in said(build(long), "C105"))
+
+
+def test_table_classes_under_a_chart_without_with_table_are_said():
+    res = build(SUPPLY + "{chart=line .bold .italic}\n")
+    assert any(".bold" in m and ".italic" in m for m in said(res, "M101"))
+
+
+def test_the_values_read_are_written_in_full_and_apart_in_a_comma_locale():
+    res = build("| d | n |\n|---|--:|\n| a | 1000000 |\n| b | 1234.5678 |\n{chart=bar}\n")
+    assert "values read: 1000000 · 1234.5678" in said(res, "C101")[0]
+    pt = build("---\nlocale: pt-BR\n---\n| d | n |\n|---|--:|\n| a | 0,5 |\n| b | 1,6 |\n{chart=bar}\n")
+    assert "y ticks 0 · 0,6 · 1,2" in said(pt, "C101")[0]
+
+
+def test_the_view_never_wraps_ink_from_one_edge_to_the_other():
+    from PIL import Image
+
+    im = Image.new("1", (24, 24), 1)
+    im.putpixel((23, 23), 0)
+    g = charts.thicken(im)
+    assert g.getpixel((0, 0)) == 255 and g.getpixel((0, 23)) == 255 and g.getpixel((23, 0)) == 255

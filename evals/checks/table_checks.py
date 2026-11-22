@@ -301,14 +301,14 @@ def drawn(path: str, kind: str) -> str:
 
 def supply_line(path):
     said = drawn(path, "line")
-    if not all(w in said for w in ("8 points", "by date", "values read: 0, 800, 3500, 52000, 120000, 300000")):
+    if not all(w in said for w in ("8 points", "by date", "values read: 0 · 800 · 3500 · 52000 · 120000 · 300000")):
         fail(f"a line of the 8 supply values spaced by date expected: {said}")
 
 
 def supply_three_values_along_the_axis(path):
     said = drawn(path, "line")
     ticks = re.search(r"y ticks (.*?) \((turned along the axis|upright)\)", said)
-    if not ticks or len(ticks.group(1).split(", ")) != 3 or ticks.group(2) != "turned along the axis":
+    if not ticks or len(ticks.group(1).split(" · ")) != 3 or ticks.group(2) != "turned along the axis":
         fail(f"three Y values written along the axis expected: {said}")
 
 
@@ -320,13 +320,13 @@ def supply_about_3cm(path):
 
 def bakery_bars(path):
     said = drawn(path, "bar")
-    if not all(w in said for w in ("7 points", "2 series", "values read: 1240.5, 980, 1105.25, 1320, 1890.75, 2430")):
+    if not all(w in said for w in ("7 points", "2 series", "values read: 1240.5 · 980 · 1105.25 · 1320 · 1890.75 · 2430")):
         fail(f"bars of the 7 days' sales read as reais, and a second series (the goal), expected: {said}")
 
 
 def file_bars(path):
     said = drawn(path, "bar")
-    if not all(w in said for w in ("1 series (valor)", "5 points", "values read: 530.5, 590, 500.75, 750, 660")):
+    if not all(w in said for w in ("1 series (valor)", "5 points", "values read: 530.5 · 590 · 500.75 · 750 · 660")):
         fail(f"bars of valor per data from vendas.csv (5 days, summed) expected: {said}")
     if [r for r in body_rows(path) if re.search(r"320|410|380|450|520", r)]:
         fail("the values were typed into the document: they should come from vendas.csv")
