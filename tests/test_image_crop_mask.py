@@ -198,7 +198,7 @@ def test_an_unknown_mask_names_the_shapes_and_prints_the_image_whole(tmp_path):
     black(tmp_path / "q.png")
     res = run(tmp_path, "mask=star")
     assert [(n.message, n.suggestion) for n in res.nudges if n.code == "M101"] == [
-        ("mask=star", "circle, ellipse or rounded (radius=3mm)")
+        ("mask=star is not a shape: the image prints whole", "mask=circle, mask=ellipse or mask=rounded radius=3mm")
     ]
     assert ink(picture(res)) == 1.0
 

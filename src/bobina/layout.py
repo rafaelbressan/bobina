@@ -2782,7 +2782,8 @@ class Layout:
         given = attrs.kv.get("mask")
         shape = None if given is None else str(given).strip().lower()
         if shape is not None and shape not in imaging.MASKS:
-            self.n.add("M101", f"mask={given}", line, "circle, ellipse or rounded (radius=3mm)")
+            self.n.add("M101", f"mask={given} is not a shape: the image prints whole", line,
+                       "mask=circle, mask=ellipse or mask=rounded radius=3mm")  # fmt: skip
             shape = None
         if "radius" in attrs.kv and shape != "rounded":
             self.n.add("M101", "radius= does nothing without mask=rounded", line, "mask=rounded radius=3mm")
