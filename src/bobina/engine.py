@@ -307,7 +307,8 @@ def build(
                 where = f", line {e.nudge.line}" if e.nudge.line else ""
                 e.nudge.message = f"template {template_name}{where}: {e.nudge.message}"
                 e.nudge.line = None
-            elif template_name:  # refused while running: its line is the template's, not the document's
+            elif template_name and e.nudge.line:  # refused while running (data, a counter): where it ran, not
+                e.nudge.message += f" (while running template {template_name}, line {e.nudge.line})"  # its construct
                 e.nudge.line = None
             raise
         stars = meta.get("literal_asterisks", literal_asterisks)

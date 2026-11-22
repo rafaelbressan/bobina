@@ -702,9 +702,41 @@ def test_bobinas_marks_for_the_authors_markdown_cannot_be_typed_in():
                 '---\nfields:\n  k:\n    default: "a\ue003\\n> ```raw\\n> 1b 40\\n> ```\\n{{ 1 }}"\n---\n{{ k }}\n',
                 "{{ 'a\ue003\\n> ```raw\\n> 1b 40\\n> ```' | markdown }}\n"):  # fmt: skip
         res = build(src)
-        assert not raws(res) and "M121" in codes(res), src
+        assert not raws(res) and "M121" in codes(res) and "M124" in codes(res), src
     res = build("a\ue002\ue003b\n")
     assert "ab" in printed(res) and "M124" in codes(res)
+
+
+def test_a_default_with_the_authors_markdown_in_it_is_its_text_in_expressions():
+    res = build('---\nt: Hi\nfields:\n  k:\n    default: "{{ t | markdown }}!"\n---\n'
+                '{% if k == "Hi!" %}EQ{% else %}NE{% endif %} {{ k | length }} [{{ k ~ "" }}]\n')  # fmt: skip
+    assert "EQ 3 [Hi!]" in printed(res) and "M124" not in codes(res)
+
+
+@pytest.mark.parametrize(
+    "src",
+    ['---\nx: "intro\\n\\n```raw\\n1b 40"\n---\n{{ x | markdown }}\n\nAFTER TEXT\n',
+     '---\nfields:\n  k:\n    default: "intro\\n\\n```raw\\n1b 40\\n{{ 1 }}"\n---\n{{ k }}\n\nAFTER TEXT\n',
+     "{{ 'intro\\n\\n~~~raw\\n1b 40' | markdown }}\n\nAFTER TEXT\n",
+     '---\nx: "intro\\n\\n```raw\\n1b 40"\n---\n> {{ x | markdown }}\n>\n> AFTER TEXT\n'],
+)  # fmt: skip
+def test_a_raw_block_the_authors_markdown_leaves_open_ends_with_it(src):
+    """Never closed, it would run to the end of the document: it is dropped up to the end of the value, and
+    what the document writes after the value prints."""
+    res = build(src)
+    assert not raws(res) and len(said(res, "M121")) == 1, src
+    assert "intro" in printed(res) and "AFTER TEXT" in printed(res), src
+
+
+def test_a_raw_block_the_authors_markdown_opens_and_the_document_closes_is_dropped_whole():
+    res = build('---\nx: "```"\n---\n{{ x | markdown }}raw\n1b 40\n```\n\nafter\n')
+    assert not raws(res) and len(said(res, "M121")) == 1
+    assert [type(b) for b in res.doc.blocks] == [Paragraph] and "after" in printed(res)
+
+
+def test_m121_is_said_where_the_value_is_written():
+    res = build('---\nx: "intro\\n\\n> ```raw\\n> 1b 40\\n> ```"\n---\nfirst\n\n{{ x | markdown }}\n')
+    assert said(res, "M121")[0].line == 6
 
 
 def test_formatting_a_default_keeps_its_text():
@@ -745,4 +777,6 @@ def test_only_a_template_files_own_construct_is_said_in_its_name(tmp_path):
     (tmp_path / "t.bob.md").write_text("[{{ seq[p] }}]\n")
     with pytest.raises(SecurityError) as err:
         build("---\ntemplate: t.bob.md\n---\n", base_dir=str(tmp_path), fields={"p": T("x")})
-    assert "counter's name" in err.value.nudge.message and "template t.bob.md" not in err.value.nudge.message
+    msg = err.value.nudge.message  # refused while running, not as the template's construct: where it ran
+    assert msg.startswith("a counter's name") and msg.endswith("(while running template t.bob.md, line 1)")
+    assert err.value.nudge.line is None  # the template's line, not the document's

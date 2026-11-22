@@ -497,7 +497,7 @@ class _Splice:
     code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
 
     def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=(),
-                 authored: dict[int, str] | None = None):  # fmt: skip
+                 authored: dict | None = None):  # fmt: skip
         self.values, self.nudges, self.off = values or [], nudges, off
         self.authored = authored or {}  # lines of the author's Markdown (a | markdown value, a default): M121
         self.said_raw: set[str] = set()
@@ -572,17 +572,46 @@ class _Splice:
     def authors_raw(self, node, line: int) -> bool:
         """A raw block the author's Markdown opens (a | markdown value, a field's default: Rendered.authored),
         however it is written (in a quote, a list, after a no-break space): dropped, said once for each value
-        (M121). Raw blocks are the document's own. One it opens with a value inside: M314, as for any value."""
+        where the value is written (M121). Raw blocks are the document's own. One the document opens with such a
+        value inside: M314, as for any value."""
         first, end = node.map or (0, 0)
-        why = self.authored.get(first)
-        if why is not None:
-            if why not in self.said_raw:
-                self.said_raw.add(why)
-                self.nudges.add("M121", why, line, "write the raw block in the document itself")
+        a = self.authored.get(first)
+        if a is not None:
+            self.say_raw(a)
             return True
         if any(i in self.authored for i in range(first + 1, end)):
             raise SecurityError("M314", "variables cannot be used inside raw blocks", line)
         return False
+
+    def say_raw(self, a) -> None:
+        if a.why not in self.said_raw:
+            self.said_raw.add(a.why)
+            self.nudges.add("M121", a.why, a.first + 1 + self.off, "write the raw block in the document itself")
+
+    def close_raw(self, text: str) -> str:
+        """`text` without the raw blocks the author's Markdown leaves open: never closed, one would run to the end
+        of the document and take what follows the value with it. Its lines up to the value's end are blank
+        (M121), so every line keeps its number."""
+        if not self.authored:
+            return text
+        lines = re.split(r"\r\n?|\n", text)
+        for _ in range(len(self.authored)):
+            if not any("```" in lines[i] or "~~~" in lines[i] for i in self.authored if i < len(lines)):
+                break
+            cut = None
+            for t in _md().parse("\n".join(lines), {}):
+                a = self.authored.get(t.map[0]) if t.type == "fence" and t.map else None
+                if a and t.map[1] - 1 > a.last and not _closes(lines[t.map[1] - 1], t.markup):
+                    info, chosen = self.kind((t.info or "").strip())
+                    if not chosen and _fence_kind(info)[0].lower() == "raw":
+                        cut = (t.map[0], a)
+                        break
+            if cut is None:
+                break
+            first, a = cut
+            lines[first : a.last + 1] = [""] * (a.last + 1 - first)
+            self.say_raw(a)
+        return "\n".join(lines)
 
     def kind(self, info: str) -> tuple[str, bool]:
         """A fence's info string with the author's own values in its kind word opened (```{{ 'qr' }}, ```{{ k }}
@@ -717,6 +746,7 @@ def parse(
 
 
 def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dict | None) -> Document:
+    text = _splice().close_raw(text)
     lines = _Source(re.split(r"\r\n?|\n", text))  # as markdown-it counts them (its maps index these)
     tails = _title_tails(lines)
     while True:  # a {…} after a title row is taken out first: GFM would not see a table with one cell too many
@@ -1022,17 +1052,7 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             out.append(Divider(line=ln))
         elif t in ("fence", "code_block"):
             info, chosen = _splice().kind((n.info or "").strip())
-            kind, a, arg = info, Attrs(), ""
-            m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
-            if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
-                kind, arg = m.group(1), m.group(2) or ""
-                if m.group(3) is not None:
-                    a = parse_attrs(m.group(3)) or Attrs()
-            elif info.split(maxsplit=1)[0].lower() in WORD_BLOCKS:  # ```contact whatsapp business: the block
-                kind, rest = info.split(maxsplit=1)  # still says what is wrong (Q112), never prints as text
-                attrs = re.search(r"\{(.*)\}\s*$", rest)
-                arg = rest[: attrs.start()].strip() if attrs else rest.strip()
-                a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
+            kind, arg, a = _fence_kind(info)
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
             if chosen:  # ```{{ lang }}: only the author chooses what a block is
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
@@ -1049,6 +1069,30 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
         elif n.children:
             out.extend(_blocks(n.children, nudges, off, src))
     return out
+
+
+def _closes(line: str, markup: str) -> bool:
+    """`line` is the closing fence of a fence opened with `markup` (inside quotes and lists too): one the document
+    closes is dropped whole, as written (_Splice.authors_raw), not cut at the value's end."""
+    if not markup:
+        return False
+    return re.fullmatch(rf"[>\s]*{re.escape(markup[0])}{{{len(markup)},}}\s*", line) is not None
+
+
+def _fence_kind(info: str) -> tuple[str, str, Attrs]:
+    """A fence's kind as written, its word (```contact whatsapp) and its attributes, from its info string."""
+    kind, a, arg = info, Attrs(), ""
+    m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
+    if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
+        kind, arg = m.group(1), m.group(2) or ""
+        if m.group(3) is not None:
+            a = parse_attrs(m.group(3)) or Attrs()
+    elif info.split(maxsplit=1)[0].lower() in WORD_BLOCKS:  # ```contact whatsapp business: the block
+        kind, rest = info.split(maxsplit=1)  # still says what is wrong (Q112), never prints as text
+        attrs = re.search(r"\{(.*)\}\s*$", rest)
+        arg = rest[: attrs.start()].strip() if attrs else rest.strip()
+        a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
+    return kind, arg, a
 
 
 def _attr_lines(tb: Table, a: Attrs, line: int) -> None:

@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -241,7 +242,15 @@ AUTHOR_OPEN, AUTHOR_CLOSE = "\ue002", "\ue003"  # where the author's Markdown go
 AUTHOR_MARK = re.compile(AUTHOR_OPEN + r"(\d*)" + AUTHOR_OPEN + "|[" + AUTHOR_OPEN + AUTHOR_CLOSE + "]")
 
 
-def author_lines(text: str, said: list[str]) -> tuple[str, dict[int, str]]:
+class Authored(NamedTuple):
+    """The author's Markdown in the document: what M121 says for it, its first and last lines (0-based)."""
+
+    why: str
+    first: int
+    last: int
+
+
+def author_lines(text: str, said: list[str]) -> tuple[str, dict[int, Authored]]:
     """The document without the marks finalize put around the author's Markdown (a | markdown value, a field's
     default), and the lines that Markdown is on (0-based, as markdown-it counts them): the parser drops a raw
     block that opens on one of them (M121, said[i] for the mark's number). A mark never closed runs to the end."""
@@ -261,11 +270,12 @@ def author_lines(text: str, said: list[str]) -> tuple[str, dict[int, str]]:
     clean = "".join(out)
     spans += [(start, len(clean), i) for start, i in open_]
     breaks = [m.end() for m in re.finditer(r"\r\n?|\n", clean)]
-    lines: dict[int, str] = {}
+    lines: dict[int, Authored] = {}
     for start, end, i in sorted(spans):
         if end > start and i < len(said):  # an empty value brings no Markdown
-            for n in range(bisect.bisect_right(breaks, start), bisect.bisect_right(breaks, end - 1) + 1):
-                lines.setdefault(n, said[i])
+            first, last = bisect.bisect_right(breaks, start), bisect.bisect_right(breaks, end - 1)
+            for n in range(first, last + 1):
+                lines.setdefault(n, Authored(said[i], first, last))
     return clean, lines
 
 
@@ -343,7 +353,7 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
-    authored: dict[int, str] = field(default_factory=dict)  # lines of the author's Markdown: M121 (author_lines)
+    authored: dict[int, Authored] = field(default_factory=dict)  # lines of the author's Markdown (author_lines)
 
     def resolve(self, s: str) -> str:
         """`s` with its placeholders as their values' text (a value holds none: finalize scrubs it); one that is no
@@ -529,7 +539,8 @@ class CounterStore:
                     "M311",
                     f'counter format \'{f}\' must contain exactly one {{:spec}}, e.g. "{{:d}}" or "A-{{:03}}"',
                 )
-            if any(len(n.lstrip("0")) > len(str(MAX_OUTPUT)) or int(n) > MAX_OUTPUT for n in re.findall(r"\d+", m[1])):
+            sizes = [n.lstrip("0") or "0" for n in re.findall(r"\d+", m[1])]  # 0005 is 5, however many zeros
+            if any(len(n) > len(str(MAX_OUTPUT)) or int(n) > MAX_OUTPUT for n in sizes):
                 raise SecurityError(  # measured before it is built, as a printf format is (check_format)
                     "M313",
                     f"counter format '{f}' asks for a field wider than {MAX_OUTPUT // 1_000_000} MB",
@@ -1628,7 +1639,8 @@ def render(
             tainted = tainted or values[i].tainted
             return values[i].text
 
-        text = PH_RE.sub(text_of, made)  # one pass: the text, and whether a value in it was data
+        text = AUTHOR_MARK.sub("", PH_RE.sub(text_of, made))  # one pass: the text, and whether a value in it was
+        # data; without the marks of the author's Markdown in it ({{ t | markdown }}): those are for the document
         out = (TaintedDefault if tainted else Default)(text)
         out._source, out._field = made, name
         return out
@@ -1636,7 +1648,14 @@ def render(
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                ctx[k] = default_value(k, env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
+                if "{{" in str(d):
+                    own = str(d)
+                    if AUTHOR_MARK.search(own):  # typed in: never a mark of the author's Markdown (M124)
+                        scrubbed.append(True)
+                        own = AUTHOR_MARK.sub("", own)
+                    ctx[k] = default_value(k, env.from_string(own).render(ctx))
+                else:
+                    ctx[k] = trust(d)
             except SecurityError as e:
                 e.nudge.message = f"default of field '{k}': {e.nudge.message}"
                 e.nudge.line = None
