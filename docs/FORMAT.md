@@ -65,18 +65,18 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
-| `\*`, `\#` … | CommonMark escapes: the character is printed literally |
+| `\*`, `\#` … | CommonMark escapes: printed literally |
 | `****TOTAL****` | printed with its asterisks (`M106`) |
 
 ## 3. Attributes `{…}` ✓
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 - at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, its line and those above back to the previous `{…}`
-- on a span: `Total: [R$ 42,00]{.bold size=large}`
+- on a span: `Total: [R$ 42,00]{.bold size=large}` (only the span grows; ⚠ not tested on paper)
 - on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
 
-`Table 4 {.center}` / `Waiter: Ana {.right}` / `Thanks` on 3 lines: centred, right, left.
+`Table 4 {.center}` / `Waiter: Ana {.right}` / `Thanks`: centred, right, left.
 
 | Class | Effect |
 |---|---|
@@ -84,7 +84,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
 | `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native) |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
-| `.mono` | monospace (the printer font is already monospace) |
+| `.mono` | monospace (the printer font already is) |
 | `.compact` | tables: do not stretch |
 | `.solid .dashed .dotted .double .wavy .cut` | divider style (`.cut` adds scissors: a place to tear) |
 

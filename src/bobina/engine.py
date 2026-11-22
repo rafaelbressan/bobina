@@ -197,6 +197,8 @@ def _note_untested(prof, rows, nudges) -> None:
         used.append("codepage")
     if "cutter" in on:
         used.append("cutter")
+    if "mixed-sizes" in features.untested() and any(isinstance(r, TextRow) and r.native and r.mixed() for r in rows):
+        used.append("mixed-sizes")
     if "native-barcode-imported" in on and any(isinstance(r, BarcodeRow) for r in rows):
         used.append("native-barcode-imported")
     drawn = {u for r in rows if isinstance(r, BitmapRow) for u in r.untested}

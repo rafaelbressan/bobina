@@ -19,6 +19,7 @@ class Cell:
     italic: bool = False
     strike: bool = False
     wide: bool = False  # occupies two columns (CJK, drawn checkbox)
+    scale: tuple[int, int] | None = None  # its own GS ! size (a span's size=); None: the row's
 
 
 def columns(cells: list[Cell]) -> int:
@@ -40,6 +41,32 @@ class TextRow:
 
     def columns(self) -> int:
         return columns(self.cells)
+
+    def scale_of(self, c: Cell) -> tuple[int, int]:
+        return c.scale or self.scale
+
+    def mixed(self) -> bool:
+        """A span on it has its own size (Um [BRS]{size=2x} dois): the sizes change along the line."""
+        return any(c.scale and c.scale != self.scale for c in self.cells)
+
+    def width(self) -> int:
+        """Columns at 1x the row takes on the paper: each cell's columns times its own width."""
+        return sum((2 if c.wide else 1) * self.scale_of(c)[0] for c in self.cells)
+
+    def height(self) -> int:
+        """Lines at 1x the row takes: its tallest cell's height (the others sit on the same baseline, at its foot)."""
+        return max([self.scale[1], *(c.scale[1] for c in self.cells if c.scale)])
+
+    def runs(self) -> list[tuple[tuple[int, int], list[Cell]]]:
+        """The cells in runs of one size, left to right: each is printed (GS !) and drawn at its own size."""
+        out: list[tuple[tuple[int, int], list[Cell]]] = []
+        for c in self.cells:
+            s = self.scale_of(c)
+            if out and out[-1][0] == s:
+                out[-1][1].append(c)
+            else:
+                out.append((s, [c]))
+        return out
 
 
 @dataclass

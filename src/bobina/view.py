@@ -25,6 +25,7 @@ BRAILLE = [
 ]
 
 
+QUOTE_BAR = "│"  # the bar of a > quote (layout.QUOTE_BAR)
 TEAR_MARK = " ⟶ "
 TURNED_TABLE = " ↻ table printed turned, header on the right "  # the terminal shows its text standing
 TURNED_COLUMNS = (" ↻ columns printed turned, top on the right ", " ↻ turned, top on the right ", " ↻ turned ",
@@ -92,11 +93,14 @@ def _sgr(cell, color: bool) -> tuple[str, str]:
 
 
 def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
-    sw, sh = row.scale
+    """A text row as terminal lines: a letter at N× width takes N columns, at N× height N lines. A row whose spans
+    have their own size (Um [BRS]{size=2x} dois) shows every letter on its last line, the baseline they share on
+    paper, under the blank lines its taller letters take."""
     parts, width = [], 0
     cells = list(reversed(row.cells)) if row.upside_down else row.cells
     align = {"left": "right", "right": "left"}.get(row.align, row.align) if row.upside_down else row.align
     for c in cells:
+        sw = row.scale_of(c)[0]
         on, off = _sgr(c, color)
         ch = icons.shown(c.ch)  # the terminal cannot draw an icon: a mark in its two columns
         glyph = ch + (" " if c.wide and unicodedata.east_asian_width(ch) not in ("W", "F") else "")
@@ -104,7 +108,11 @@ def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
         width += (2 if c.wide else 1) * sw
     pad = {"center": (cols - width) // 2, "right": cols - width}.get(align, 0)
     line = " " * max(0, pad) + "".join(parts) + " " * max(0, cols - width - max(0, pad))
-    return [line] + [" " * cols] * (sh - 1)
+    if not row.mixed():
+        return [line] + [" " * cols] * (row.height() - 1)
+    bars = "".join(c.ch if c.ch == QUOTE_BAR else " " * ((2 if c.wide else 1) * row.scale_of(c)[0]) for c in cells)
+    above = (" " * max(0, pad) + bars).ljust(cols)  # a quote's bars go up the taller line, as on paper
+    return [above] * (row.height() - 1) + [line]
 
 
 def width(rows, profile) -> int:
@@ -119,11 +127,11 @@ def width(rows, profile) -> int:
 def fit(row: TextRow, cols: int) -> TextRow:
     """A line of drawn text in the frame's `cols` columns: as it is, or cut with "…" (text in a smaller font widens
     the frame instead: BitmapRow.wide_view)."""
-    if row.columns() * row.scale[0] <= cols:
+    if row.width() <= cols:
         return row
     kept, used = [], 0
     for c in row.cells:
-        w = (2 if c.wide else 1) * row.scale[0]
+        w = (2 if c.wide else 1) * row.scale_of(c)[0]
         if used + w > cols - row.scale[0]:
             break
         kept.append(c)
@@ -166,7 +174,7 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
                 out += [ln[:cols] + more for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
         elif isinstance(r, BitmapRow) and r.text_rows:
             trs = r.text_rows if r.wide_view else [fit(tr, frame) for tr in r.text_rows]  # wide_view: never cut
-            room = max([cols, *(tr.columns() * tr.scale[0] for tr in trs)])  # a smaller font's paper line: wider
+            room = max([cols, *(tr.width() for tr in trs)])  # a smaller font's paper line: wider
             for tr in trs:
                 if r.kind == "band":  # white on black on paper, from edge to edge
                     tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
@@ -231,7 +239,7 @@ def _columns_view(cv, profile):
     out, shift = [], 0
     for c in cv.columns:
         sub = replace(profile, width_dots=c.inner)
-        drawn = [tr.columns() * tr.scale[0] for r in c.rows if isinstance(r, BitmapRow) and r.text_rows
+        drawn = [tr.width() for r in c.rows if isinstance(r, BitmapRow) and r.text_rows
                  and r.kind != "table" for tr in r.text_rows]  # fmt: skip
         w = max([width(c.rows, sub), *drawn])
         out.append((sub, c.left + shift, w))

@@ -245,9 +245,12 @@ def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
     w = max(1, t.width())
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
+    fa, fd = t.font.getmetrics()
     if t.invert:
-        d.rectangle((0, 0, w - 1, line_h - 1), fill=0)
-    fa, _ = t.font.getmetrics()
+        top, bottom = 0, line_h - 1
+        if ascent - fa > 2 or line_h - (ascent + fd) > 2:  # beside bigger letters (a span's size=): its own height
+            top, bottom = ascent - fa, ascent + fd - 1
+        d.rectangle((0, top, w - 1, bottom), fill=0)
     ink = 255 if t.invert else 0
     if t.icon:
         from . import icons

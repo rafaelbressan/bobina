@@ -354,13 +354,15 @@ class Layout:
         if scale[0] not in ok or scale[1] not in ok:
             self.n.add("F303", f"size {scale[0]}x{scale[1]} is jagged on this printer", line, "use up to 4x", "N1")
 
-    def cells_from_runs(self, runs: list[Run], extra: dict) -> list[Cell | None]:
-        """Runs -> cells; None marks a forced line break."""
+    def cells_from_runs(self, runs: list[Run], extra: dict, sized=None) -> list[Cell | None]:
+        """Runs -> cells; None marks a forced line break. sized(run): the GS ! size of a span's own size= (None:
+        the line's), kept on each of its cells."""
         out: list[Cell | None] = []
         for r in runs:
             if r.text == "\n":
                 out.append(None)
                 continue
+            own = sized(r) if sized and r.size else None
             for ch in self.text(r.text):
                 if ch == "\n":
                     out.append(None)
@@ -374,25 +376,29 @@ class Layout:
                         italic=r.italic or extra.get("italic", False),
                         strike=r.strike or extra.get("strike", False),
                         wide=is_wide(ch),
+                        scale=own,
                     )
                 )
         return out
 
-    def wrap(self, cells: list[Cell | None], cap: int, hang: int, line: int) -> list[list[Cell]]:
-        """Greedy word wrap on columns; `hang` columns already used on continuation lines."""
+    def wrap(self, cells: list[Cell | None], cap: int, hang: int, line: int, measure=columns,
+             unit: int = 1) -> list[list[Cell]]:  # fmt: skip
+        """Greedy word wrap on columns; `hang` columns already used on continuation lines. measure, unit: a line
+        whose spans have their own size is measured in dots (cap too), `unit` dots to a column of the line."""
 
         def split(word, at):
-            self.said_cut("".join(c.ch for c in word), f"{at} columns", line, "shorten it or use a smaller size")
+            hint = "shorten it or use a smaller size"
+            self.said_cut("".join(c.ch for c in word), f"{at // unit} columns", line, hint)
 
         lines: list[list[Cell]] = []
         para: list[Cell] = []
         for c in cells:
             if c is None:
-                lines += wrap_words(word_tokens(para), cap, hang, split)
+                lines += wrap_words(word_tokens(para), cap, hang, split, measure)
                 para = []
             else:
                 para.append(c)
-        return lines + wrap_words(word_tokens(para), cap, hang, split)
+        return lines + wrap_words(word_tokens(para), cap, hang, split, measure)
 
     def said_cut(self, word: str, at: str, line: int, hint: str, around: str = "") -> None:
         """L101 for a word longer than the line, cut to fill lines (`at`: the line's width, as it is counted); an
@@ -772,10 +778,26 @@ class Layout:
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)), self.align
         )
-        cells = self.cells_from_runs(runs, extra)
+        sizes: dict[str, tuple[int, int]] = {}
+
+        def sized(r: Run) -> tuple[int, int] | None:  # a span's size= as the line's size= maps it (F303, M101)
+            if r.size not in sizes:
+                sizes[r.size] = self.scale_for(r.size, line)
+                self.jagged(sizes[r.size], line)
+            return None if sizes[r.size] == scale else sizes[r.size]
+
+        cells = self.cells_from_runs(runs, extra, sized)
         prefix = prefix or []
         pw = columns(prefix)
         advance = self.p.cell[0] * scale[0] + self.p.tracking_gap(tracking, scale[0])  # as the printer spaces them
+        measure, unit = columns, 1  # columns of the line's size; spans of their own size: dots
+        if any(c is not None and c.scale for c in cells):
+
+            def measure(cs: list[Cell]) -> int:
+                return sum((2 if c.wide else 1) * self.p.cell[0] * (c.scale or scale)[0]
+                           + self.p.tracking_gap(tracking, (c.scale or scale)[0]) for c in cs)  # fmt: skip
+
+            unit = advance
         gutter = indent  # columns at 1x: quote gutters and list indents
         quoted = bool(self.bars_in(gutter))
         drawn_bars = quoted and scale[0] > 1  # a 2x line cannot hold a 1x │: drawn into it as an image
@@ -789,22 +811,27 @@ class Layout:
                 "L101", "indent and letter spacing leave no room on the line", line, "reduce indent= or tracking="
             )
             cap = pw + 1
-        if leading is not None and self.p.cell[1] * scale[1] + leading > 255:
-            self.n.add("M101", f"leading={leading} too large for {scale[1]}x height", line)
-        lines = self.wrap(cells, cap - pw, 0, line)
+        tallest = max([scale[1], *(c.scale[1] for c in cells if c is not None and c.scale)])
+        if leading is not None and self.p.cell[1] * tallest + leading > 255:
+            self.n.add("M101", f"leading={leading} too large for {tallest}x height", line)
+        lines = self.wrap(cells, (cap - pw) * unit, 0, line, measure, unit)
         rows = []
         for i, lc in enumerate(lines):
             if align == "justify" and i < len(lines) - 1:
-                lc = _justify(lc, cap - pw)
+                lc = _justify(lc, (cap - pw) * unit, measure, unit)
             lead = (self.lead(indent, gutter) if not drawn_bars else [Cell(" ")] * indent) + (
                 prefix if i == 0 else [Cell(" ")] * pw
             )
             row_align = "left" if align == "justify" else align
             if quoted and row_align != "left":  # centred in the room after the bar, never the bar with it
-                free = max(0, cap - pw - columns(lc))
+                free = max(0, (cap - pw) * unit - measure(lc)) // unit
                 lead += [Cell(" ")] * (free // 2 if row_align == "center" else free)
                 row_align = "left"
             cells_line = lead + lc
+            own, line_scale = {c.scale for c in cells_line}, scale
+            if len(own) == 1 and None not in own:  # a line all of one span's size: that size is the line's
+                line_scale = own.pop()
+                cells_line = [replace(c, scale=None) for c in cells_line]
             reason = self.native_ok(cells_line)
             if reason.startswith("glyph"):
                 self.n.add(
@@ -819,7 +846,7 @@ class Layout:
             rows.append(
                 TextRow(
                     cells_line,
-                    scale,
+                    line_scale,
                     row_align,
                     line,
                     native=not reason,
@@ -844,7 +871,15 @@ class Layout:
                 )
                 for r in rows
             ]
+        if quoted:  # a span's size= makes a line taller than its │: the bars drawn its whole height, as at 2x
+            return [self.tall_quoted(r, gutter) if r.height() > r.scale[1] else r for r in rows]
         return rows
+
+    def tall_quoted(self, row: TextRow, gutter: int) -> BitmapRow:
+        """A quoted line taller than its 1x │ (a span's own size): printed as an image with the quote bars drawn
+        from its top to its foot; the views show its letters as they are, the bars on each of their lines."""
+        bare = replace(row, cells=[replace(c, ch=" ") if c.ch == QUOTE_BAR else c for c in row.cells])
+        return BitmapRow(self.draw_bars(self.em.render_row(bare, self.W), gutter, 0), row.line, "text", [row])
 
     def band(self, rows: list[TextRow], line: int) -> BitmapRow:
         """Continuous inverted band (GS B leaves spaces white, so it goes raster)."""
@@ -3852,10 +3887,11 @@ class _FontInk:
             im.paste(part if invert else ImageChops.darker(im.crop(box), part), box[:2])
 
 
-def _justify(cells: list[Cell], cap: int) -> list[Cell]:
-    width = columns(cells)
+def _justify(cells: list[Cell], cap: int, measure=columns, unit: int = 1) -> list[Cell]:
+    """Spaces of the line's size added between words until the line is `cap` wide (in the unit of measure: columns,
+    or dots for a line whose spans have their own size, `unit` dots to a space)."""
     gaps = [i for i, c in enumerate(cells) if c.ch == " "]
-    extra = cap - width
+    extra = (cap - measure(cells)) // unit
     if not gaps or extra <= 0:
         return cells
     add = {g: extra // len(gaps) + (1 if k < extra % len(gaps) else 0) for k, g in enumerate(gaps)}
