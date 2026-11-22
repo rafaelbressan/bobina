@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Checks of the table tasks in evals/agent-eval.yaml, graded from what the real bobina says and shows: `bobina check
---json` (problems, and the width each column got: L108) and `bobina view` (the strip as text; a drawn rule is a
+"""Checks of the table and chart tasks in evals/agent-eval.yaml, graded from what the real bobina says and shows:
+`bobina check --json` (problems, the width each column got: L108, what a chart drew: C101) and `bobina view` (the strip as text; a drawn rule is a
 line of braille dots; a table in a raster font is a map of the paper when it fits the paper's printer-font columns,
 else on its own grid in a wider frame, every cell whole; only a raster paragraph wider than the frame is cut with
 "…", so text is matched whole or cut). The document is read only for what never prints (a value typed in a cell
@@ -291,10 +291,58 @@ def fix_discount_wider(path):
         fail(f"the discount line stays in its column (it ends before column {total_at}): {lines[d : d + 2]}")
 
 
+def drawn(path: str, kind: str) -> str:
+    """What bobina check says it drew (C101) for the first chart of that kind; fails when there is none."""
+    said = [p["message"] for p in problems(path) if p["code"] == "C101" and p["message"].startswith(f"chart={kind}:")]
+    if not said:
+        fail(f"no chart={kind} drawn (bobina check says no C101 for one)")
+    return said[0]
+
+
+def supply_line(path):
+    said = drawn(path, "line")
+    if not all(w in said for w in ("8 points", "by date", "values read: 0, 800, 3500, 52000, 120000, 300000")):
+        fail(f"a line of the 8 supply values spaced by date expected: {said}")
+
+
+def supply_three_values_along_the_axis(path):
+    said = drawn(path, "line")
+    ticks = re.search(r"y ticks (.*?) \((turned along the axis|upright)\)", said)
+    if not ticks or len(ticks.group(1).split(", ")) != 3 or ticks.group(2) != "turned along the axis":
+        fail(f"three Y values written along the axis expected: {said}")
+
+
+def supply_about_3cm(path):
+    m = re.search(r"; (\d+)x(\d+) dots", drawn(path, "line"))
+    if not m or not 216 <= int(m.group(2)) <= 264:  # 3 cm is 240 dots at 203 dpi
+        fail(f"a chart about 3 cm tall expected: {m.group(0) if m else 'no size'}")
+
+
+def bakery_bars(path):
+    said = drawn(path, "bar")
+    if not all(w in said for w in ("7 points", "2 series", "values read: 1240.5, 980, 1105.25, 1320, 1890.75, 2430")):
+        fail(f"bars of the 7 days' sales read as reais, and a second series (the goal), expected: {said}")
+
+
+def file_bars(path):
+    said = drawn(path, "bar")
+    if not all(w in said for w in ("1 series (valor)", "5 points", "values read: 530.5, 590, 500.75, 750, 660")):
+        fail(f"bars of valor per data from vendas.csv (5 days, summed) expected: {said}")
+    if [r for r in body_rows(path) if re.search(r"320|410|380|450|520", r)]:
+        fail("the values were typed into the document: they should come from vendas.csv")
+
+
+def file_half_centred_grid(path):
+    said = drawn(path, "bar")
+    if not re.search(r"; 1[89]\dx\d+ dots, centred", said) or "a grid" not in said:
+        fail(f"half the paper wide, centred, with dotted lines at the values expected: {said}")
+
+
 CHECKS = {f.__name__.replace("_", "-"): f for f in (
     clean, totals_without_title, totals_name_left_value_right, bar_titles_ruled, bar_items,
     market_one_line_per_item, market_smaller_letters, market_code_narrow, market_discount_under_description,
     prices_prefixed, prices_not_before_names, prices_not_typed, fix_prices, fix_receipt_look, fix_discount_wider,
+    supply_line, supply_three_values_along_the_axis, supply_about_3cm, bakery_bars, file_bars, file_half_centred_grid,
 )}  # fmt: skip
 
 

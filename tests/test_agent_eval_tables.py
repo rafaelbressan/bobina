@@ -37,7 +37,8 @@ def box(tmp_path, monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     work = tmp_path / "work"
     work.mkdir()
-    (work / "etiqueta.bob.md").write_bytes((ROOT / "evals" / "fixtures" / "etiqueta.bob.md").read_bytes())
+    for name in ("etiqueta.bob.md", "vendas.csv"):
+        (work / name).write_bytes((ROOT / "evals" / "fixtures" / name).read_bytes())
     monkeypatch.chdir(work)
     return work
 
