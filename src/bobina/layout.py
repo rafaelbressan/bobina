@@ -161,22 +161,22 @@ def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list
         elif cur:
             cur += gap
             width += measure(gap)
-        whole, room = word, avail
+        whole, room, done = word, avail, 0
+        text = "".join(c.ch[:1] or " " for c in word)  # one letter per cell: soft_break's offsets are cells
         while ww > avail and len(word) > 1:  # a word longer than a full line
             k, take = 0, 0
             while k < len(word) and take + measure(word[k : k + 1]) <= avail:
                 take += measure(word[k : k + 1])
                 k += 1
             k = max(k, 1)  # a wide character on a line of one column: on a line of its own, never lost
-            text = "".join(c.ch for c in word)
             for j in range(k, 0, -1):  # the last soft place that leaves the line at least half full
                 if 2 * measure(word[:j]) < avail:
                     break
-                if rasterfont.soft_break(text, j):
+                if rasterfont.soft_break(text, done + j):
                     k = j
                     break
             lines.append(word[:k])
-            word, avail = word[k:], cap - hang
+            word, avail, done = word[k:], cap - hang, done + k
             ww = measure(word)
         if word is not whole:
             split(whole, room)
@@ -394,10 +394,11 @@ class Layout:
                 para.append(c)
         return lines + wrap_words(word_tokens(para), cap, hang, split)
 
-    def said_cut(self, word: str, at: str, line: int, hint: str) -> None:
+    def said_cut(self, word: str, at: str, line: int, hint: str, around: str = "") -> None:
         """L101 for a word longer than the line, cut to fill lines (`at`: the line's width, as it is counted); an
-        address is better carried by a QR code."""
-        if "://" in word or "www." in word:
+        address is better carried by a QR code (looked for in `around` too: a table cell's whole text, as its words
+        reach wrap_words in pieces)."""
+        if any(m in (word + " " + around).lower() for m in ("://", "www.")):
             hint += "; a ```qr block carries the address whole"
         self.n.add("L101", f"word '{''.join(icons.shown(ch) for ch in word)[:20]}…' split at {at}", line, hint)
 
@@ -622,16 +623,20 @@ class Layout:
 
         def split(word, room):  # a word wider than the line, cut: its width in columns of its font (its digit)
             t = next((t for t in word if not t.icon), word[0])
-            cols = room // max(1, replace(t, text="0", icon="").width())
+            cols = room * 10 // max(1, replace(t, text="0" * 10, icon="", italic=False).width())  # no slant
             name = f"{fam} {t.px}px"  # the block's font: a word in a run of another font= is rare
             smaller = "use a smaller size (size=12px) or " if t.px > 12 else ""
             self.said_cut("".join(x.text for x in word), f"{cols} columns in {name}", line,
                           f"{smaller}add a space or a hyphen to the word")  # fmt: skip
 
+        room = self.W - indent * self.p.cell[0] - indent_dots - (pimg.width if pimg else 0)  # render_block's
+        if room < rasterfont.letter_width(toks):  # as the printer font says it (layout_lines cuts nothing then)
+            self.n.add(
+                "L101", "indent and letter spacing leave no room on the line", line, "reduce indent= or tracking="
+            )
         im, texts = rasterfont.render_block(
             toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl, split=split
         )
-        room = self.W - indent * self.p.cell[0] - indent_dots - (pimg.width if pimg else 0)  # render_block's
         view_rows = [
             TextRow(
                 self.view_with_bars(self.view_cells(t, room), indent, rtl),
@@ -661,14 +666,15 @@ class Layout:
 
     def view_cells(self, toks, room: int) -> list[Cell]:
         """A line of drawn text as cells for the terminal views, every letter the paper shows (in a smaller font,
-        more than the paper's columns: the views widen), a word longer than the line's `room` dots cut where the
-        paper cuts it. Inverted words stay inverted (the rest of a drawn line is plain, as on paper)."""
+        more than the paper's columns: the views widen), a letter or icon wider than the line's `room` dots (left
+        whole by layout_lines, which cuts longer words onto new lines) cut where the paper cuts it. Inverted words
+        stay inverted (the rest of a drawn line is plain, as on paper)."""
         out, x = [], 0
         for t in toks:
             w = t.width()
             k = len(t.text)
             while k and x + w > room and replace(t, text=t.text[:k]).width() > room - x:
-                k -= 1  # the letters whose advance ends on the paper (render_block draws past it, cut off)
+                k -= 1  # the letters whose advance ends on the paper (render_block draws past it: the paper cuts it)
             out += [Cell(ch, wide=is_wide(ch), invert=t.invert) for ch in t.text[:k]]
             x += w
         return out
@@ -3072,10 +3078,15 @@ class Layout:
         span's: the widths it covers and the spaces between them) and aligned (:-- --: :-:, or its class). A word
         longer than its column is cut and said (L101), but not in columns given a width: that is what was asked."""
 
-        def split(word, at):
-            shown = "".join(icons.shown(c.ch) for c in word)[:20]
-            self.n.add("L101", f"word '{shown}…' split at {at // ink.scale} columns in a table", t.line,
-                       "shorten it, leave out a column, or turn the table: orientation=vertical")  # fmt: skip
+        def split_in(cell: list[Cell]):
+            around = "".join(c.ch for c in cell)
+
+            def split(word, at):
+                self.said_cut("".join(c.ch for c in word), f"{at // ink.scale} columns in a table", t.line,
+                              "shorten it, leave out a column, or turn the table: orientation=vertical",
+                              around)  # fmt: skip
+
+            return split
 
         def quiet(word, at):
             pass
@@ -3086,7 +3097,9 @@ class Layout:
                 word_tokens(_at(cells_row, s.first, []), pieces=True),
                 _span(widths, s) * ink.scale,
                 0,
-                quiet if lay and (lay.quiet or all(lay.fixed[i] is not None for i in s.cols)) else split,
+                quiet
+                if lay and (lay.quiet or all(lay.fixed[i] is not None for i in s.cols))
+                else split_in(_at(cells_row, s.first, [])),
                 ink.measure,
             )  # fmt: skip
             for s in slots

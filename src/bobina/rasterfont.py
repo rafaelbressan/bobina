@@ -394,10 +394,18 @@ def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
 
 
+def letter_width(toks: list[Tok]) -> int:
+    """How wide one letter of these tokens is drawn: a digit of the first that is text (no slant), else the first
+    icon. A line narrower than that holds no letter: a word is not cut for it (each letter on a line of its own,
+    off the paper)."""
+    t = next((t for t in toks if not t.icon), None)
+    return dataclasses.replace(t, text="0", italic=False).width() if t else toks[0].width() if toks else 0
+
+
 def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[list[Tok]]:
     """Tokens wrapped at their spaces into lines `width` dots wide (`width - hang` after the first). A word wider
     than a whole line is cut to fill lines (_cut), never drawn past the paper; split(word, room) is called once for
-    each word that was cut (to say it: L101)."""
+    each word that was cut (to say it: L101). A line too narrow for one letter (letter_width) cuts nothing."""
     units: list[list[Tok]] = []  # words: a token and the glued parts after it
     for t in toks:
         if t.glue and units and not units[-1][0].brk and not units[-1][-1].space:
@@ -442,7 +450,7 @@ def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[lis
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
         whole, room = u, avail
-        while tw > avail:  # a word wider than a whole line: cut to fill lines
+        while tw > avail and width - hang >= letter_width(u):  # wider than a whole line: cut to fill lines
             head, rest = _cut(u, avail)
             if not rest:  # one letter or icon wider than the line: whole, it sticks out
                 break

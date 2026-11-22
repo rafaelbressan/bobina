@@ -148,3 +148,28 @@ def test_every_raster_line_fits_its_room():
 def test_one_letter_wider_than_the_line_is_kept_whole():
     t = rasterfont.Tok("W", rasterfont.resolve("Terminus").path, 32)
     assert [[x.text for x in ln] for ln in rasterfont.layout_lines([t], 4, 0)] == [["W"]]
+
+
+def test_an_indent_that_leaves_no_room_cuts_nothing_and_says_so():
+    """No room for one letter: the word is not cut letter by letter onto blank lines (a 21-dot row, not 1302)."""
+    res = build(f"{WORD}{WORD} {{font=Terminus size=16px indent=47}}\n")
+    (row,) = [r for r in res.rows if hasattr(r, "image")]
+    assert row.image.height < 40
+    (n,) = cuts(res)
+    assert n.message == "indent and letter spacing leave no room on the line"
+
+
+def test_italic_says_the_columns_its_lines_hold():
+    res = build(f"{URL} {{font=Terminus size=16px .italic}}\n")
+    (n,) = cuts(res)
+    assert "split at 48 columns in Terminus 16px" in n.message
+
+
+def test_an_address_cut_in_a_table_cell_suggests_a_qr_code():
+    res = build(f"| Consulta | Valor |\n|---|---|\n| {URL} | 12,00 |\n")
+    assert cuts(res) and all("```qr" in n.suggestion for n in cuts(res))
+
+
+def test_an_address_in_capitals_suggests_a_qr_code():
+    (n,) = cuts(build(f"{URL.upper().removeprefix('HTTPS://')} {{font=Terminus size=16px}}\n"))
+    assert "```qr" in n.suggestion
