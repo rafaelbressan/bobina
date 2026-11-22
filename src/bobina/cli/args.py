@@ -43,6 +43,7 @@ TEXT
     font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
     a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (bobina help table)
     a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
+    as a chart: {chart=line|bar|area|sparkline}; rows from a file: {data=sales.csv} (bobina help chart)
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
     crop=x,y,w,h (pixels of the file or %) mask=circle|ellipse|rounded radius=3mm .invert rotate=90 mirror=x
@@ -197,6 +198,10 @@ NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pi
 # Topics that are other names, so bobina help does not list them again: "commands" is what bobina help prints
 # without a topic, and "problems" is the docs' name for nudges.
 ALSO_NAMED = frozenset({"commands", "problems"})
+# Words people and agents try first for something that lives under another topic: charts are tables
+# (chart= under one), images are in the format's summary. bobina help chart opens the table help, not "chat?".
+TOPIC_WORDS = {"chart": "table", "charts": "table", "graph": "table", "graphs": "table",
+               "image": "format", "images": "format"}  # fmt: skip
 # The topics bobina help lists, in the footer of its own help.
 SHOWN = [t for t in TOPICS if t not in ALSO_NAMED]
 # The same list with the other things it takes, for the help command's description, an unknown topic's error and
@@ -264,6 +269,7 @@ def _help_text(topic: str, name: str | None = None) -> str:
 
 def cmd_help(args):
     topic, as_json, name = args.topic, getattr(args, "json", False), getattr(args, "name", None)
+    topic = TOPIC_WORDS.get(topic.lower(), topic) if topic else topic
     topic = topic.lower() if topic and topic.lower() in TOPICS else topic
     if name and topic not in NAMED:
         raise Fail(USAGE, f"only 'bobina help pay SCHEME' and 'bobina help contact NETWORK' take a second word "

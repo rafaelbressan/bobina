@@ -46,7 +46,7 @@ CELL_HINT = (
 TABLE_HINT = (
     "a table takes "
     + ", ".join([*(f".{c}" for c in sorted(TABLE_CLASSES)), *(f"{k}=" for k in sorted(TABLE_KEYS - {"id"}))])
-    + " and #id (docs/guides/tables.md)"
+    + " and #id (docs/guides/tables.md); a chart: chart=line|bar|area|sparkline, data=FILE (bobina help chart)"
 )
 OBJECT_WIDTH_HINT = "full, half, third, 50%, 30mm or dots (200)"
 BOX_LINES = ("solid", "dashed", "dotted", "double")  # a box's frame: the divider's lines
@@ -2019,7 +2019,10 @@ class Layout:
         if kind == "image":
             return self.image(f.content.strip(), f.attrs, f.line)
         if kind not in ("", "text", "txt", "plain"):
-            self.n.add("M102", f"block type '{kind}' is not supported (yet): printed as text", f.line)
+            hint = None
+            if kind in ("chart", "graph", "plot", "sparkline", "vega", "vega-lite"):  # charts are tables here
+                hint = "a chart is a table with {chart=line} under it: bobina help chart, docs/guides/charts.md"
+            self.n.add("M102", f"block type '{kind}' is not supported (yet): printed as text", f.line, hint)
         rows = []
         cap = self.cols - indent
         for ln in f.content.rstrip("\n").split("\n"):
@@ -3013,8 +3016,12 @@ class Layout:
         for name in idle:
             by_line.setdefault(self.said_at(t, name), []).append(name)
         for line, names in sorted(by_line.items()):
+            hint = TABLE_HINT
+            kind = str(a.kv.get("type", "")).lower().rstrip("s")
+            if "type=" in names and kind in ("line", "bar", "area", "sparkline"):  # a chart meant: chart= names it
+                hint = f"chart={kind} draws the table as a chart (bobina help chart)"
             self.n.add("M101", f"{', '.join(names)} {'does' if len(names) == 1 else 'do'} nothing on a table", line,
-                       TABLE_HINT)  # fmt: skip
+                       hint)  # fmt: skip
 
     def table_style(self, t: Table) -> str:
         """style= on the table's {…} line; anything else is said (M101) and the table prints plain."""

@@ -99,3 +99,36 @@ def test_the_mcp_server_uses_the_clis_lists():
     from bobina import mcp_server
 
     assert mcp_server.LISTED is args.LISTED and mcp_server.EXIT_CODES is args.EXIT_CODES
+
+
+@pytest.mark.parametrize("word", ["chart", "Charts", "graph", "graphs"])
+def test_help_chart_opens_the_table_help_where_charts_are(word, capsys):
+    assert cli.main(["help", word]) == cli.OK
+    out = capsys.readouterr().out
+    assert "CHART" in out and "chart=line|bar|area|sparkline" in out and "chat?" not in out
+
+
+def test_help_images_opens_the_format_summary(capsys):
+    assert cli.main(["help", "images"]) == cli.OK
+    assert "mask=circle|ellipse|rounded" in capsys.readouterr().out
+
+
+def test_help_format_names_charts(capsys):
+    assert cli.main(["help", "format"]) == cli.OK
+    assert "{chart=line|bar|area|sparkline}" in capsys.readouterr().out
+
+
+def test_a_chart_fence_points_to_the_table_syntax():
+    (n,) = [n for n in build("```chart\nSeg, 10\n```\n").nudges if n.code == "M102"]
+    assert "{chart=line}" in n.suggestion and "bobina help chart" in n.suggestion
+
+
+@pytest.mark.parametrize("given, meant", [("bar", "bar"), ("bars", "bar"), ("Line", "line")])
+def test_type_on_a_table_suggests_chart(given, meant):
+    (n,) = [n for n in build(f"| d | v |\n|---|--:|\n| a | 1 |\n{{type={given}}}\n").nudges if n.code == "M101"]
+    assert n.suggestion.startswith(f"chart={meant} ")
+
+
+def test_the_table_hint_names_the_chart_keys():
+    (n,) = [n for n in build("| d | v |\n|---|--:|\n| a | 1 |\n{.dashed}\n").nudges if n.code == "M101"]
+    assert "chart=line|bar|area|sparkline" in n.suggestion
