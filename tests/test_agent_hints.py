@@ -51,8 +51,8 @@ def test_undefined_variable_with_data_lists_the_columns(tmp_path, capsys):
 
 
 def test_counter_format_error_shows_a_valid_format(capsys):
-    run("check", '---\ncounters:\n  t: { format: "{}" }\n---\n{{ seq.t }}')
-    assert '"{:d}"' in capsys.readouterr().err
+    run("check", '---\ncounters:\n  t: { format: "{} {}" }\n---\n{{ seq.t }}')
+    assert '"A-{:03}"' in capsys.readouterr().err
 
 
 def test_no_roll_length_nudge_on_a_file_printer(tmp_path, capsys):

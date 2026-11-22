@@ -66,7 +66,8 @@ A table with only its title row and second line, and `data=` under it:
 | `sparkline` | a small line, no axes, no labels, one text line tall: beside a number in columns |
 
 When every label is a date (`2026-11-07`, `27/01`, `Jan 27`, `27 jan`), lines and areas space the points by the time
-between them; other labels, and bars, are evenly spaced.
+between them; other labels, and bars, are evenly spaced. Dates without a year follow one another: `Dec 20, Jan 5` is
+the next January.
 
 ## Size and axes
 

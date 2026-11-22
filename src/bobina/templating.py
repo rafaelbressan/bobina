@@ -412,7 +412,7 @@ def split_front_matter(text: str) -> tuple[dict, str, int]:
 
 # ---------------------------------------------------------------- counters
 
-FMT_RE = re.compile(r"^[^{}]*\{:([^{}]*)\}[^{}]*$")  # one {:spec}; its numbers: its width and precision
+FMT_RE = re.compile(r"^[^{}]*\{(?::([^{}]*))?\}[^{}]*$")  # one {} or {:spec}; its numbers: width and precision
 
 
 def letters(n: int) -> str:
@@ -561,9 +561,9 @@ class CounterStore:
             if not m:
                 raise SecurityError(
                     "M311",
-                    f'counter format \'{f}\' must contain exactly one {{:spec}}, e.g. "{{:d}}" or "A-{{:03}}"',
+                    f'counter format \'{f}\' must contain exactly one {{}} or {{:spec}}, e.g. "{{}}" or "A-{{:03}}"',
                 )
-            sizes = [n.lstrip("0") or "0" for n in re.findall(r"\d+", m[1])]  # 0005 is 5, however many zeros
+            sizes = [n.lstrip("0") or "0" for n in re.findall(r"\d+", m[1] or "")]  # 0005 is 5, however many zeros
             if any(len(n) > len(str(MAX_OUTPUT)) or int(n) > MAX_OUTPUT for n in sizes):
                 raise SecurityError(  # measured before it is built, as a printf format is (check_format)
                     "M313",

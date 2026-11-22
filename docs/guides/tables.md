@@ -2,13 +2,13 @@
 
 A table is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
 
-- for the whole table, on the line right under it (blank line or not): `{style=receipt .compact}`;
+- for the whole table, on the line under it: `{style=receipt .compact}`; as a chart,
+  `{chart=bar}`: [charts.md](charts.md);
 - for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`;
-- for one cell, at the end of its text, and for one row, after its closing pipe; a cell over several columns
-  (`span=all`): [table-cells.md](table-cells.md).
+- for one cell, at the end of its text; for one row, after its closing pipe; a cell over columns (`span=all`):
+  [table-cells.md](table-cells.md).
 
-Everything with the same reach goes in one `{…}`. Names and values are lowercase. Whole receipts:
-[receipts.md](receipts.md).
+Everything with the same reach goes in one `{…}`. Names and values are lowercase.
 
 ```markdown
 | Item | Qty | Price |
@@ -38,10 +38,9 @@ title band or rule, in any style.
 
 At the end of a column's title cell:
 
-- `width=`: `7ch` (7 columns), `20mm`, `30%` (of the table's text room, the spaces between columns left out:
-  `50%` + `50%` fill it), `96` (dots), or `auto`, the default: the columns without a width share what is left. A
+- `width=`: `7ch` (7 columns), `20mm`, `30%` (of the text room, gaps left out: `50%` + `50%` fill it), `96` (dots), or `auto`, the default: the columns without a width share what is left. A
   column you give a width keeps it: its text wraps inside it, and a word longer than it (a 13-digit code in `7ch`)
-  is **cut at its edge without a warning**: you chose that width.
+  is **cut at its edge without a warning**: you chose that width. A narrow code column: [receipts-supermarket.md](receipts-supermarket.md).
 - `prefix="R$ "`, `suffix=" kg"`: printed before or after every value of the column, never in the title row nor in
   an empty cell. The column's width counts them. A value from `--data` or `--set` stays as it is.
 
@@ -53,7 +52,7 @@ At the end of a column's title cell:
 ```
 
 Without a title row: `| | {prefix="R$ "} |` (still empty).
-`bobina check FILE` says the width each column got (`L108`): `column widths: Product 14 · Price 8 · Sale 8 (+2 gaps =
+`bobina check` says each column's width (`L108`): `column widths: Product 14 · Price 8 · Sale 8 (+2 gaps =
 32 of 32)`. Widths wider than the paper shrink in proportion, `auto` columns keeping 2 (`L107`). With `font=`, `7ch`
 is 7 times that font's `0`.
 

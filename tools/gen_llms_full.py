@@ -24,7 +24,7 @@ PARTS = [
 # server that does not exist yet): they stay in the docs and on the site; llms-full.txt names where they are.
 SKIP = {
     # Names: the README says it; Drafts and editor: an editor needs a person at a terminal
-    "README.md": ("## Repository",),  # the source tree: for contributors, not for using bobina
+    "README.md": ("## Repository", "## Hardware notes (MTP-II)"),  # contributors; one printer, a person at it
     "docs/CLI.md": ("## Names", "## Drafts and editor (`edit`)", "## Decided", "## Help layout"),
     "docs/FORMAT.md": ("## 10. Conformance",),
     "docs/SECURITY.md": ("## Requirements before a print server or chat bot exists", "## Open"),

@@ -61,9 +61,11 @@ bobina init --yes             # agents, scripts: no questions, no print
 Bluetooth printing needs Linux and the system Python (`get.sh` picks it). The .deb, pipx, the boot service and a
 checkout: [docs/INSTALL.md](docs/INSTALL.md).
 Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
-`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
-Dates and money: the first `check`, `preview` or `print` takes the locale from the time zone and saves it
-(`M203`); `bobina config set locale en-US` changes it.
+`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer; `bobina printer list`
+shows where each one writes).
+Dates and money: the first command that reads a document (`check`, `preview`, `view` or `print`) takes the locale
+from the time zone and saves it in config.toml, once, so every later command formats alike (note `M203`);
+`bobina config set locale en-US` changes it.
 
 ## The format in one screen
 
@@ -100,7 +102,8 @@ Signed, [Ana]{font=hand size=32px}
 ````
 
 `bobina help format` has the rest: sizes (`small`…`huge`, physical mm), dividers, barcodes,
-Data Matrix, PDF417, images (dither and gamma), rotation, upside-down text, templates and data.
+Data Matrix, PDF417, images (dither, `crop=`, `mask=`), rotation, upside-down text, templates and data.
+A table with `{chart=bar}` under it prints as a chart: [docs/guides/charts.md](docs/guides/charts.md).
 
 ## One label per row
 
@@ -153,16 +156,7 @@ Q112) · 10 newer release.
 Pre-release (v0.x). MIT licensed (bundled fonts keep their own licenses: `src/bobina/fonts/LICENSES.md`). Baseline profile: `mtp-ii-58` (measured); 32 more imported from escpos-printer-db, not measured on paper (`bobina profile list`; calibrate before trusting them). Realistic preview is an estimate until
 the profile is calibrated from photos (`preview.calibrated = false`).
 
-## Hardware notes (MTP-II)
-
-| Symptom | Likely cause |
-|---|---|
-| `printer unreachable` | printer off or asleep: press POWER until the yellow LED is steady |
-| Blank output | roll upside down (the side that darkens with a fingernail faces the head) |
-| Turns off when printing | battery: charge it; first use: remove the film on the battery contacts |
-| Prints garbage | another app sent a different command language (TSPL/CPCL) as text; the MTP-II itself only speaks ESC/POS |
-| Self-test | printer off → hold FEED, press POWER, release at the beep |
-| The last line stops at the tear bar, or a `--marks tear` line is off | `bobina calibrate tear` (a ruler: tear it and read the mm), then `bobina calibrate feed` (does the printer obey a paper feed right after an image?) |
+<!-- 'Hardware notes (MTP-II)' left out here: see README.md -->
 
 
 <!-- file: docs/agents.md -->
@@ -180,13 +174,15 @@ every problem has a code, and every command that returns data has `--json`.
    terminal), `bobina preview FILE -o out.png` (the exact image). Print only what the user asked for.
 3. **Read the codes.** Warnings never block: each one has a code, a suggestion and the evidence. `bobina help CODE`
    says what to do; [problems/README.md](docs/problems/README.md) lists every code.
-4. **Try without hardware.** `bobina printer add test --path out.bin` is a file printer: each job's bytes are
+4. **First run.** The first `check`, `preview`, `view` or `print` saves the locale it took from the time zone
+   (`M203`, once). Set it first with `bobina config set locale pt-BR` when the user's language is known.
+5. **Try without hardware.** `bobina printer add test --path out.bin` is a file printer: each job's bytes are
    appended to `out.bin`.
 
 ## Machine output
 
-- `bobina check FILE --json` (and `print`, `preview`) gives `{"stats", "problems"}`; `--problems json|jsonl`
-  writes problems to stderr. Schemas: [schemas/README.md](docs/schemas/README.md).
+- `bobina check FILE --json > problems.json` (and `print`, `preview`) writes `{"stats", "problems"}` to stdout;
+  `--problems json|jsonl` writes the problems to stderr (`> f` would save the human summary). Schemas: [schemas/README.md](docs/schemas/README.md).
 - `bobina help --json` describes every command, option, topic and problem code.
 - Tables: `bobina help table` (`--json`): where each `{…}` goes (`style=receipt` under the table, a column's
   settings in its title cell) and the columns per line in each font.

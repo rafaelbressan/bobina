@@ -812,8 +812,12 @@ class Chart:
                 what.append(f"{g.nticks} values on the Y axis" if g.nticks else "no values on the Y axis")
             if g.font is not font:
                 what.append(f"labels in {g.font.name}")
+            if g.nticks != nt:  # fewer values: the height is short
+                hint = "a taller height= (height=40mm) or a smaller size= (size=16px)"
+            else:  # only smaller letters: the width is short, a taller chart would not help
+                hint = f"a wider width= (width=full), or size={g.font.px}px to choose these labels (then no note)"
             self.n.add("C105", f"a chart {H} dots tall and {W} wide is too small for its labels: {', '.join(what)}",
-                       self.t.line, "a taller height= (height=30mm) or a smaller size= (size=16px)")  # fmt: skip
+                       self.t.line, hint)  # fmt: skip
         im = Image.new("1", (W, H), 1)
         d = ImageDraw.Draw(im)
         self.drawn = (H, W) if turned else (W, H)  # as it lies on the paper: across, along

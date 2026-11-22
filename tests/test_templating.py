@@ -200,3 +200,15 @@ def test_lang_is_an_alias_of_locale():
     a = build("---\nlocale: pt-BR\n---\n{{ 4.5 | currency('BRL') }}").data
     b = build("---\nlang: pt-BR\n---\n{{ 4.5 | currency('BRL') }}").data
     assert a == b and b"4,50" in b
+
+
+def test_a_plain_counter_format_is_the_number():
+    res = build('---\ncounters:\n  t: { start: 100, format: "Senha {}" }\n---\n{{ seq.t }}')
+    assert text_of(res) == ["Senha 100"]
+
+
+@pytest.mark.parametrize("fmt", ["{} {}", "{0}", "{!r}", "{x}"])
+def test_a_counter_format_takes_one_plain_or_spec_field(fmt):
+    with pytest.raises(SecurityError) as e:
+        build(f'---\ncounters:\n  t: {{ format: "{fmt}" }}\n---\n{{{{ seq.t }}}}')
+    assert e.value.nudge.code == "M311" and "exactly one {} or {:spec}" in e.value.nudge.message

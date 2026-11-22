@@ -544,3 +544,12 @@ def test_a_stroke_is_centred_on_its_point():
     charts.segment(ImageDraw.Draw(im), (5, 10), (15, 10))
     assert [y for y in range(20) if im.getpixel((10, y)) == 0] == [9, 10]
     assert [x for x in range(20) if im.getpixel((x, 10)) == 0] == list(range(4, 16))
+
+
+def test_a_half_width_chart_with_small_labels_points_to_width_not_height():
+    rows = "".join(f"| 2026-11-0{d} | {v} |\n" for d, v in [(2, 530), (3, 590), (4, 500), (5, 750), (6, 660)])
+    src = f"| data | valor |\n|---|---|\n{rows}{{chart=bar width=half height=40mm}}\n"
+    (n,) = [n for n in build(src).nudges if n.code == "C105"]
+    assert "width=" in n.suggestion and "height" not in n.suggestion
+    chosen = build(src.replace("height=40mm", "height=40mm size=12px"))
+    assert not [n for n in chosen.nudges if n.code == "C105"]  # the small labels chosen: no note

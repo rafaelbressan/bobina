@@ -254,7 +254,7 @@ FIX = {
     "M205": "Write a BCP 47 tag (pt-BR, en-US, fr-CA); the message suggests the closest one bobina knows.",
     "M201": "Use CLDR date patterns (dd/MM/yyyy HH:mm), not Moment.js (DD/MM/YYYY).",
     "M310": "Templates cannot read files: put the content in the document.",
-    "M311": 'A counter format takes exactly one {:spec} ("{:d}", "A-{:03}"); other unsafe operations are refused.',
+    "M311": 'A counter format takes exactly one {} or {:spec} ("{}", "A-{:03}"); other unsafe operations are refused.',
     "M312": "A variable cannot choose a file or image path: write the path in the document.",
     "M313": "Simplify the template: a loop or the output passed bobina's limit.",
     "M314": "Variables cannot be used inside raw blocks.",

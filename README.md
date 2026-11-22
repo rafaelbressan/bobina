@@ -54,9 +54,11 @@ bobina init --yes             # agents, scripts: no questions, no print
 Bluetooth printing needs Linux and the system Python (`get.sh` picks it). The .deb, pipx, the boot service and a
 checkout: [docs/INSTALL.md](docs/INSTALL.md).
 Printer on another machine? `bobina init --command "ssh tower bobina send --yes -"`. No printer at hand?
-`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer).
-Dates and money: the first `check`, `preview` or `print` takes the locale from the time zone and saves it
-(`M203`); `bobina config set locale en-US` changes it.
+`bobina init --yes --printer ./out.bin`: every job's bytes are appended to `out.bin` (a file printer; `bobina printer list`
+shows where each one writes).
+Dates and money: the first command that reads a document (`check`, `preview`, `view` or `print`) takes the locale
+from the time zone and saves it in config.toml, once, so every later command formats alike (note `M203`);
+`bobina config set locale en-US` changes it.
 
 ## The format in one screen
 
@@ -93,7 +95,8 @@ Signed, [Ana]{font=hand size=32px}
 ````
 
 `bobina help format` has the rest: sizes (`small`…`huge`, physical mm), dividers, barcodes,
-Data Matrix, PDF417, images (dither and gamma), rotation, upside-down text, templates and data.
+Data Matrix, PDF417, images (dither, `crop=`, `mask=`), rotation, upside-down text, templates and data.
+A table with `{chart=bar}` under it prints as a chart: [docs/guides/charts.md](docs/guides/charts.md).
 
 ## One label per row
 

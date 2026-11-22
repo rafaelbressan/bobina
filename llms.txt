@@ -14,9 +14,8 @@ Facts an agent needs first:
   `--copies-from COL`, `--join FILE --on KEY`, `--set KEY=VALUE`; `bobina help data` has them on one screen.
 - A problem code in an error or warning: `bobina help CODE` (that code) says what to do.
 - The whole CLI for programs: `bobina help --json` (commands, options, topics, every problem code).
-- Machine output: `check --json` gives `{"stats", "problems"}`; `--problems json|jsonl` writes problems to stderr;
-  exit codes: 0 ok, 1 usage, 2 document, 3 strict, 4 unreachable, 5 printer not ready, 6 language,
-  7 confirmation, 8 security, 9 a payment code left out (Q111).
+- Machine output: `check --json > problems.json` (`{"stats", "problems"}` on stdout); `--problems json|jsonl` writes
+  to stderr; exit codes: [CLI.md](docs/CLI.md#exit-codes).
 - Reprint: `print --last` (identical bytes) or `--again` (re-rendered); `-o FILE` saves bytes instead of printing.
 - Try without hardware: `bobina printer add test --path out.bin` (a file printer).
 - An MCP client (Claude Code, Cursor): `uv tool install 'bobina[mcp]'`, `claude mcp add bobina -- bobina mcp`;
@@ -27,12 +26,13 @@ Facts an agent needs first:
 - [README](README.md): install, the document format in one screen, every command in one table
 - [Agents](docs/agents.md): the rules for agents, machine output
 - [MCP server](docs/mcp.md): `bobina mcp`, setup and tools
-- [Chat](docs/chat.md): `bobina chat` (a chat screen) or `bobina chat "QUESTION" --yes` (one printed answer); `bobina ai` chooses the AI
+- [Chat](docs/chat.md): `bobina chat`, or `bobina chat "QUESTION" --yes` for one printed answer; `bobina ai` picks the AI
 - [CLI reference](docs/CLI.md): commands and options, problems and exit codes, strips (`--compact`, `--marks`), calibration
 - [Document format](docs/FORMAT.md): the `.bob.md` format and the catalog of problem codes
 - [Batch printing guide](docs/guides/batch-printing.md): one label per row of a spreadsheet, step by step
 - [Payment codes](docs/pay.md): every `pay` scheme (Pix, UPI, SEPA…), what each field means in it and its limits
 - [Tables guide](docs/guides/tables.md): table styles (`style=receipt`, `grid`, `zebra`…), smaller fonts, column widths and `prefix=`, tables without titles
+- [Charts guide](docs/guides/charts.md): `{chart=line|bar|area|sparkline}` under a table; rows from a file with `data=`
 - [Table cells guide](docs/guides/table-cells.md): a cell's or a row's `{.bold .invert .shade .right}`, `span=all`
 - [Receipts guide](docs/guides/receipts.md): whole receipts to copy: totals, a bar bill, a 7-column supermarket receipt on 58 mm
 - [Layout guide](docs/guides/layout.md): boxes, `::: {.box title="TABLE"}` around blocks
