@@ -307,6 +307,8 @@ def build(
                 where = f", line {e.nudge.line}" if e.nudge.line else ""
                 e.nudge.message = f"template {template_name}{where}: {e.nudge.message}"
                 e.nudge.line = None
+            elif template_name:  # refused while running: its line is the template's, not the document's
+                e.nudge.line = None
             raise
         stars = meta.get("literal_asterisks", literal_asterisks)
         if not isinstance(stars, bool):
@@ -318,7 +320,7 @@ def build(
             stars = literal_asterisks
         doc = parse(
             rendered.text, nudges, line_offset=fm_lines, base_dir=base_dir, meta=meta, values=rendered.values,
-            literal_asterisks=stars,
+            literal_asterisks=stars, authored=rendered.authored,
         )  # fmt: skip
         doc.meta_lines = templating.front_matter_lines(source)
     rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()

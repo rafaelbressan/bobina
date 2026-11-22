@@ -28,7 +28,7 @@ from .model import (
     Run,
     Table,
 )
-from .nudges import Nudges
+from .nudges import Nudges, SecurityError
 from .templating import PH_CLOSE, PH_OPEN, PH_RE
 
 PH_SPLIT = re.compile(f"({PH_OPEN}\\d+{PH_CLOSE})")  # a value's placeholder, kept by re.split
@@ -496,8 +496,11 @@ class _Splice:
     one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line breaks. In a
     code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
 
-    def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=()):
+    def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=(),
+                 authored: dict[int, str] | None = None):  # fmt: skip
         self.values, self.nudges, self.off = values or [], nudges, off
+        self.authored = authored or {}  # lines of the author's Markdown (a | markdown value, a default): M121
+        self.said_raw: set[str] = set()
         self.line = 0  # the document line (1-based, offset) of the block being read: refusals inside it go there
         self.parsed: dict[str, tuple[list[Block], list[tuple[str, str]]]] = {}
         self.said: set[tuple[str, str]] = set()  # each refusal once per value (by its text: a loop repeats it)
@@ -565,6 +568,21 @@ class _Splice:
                                underline=r.underline or st.underline, invert=r.invert or st.invert,
                                mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
         return out
+
+    def authors_raw(self, node, line: int) -> bool:
+        """A raw block the author's Markdown opens (a | markdown value, a field's default: Rendered.authored),
+        however it is written (in a quote, a list, after a no-break space): dropped, said once for each value
+        (M121). Raw blocks are the document's own. One it opens with a value inside: M314, as for any value."""
+        first, end = node.map or (0, 0)
+        why = self.authored.get(first)
+        if why is not None:
+            if why not in self.said_raw:
+                self.said_raw.add(why)
+                self.nudges.add("M121", why, line, "write the raw block in the document itself")
+            return True
+        if any(i in self.authored for i in range(first + 1, end)):
+            raise SecurityError("M314", "variables cannot be used inside raw blocks", line)
+        return False
 
     def kind(self, info: str) -> tuple[str, bool]:
         """A fence's info string with the author's own values in its kind word opened (```{{ 'qr' }}, ```{{ k }}
@@ -683,11 +701,13 @@ def parse(
     meta: dict | None = None,
     values: list | None = None,
     literal_asterisks: bool = True,
+    authored: dict[int, str] | None = None,
 ) -> Document:
     """values: the render's values (Rendered.values): those rendered as Markdown that are not the author's own are
     spliced in after the document is parsed, so they never meet its source (_Splice). literal_asterisks: four or
-    more asterisks in a row print as written (_star_run_rule)."""
-    token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text)))
+    more asterisks in a row print as written (_star_run_rule). authored: the lines of the author's Markdown
+    (Rendered.authored), where no raw block may open (M121)."""
+    token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text), authored))
     stars = _LITERAL_STARS.set(literal_asterisks)
     try:
         return _parse(text, nudges, line_offset, base_dir, meta)
@@ -1017,6 +1037,8 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             if chosen:  # ```{{ lang }}: only the author chooses what a block is
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
                 kind, k, a, arg = "text", "text", Attrs(), ""
+            if k == "raw" and _splice().authors_raw(n, ln):
+                continue
             check_attrs(
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
                 extra=IMAGE_KEYS if k == "image" else CAPTION_KEYS if k in CODES else frozenset(),

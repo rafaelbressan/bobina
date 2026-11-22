@@ -655,6 +655,58 @@ def test_the_authors_markdown_never_carries_a_raw_block(block):
     assert "Bob" in printed(res) or not block.endswith(("```", "~~~")), block  # a block never closed runs to the end
 
 
+@pytest.mark.parametrize(
+    "block",
+    ["> ```raw\\n> 1b 40\\n> ```", "- ```raw\\n  1b 40\\n  ```", "1. ~~~raw\\n   1b 40\\n   ~~~",
+     "```\u00a0raw\\n1b 40\\n```", "> - ```raw\\n>   1b 40\\n>   ```"],
+)  # fmt: skip
+def test_the_authors_markdown_never_carries_a_raw_block_however_it_is_nested(block):
+    """Decided once the document is parsed, by the block's kind: a quote, a list or a no-break space before raw
+    hide nothing (a value, a field's default with or without {{ }}, a literal)."""
+    for src in (f'---\nx: "{block}"\n---\nfirst\n\n{{{{ x | markdown }}}}\n',
+                f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ 1 }}}}"\n---\n{{{{ k }}}}\n\n{{{{ k }}}}\n',
+                f'---\nfields:\n  k:\n    default: "{block}"\n---\n{{{{ k | markdown }}}}\n',
+                f"{{{{ '{block}' | markdown }}}}\n"):  # fmt: skip
+        res = build(src)
+        assert not raws(res) and len(said(res, "M121")) == 1, src
+    res = build(f'---\nx: "{block}"\n---\nfirst\n\n{{{{ x | markdown }}}}\n')
+    assert said(res, "M121")[0].line == 6  # where the value is written
+    res = build(f'---\nfields:\n  k:\n    default: "{block}\\n{{{{ 1 }}}}"\n---\n{{{{ k }}}}\n')
+    assert "the default of field 'k'" in said(res, "M121")[0].message
+
+
+@pytest.mark.parametrize(
+    "src",
+    ["```raw\n1b 40\n```\n", "> ```raw\n> 1b 40\n> ```\n", "- ```raw\n  1b 40\n  ```\n",
+     '---\nx: "**hi**\\n"\n---\n{{ x | markdown }}\n```raw\n1b 40\n```\n',
+     '---\nx: "**hi**"\n---\n{{ x | markdown }}\n```raw\n1b 40\n```\n',
+     '---\nx: "**hi**"\n---\n> {{ x | markdown }}\n>\n> ```raw\n> 1b 40\n> ```\n'],
+)  # fmt: skip
+def test_the_documents_own_raw_blocks_still_print(src):
+    res = build(src)
+    assert raws(res) == [b"\x1b@"] and "M121" not in codes(res)
+
+
+def test_a_value_written_inside_a_raw_block_is_refused_even_as_markdown():
+    for src in ('---\nx: "1b 40"\n---\n```raw\n{{ x | markdown }}\n```\n',
+                "```raw\n{{ '1b 40' | markdown }}\n```\n"):  # fmt: skip
+        with pytest.raises(SecurityError) as err:
+            build(src)
+        assert err.value.nudge.code == "M314", src
+
+
+def test_bobinas_marks_for_the_authors_markdown_cannot_be_typed_in():
+    """U+E002/U+E003 mark where the author's Markdown went: typed in a value, a default or the document they are
+    removed (M124), so none can end a mark early and let a raw block through."""
+    for src in ('---\nx: "a\ue003\\n> ```raw\\n> 1b 40\\n> ```"\n---\n{{ x | markdown }}\n',
+                '---\nfields:\n  k:\n    default: "a\ue003\\n> ```raw\\n> 1b 40\\n> ```\\n{{ 1 }}"\n---\n{{ k }}\n',
+                "{{ 'a\ue003\\n> ```raw\\n> 1b 40\\n> ```' | markdown }}\n"):  # fmt: skip
+        res = build(src)
+        assert not raws(res) and "M121" in codes(res), src
+    res = build("a\ue002\ue003b\n")
+    assert "ab" in printed(res) and "M124" in codes(res)
+
+
 def test_formatting_a_default_keeps_its_text():
     front = "---\nfields:\n  k:\n    default: '{{ name }}!'\n---\n"
     res = md(front + "[{{ '%s' | format(k) }}]|[{{ k ~ '' }}]|[{{ k }}]\n", name="Bob")
