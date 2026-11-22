@@ -526,7 +526,7 @@ def render_block(
         row = Image.new("L", (width, h), 255)
         x0 = 0 if rtl else indent + pw  # right to left: indent and bullet on the right
         avail = width - indent - pw
-        line_px = max([t.px for t in ln if not t.space] or [0])
+        line_px = max([t.px for t in ln] or [0])  # from the tokens ascent and descent come from
         parts = [draw_tok(t, ascent, ascent + descent, line_px) for t in ln]
         used = sum(p.width for p in parts)
         gaps = [k for k, t in enumerate(ln) if t.space]

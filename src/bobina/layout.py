@@ -30,6 +30,8 @@ SIZE_RE = rasterfont.SIZE_RE
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
 GS_MAX = 8  # the largest multiplier GS ! takes, in width and in height
+MULTIPLIER_RE = re.compile(r"^(\d+)x(?:(\d+))?$")  # 2x, 1x2, and those GS ! cannot take (0x, 17x)
+MULTIPLIER_HINT = "2x, 3x, 1x2 or a name: small, normal, large, title, huge"
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
@@ -303,6 +305,11 @@ class Layout:
         """The front matter's size: (normal when absent). One it cannot read is said once, at its line, and every
         block uses normal instead (never one problem per block)."""
         size = str(meta.get("size", "normal"))
+        m = MULTIPLIER_RE.match(size)
+        if m and not all(1 <= int(k) <= GS_MAX for k in m.groups(m.group(1))):
+            self.n.add("M101", f"size: {size} in the front matter: the printer font takes 1x to {GS_MAX}x, normal is "
+                       "used", self.doc.meta_lines.get("size"), MULTIPLIER_HINT)  # fmt: skip
+            return "normal"
         if size in self.p.get("native.sizes", {}) or rasterfont.readable(size, self.p):
             return size
         self.n.add("M101", f"size: {size} in the front matter is not a size: normal is used",
@@ -315,28 +322,32 @@ class Layout:
         s = RESERVED_CHARS.sub("", s)  # a placeholder a template cut in two: never printed as a glyph
         return CTRL.sub("", s.replace("\t", "    ")).translate(SPACES)
 
-    def scale_for(self, size: str | None, line: int) -> tuple[int, int]:
+    def scale_for(self, size: str | None, line: int, fallback: tuple[int, int] | None = None,
+                  span: bool = False) -> tuple[int, int]:  # fmt: skip
+        """A size= as printer-font multipliers (width, height). A multiplier GS ! cannot take (0x, 9x): M101 and
+        `fallback` (a span: its line's; a heading: its own), else the document's size. span: said as a span's."""
         if not size:
             size = self.size
         named = self.p.get("native.sizes", {})
         if size in named:
             return tuple(named[size])
-        m = SIZE_RE.match(size)
+        m = MULTIPLIER_RE.match(size)
         if m:
             w = int(m.group(1))
             h = int(m.group(2) or m.group(1))
-            return (w, h)
+            if 1 <= w <= GS_MAX and 1 <= h <= GS_MAX:
+                return (w, h)
+            where = " on a span" if span else ""
+            self.n.add("M101", f"size={size}{where}: the printer font takes 1x to {GS_MAX}x", line, MULTIPLIER_HINT)
+            return fallback or (self.scale_for(None, line) if size != self.size else (1, 1))
         m = UNIT_RE.match(size)
         if m:
             v = float(m.group(1))
             dots = v if m.group(2) == "px" else self.p.mm_to_dots(v)
             s = max(1, min(4, round(dots / self.p.cell[1])))
-            self.n.add(
-                "F303",
-                f"size {size} printed natively at {s}x",
-                line,
-                "set a raster font (fonts: body: Atkinson Hyperlegible) for exact sizes",
-            )
+            said = f"on a span: the printer font's nearest, {s}x" if span else f"printed natively at {s}x"
+            self.n.add("F303", f"size {size} {said}", line,
+                       "set a raster font (fonts: body: Atkinson Hyperlegible) for exact sizes")  # fmt: skip
             return (s, s)
         self.n.add("M101", f"unknown size '{size}'", line, "small, normal, large, title, huge, 2x, 1x2, 20px, 3mm")
         return (1, 1)
@@ -410,7 +421,8 @@ class Layout:
         self.n.add("L101", f"word '{''.join(icons.shown(ch) for ch in word)[:20]}…' split at {at}", line, hint)
 
     def native_ok(self, cells: list[Cell]) -> str:
-        """'' if the line can be printed natively, else the reason."""
+        """'' if the line can be printed natively, else the reason. Letters of a span's own size: GS ! would stand
+        each size on its cells' feet, not on one baseline, so the line is drawn in the printer font's look."""
         icon = False
         for c in cells:
             if c.italic:
@@ -424,6 +436,8 @@ class Layout:
                 continue
             if c.ch != " " and not self.p.native_glyph(c.ch):
                 return f"glyph {c.ch}"
+        if any(c.scale for c in cells):  # after the reasons that are said (a glyph the printer lacks: F301)
+            return "sizes"
         return "icon" if icon else ""
 
     def drawn_whole(self, runs) -> str:
@@ -609,7 +623,7 @@ class Layout:
             else:
                 t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
                 asc, desc = t.font.getmetrics()
-                pimg = rasterfont.draw_tok(t, asc, asc + desc)
+                pimg = rasterfont.draw_tok(t, asc, asc + desc, px)
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)),
             "right" if rtl and "align" not in self.doc.meta else self.align,  # Arabic, Hebrew: from the right
@@ -783,11 +797,7 @@ class Layout:
 
         def sized(r: Run) -> tuple[int, int] | None:  # a span's size= as the line's size= maps it (F303, M101)
             if r.size not in sizes:
-                own = self.scale_for(r.size, line)
-                if not all(1 <= k <= GS_MAX for k in own):  # GS ! takes 1 to 8 times: the span keeps the line's
-                    self.n.add("M101", f"size={r.size} on a span: the printer font takes 1x to {GS_MAX}x",
-                               line, "2x, 3x, 1x2 or a name: small, normal, large, title, huge")  # fmt: skip
-                    own = scale
+                own = self.scale_for(r.size, line, scale, span=True)  # one GS ! cannot take: the line's
                 self.jagged(own, line)
                 sizes[r.size] = own
             return None if sizes[r.size] == scale else sizes[r.size]
@@ -839,8 +849,6 @@ class Layout:
                 line_scale = own.pop()
                 cells_line = [replace(c, scale=None) for c in cells_line]
             reason = self.native_ok(cells_line)
-            if not reason and any(c.scale for c in cells_line):  # GS ! would stand them on their cells' feet, not
-                reason = "sizes"  # on one baseline: drawn in the printer font's look, each run on the line's baseline
             if reason.startswith("glyph"):
                 self.n.add(
                     "F301",
@@ -889,7 +897,7 @@ class Layout:
         cells = row.cells[indent:]
         if row.mixed():
             cells = [c if c.scale else replace(c, scale=row.scale) for c in cells]
-        return TextRow([*self.lead(gutter), *cells], (1, 1), "left", row.line)
+        return replace(row, cells=[*self.lead(gutter), *cells], scale=(1, 1), align="left")
 
     def tall_quoted(self, row: TextRow, gutter: int) -> BitmapRow:
         """A quoted line taller than its 1x │ (a span's own size): printed as an image with the quote bars drawn
@@ -1022,7 +1030,8 @@ class Layout:
     def _block(self, b, indent: int) -> list:
         if isinstance(b, Heading):
             h = self.p.get(f"native.headings.h{min(b.level, 3)}", {"scale": [1, 1], "bold": True})
-            scale = self.scale_for(b.attrs.kv["size"], b.line) if "size" in b.attrs.kv else tuple(h["scale"])
+            scale = tuple(h["scale"])
+            scale = self.scale_for(b.attrs.kv["size"], b.line, scale) if "size" in b.attrs.kv else scale
             return self.text_block(
                 b.runs,
                 line=b.line,
@@ -3880,7 +3889,7 @@ class _FontInk:
             at = 0
             for c in run:
                 if not c.ch.isspace():
-                    g = rasterfont.draw_tok(self.tok(c), self.asc, self.text_h)
+                    g = rasterfont.draw_tok(self.tok(c), self.asc, self.text_h, self.px)
                     gx = round(at / 64)
                     box = (gx, 0, min(ri.width, gx + g.width), self.text_h)
                     if box[2] > box[0]:

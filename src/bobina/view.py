@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import sys
 import unicodedata
+from dataclasses import replace
 
 from PIL import Image
 
@@ -138,7 +139,7 @@ def fit(row: TextRow, cols: int) -> TextRow:
         used += w
     last = kept[-1] if kept else row.cells[0]
     dots = type(last)(**{**last.__dict__, "ch": "…", "wide": False, "scale": None})  # at the row's size: as reserved
-    return TextRow([*kept, dots], row.scale, row.align)
+    return replace(row, cells=[*kept, dots])
 
 
 def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: int | None = None) -> list[str]:

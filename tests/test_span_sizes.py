@@ -251,3 +251,38 @@ def test_a_cut_view_line_with_big_spans_fits_its_frame():
 def test_a_quoted_2x_line_shows_its_span_at_its_size_beside_the_line_s_letters():
     lines = shown("> Um [BRS]{size=3x} dois {size=2x}")
     assert lines[:3] == ["│", "│", "│ U m   B  R  S    d o i s"]
+
+
+def test_a_line_or_heading_multiplier_gs_bang_cannot_take_falls_back():
+    res = build("BRS {size=9x}")
+    [row] = text_rows(res)
+    assert row.scale == (1, 1) and GS + b"!\x88" not in res.data
+    assert any(n.code == "M101" and "1x to 8x" in n.message for n in res.nudges)
+    res = build("# T {size=17x}")
+    [row] = text_rows(res)
+    assert row.scale == (2, 2)  # the heading's own size
+    assert any(n.code == "M101" and "size=17x" in n.message and "1x to 8x" in n.message for n in res.nudges)
+    res = build("---\nsize: 9x\n---\nBRS\n")
+    assert text_rows(res)[0].scale == (1, 1) and any(n.code == "M101" and "9x" in n.message for n in res.nudges)
+
+
+def test_a_span_size_in_dots_is_said_as_a_span_s():
+    res = build("Um [BRS]{size=48px} dois")
+    assert any(n.code == "F303" and "on a span" in n.message and "2x" in n.message for n in res.nudges)
+    assert not any("natively" in n.message for n in res.nudges)  # the line is drawn, not printed natively
+
+
+def test_the_writer_never_prints_mixed_sizes_through_gs_bang():
+    from bobina import escpos
+    from bobina.rows import Cell
+
+    row = TextRow([Cell("a"), Cell("B", scale=(2, 2))], (1, 1))  # marked native by mistake
+    data = escpos.encode([row], build("x").profile)
+    assert GS + b"v0" in data and b"aB" not in data
+
+
+def test_a_cut_view_line_keeps_how_the_row_prints():
+    from bobina.rows import Cell
+
+    row = view.fit(TextRow([Cell("a")] * 40, (1, 1), "right", upside_down=True, tracking=3, gap=10), 12)
+    assert (row.upside_down, row.tracking, row.gap, row.align) == (True, 3, 10, "right")
