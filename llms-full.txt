@@ -933,14 +933,14 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
   rendered at the target width (extras `bobina[svg]`, `bobina[pdf]`; missing → `I105`); they print as
   line art unless `.dither` or `dither=`.
 - `https://` URLs only when the command line has `--allow-net` (`I103` otherwise); public hosts only,
-  no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`).
+  no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
 - `width=` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
   `gamma=` (defaults: front matter `image:`, then the profile).
 - A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
   `.dither`, `.threshold` or `threshold=60%` choose.
-- First `crop=x,y,w,h` (pixels as a viewer shows them, or `%`: `crop=0,0,25%,15%`; SVG/PDF: `%`; outside: `I111`),
-  `.invert` (black ↔ white), `rotate=` any angle, `mirror=x|y|xy` (`.mirror`: x), fitted whole (`I110`); last
-  `mask=circle|ellipse|rounded` (`radius=3mm`, `12`, `10%`): paper outside it, even with `.invert`.
+- In order: `crop=x,y,w,h` (pixels as a viewer shows, or `%`; SVG/PDF: `%`; `I111`), `.invert`, `rotate=` any
+  angle, `mirror=x|y|xy` (`.mirror`: x), fitted whole (`I110`), `mask=circle|ellipse|rounded`
+  (`radius=3mm|12|10%`): paper outside.
 - `caption="…"`/`caption=alt`: a line under. Above 40 megapixels or unreadable: `I101`, the rest prints.
 
 ### 6.6 Text ✓
@@ -1153,6 +1153,7 @@ Nudges:
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |
+| `Q114` | note | a code in an inverted box stays black on white |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
 | `L103` | warning | preformatted line longer than the paper was wrapped |

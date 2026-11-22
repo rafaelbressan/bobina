@@ -53,6 +53,7 @@ FIX = {
         "always 5 dots) or put less data in it (it prints up to version 7). With render=native, module= and width= "
         "have no effect."
     ),
+    "Q114": "Nothing to fix: the code scans. For a band with no white in it, put the code after the box's closing :::.",
     # L layout
     "L101": (
         "Add a space or a hyphen to the long word, or use a smaller size; an address prints whole as a QR code "

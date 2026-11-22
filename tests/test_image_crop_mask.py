@@ -310,3 +310,89 @@ def test_the_view_shows_an_inverted_box_with_heavy_lines_and_reversed_in_colour(
     assert plain[0].startswith("┏") and plain[1].startswith("┃hello") and plain[-1].startswith("┗")
     coloured = [ln for ln in view.lines(res.rows, res.profile, color=True) if ln.strip() and "┄" not in ln]
     assert all(ln.startswith("\x1b[7m") and ln.endswith("\x1b[0m") for ln in coloured)
+
+
+# --- review fixes -------------------------------------------------------------------------------------------------
+
+
+def test_a_band_title_of_a_box_inside_an_inverted_box_is_a_band_and_says_nothing():
+    res = build("::: {.box .invert}\n::: {.box title=HI title-style=band}\nx\n:::\n:::\n")
+    assert "M101" not in codes(res)  # nobody wrote .invert: the band is the inner box's own
+    im = box_image(res)
+    whitest = max(1 - ink(im.crop((0, y, W, y + 1))) for y in range(im.height))
+    assert whitest > 0.7  # the inner band reads as a band: a white strip across the black, its title black
+
+
+def test_the_colour_view_shows_a_bold_band_title_plain_inside_an_inverted_box():
+    res = build("::: {.box .invert title=HELLO title-style=band}\nx\n:::\n")
+    (title,) = [ln for ln in view.lines(res.rows, res.profile, color=True) if "H" in ln]
+    assert "\x1b[1;7m" not in title and "\x1b[1;27m" in title  # bold, and plain again in the reversed box
+    assert title.startswith("\x1b[7m") and title.endswith("\x1b[0m")
+
+
+def test_the_colour_view_of_a_turned_inverted_box_leaves_its_mark_plain():
+    res = build("::: {.box .invert rotate=90}\nhi\n:::\n")
+    out = [ln for ln in view.lines(res.rows, res.profile, color=True) if "↻" in ln]
+    assert out and "\x1b[7m" not in out[0]
+
+
+def code_margin(im: Image.Image, top: int, bottom: int) -> tuple[int, int]:
+    """In the middle row of a code drawn in rows top..bottom: (where the band's black stops on the left, where the
+    code's first black module is)."""
+    y = (top + bottom) // 2
+    row = [im.getpixel((x, y)) for x in range(im.width)]
+    white = row.index(255)
+    return white, row.index(0, white)
+
+
+def test_a_qr_code_in_an_inverted_box_stays_black_on_white_in_its_quiet_zone():
+    res = build(
+        "::: {.box .invert}\n**Pay here** {.center}\n\n```qr {width=half}\nhttps://example.com/pay/42\n```\n:::\n"
+    )
+    (said_q,) = said(res, "Q114")
+    assert "black on white" in said_q
+    (b,) = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "box"]
+    im = b.image.convert("L")
+    (top, bottom, kind) = b.code_spans[0]
+    assert kind == "qr"
+    edge, first = code_margin(im, top, bottom)
+    assert im.getpixel((2, (top + bottom) // 2)) == 0  # the band goes on beside it
+    code = im.crop((edge, top, W - edge, bottom))
+    x0, y0, _, _ = code.point(lambda v: 255 - v).getbbox()  # the modules
+    run = next(x for x in range(x0, code.width) if code.getpixel((x, y0)) == 255) - x0  # a finder's top: 7 modules
+    module = run / 7
+    assert module >= 3 and first - edge >= 4 * module  # 4 modules of paper before the code
+    assert code.getpixel((round(x0 + 3.5 * module), round(y0 + 3.5 * module))) == 0  # the finder's black centre
+    assert code.getpixel((round(x0 + 1.5 * module), round(y0 + 1.5 * module))) == 255  # inside its black ring
+
+
+def test_a_barcode_in_an_inverted_box_keeps_its_quiet_zone():
+    res = build("::: {.box .invert}\n```barcode {module=2}\nABC-123\n```\n:::\n")
+    assert said(res, "Q114")
+    (b,) = [r for r in res.rows if isinstance(r, BitmapRow) and r.kind == "box"]
+    im = b.image.convert("L")
+    top, bottom, _ = b.code_spans[0]
+    edge, first = code_margin(im, top, bottom)
+    assert first - edge >= 10 * 2  # 10 modules of paper before the bars
+
+
+def test_a_tall_inverted_box_in_a_turned_label_is_cut_between_its_lines():
+    box = "::: {.box .invert}\n" + "\n".join(f"line {i}" for i in range(40)) + "\n:::"
+    src = f":::: {{.columns orientation=vertical}}\n::: {{.column}}\n{box}\n:::\n::: {{.column}}\nx\n:::\n::::\n"
+    res = build(src)
+    (n,) = [n for n in res.nudges if n.code in ("L112", "L114")]
+    assert n.code == "L112" and "between its lines" in n.message
+
+
+def test_shade_on_an_inverted_box_is_said_and_left_out():
+    res = build("::: {.box .invert .shade}\nhello\n:::\n")
+    assert said(res, "M101") == [".shade does nothing on an inverted box: it is black"]
+    plain = box_image(build("::: {.box .invert}\nhello\n:::\n"))
+    assert box_image(res).tobytes() == plain.tobytes()
+
+
+def test_the_format_still_says_a_document_cannot_enable_the_network():
+    from pathlib import Path
+
+    fmt = (Path(__file__).resolve().parents[1] / "docs" / "FORMAT.md").read_text(encoding="utf-8")
+    assert "A document cannot enable the network." in fmt.split("### 6.5 Images")[1].split("### 6.6")[0]

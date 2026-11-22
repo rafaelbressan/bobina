@@ -48,6 +48,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "native QR with fixed modules: this QR printed as an image",
         "",
     ),
+    "Q114": ("note", "a code in an inverted box keeps black on white, in a white margin (scanners need it)", ""),
     # L layout
     "L101": ("warning", "word longer than the line was split", ""),
     "L102": ("note", "long print", ""),

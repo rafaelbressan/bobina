@@ -245,6 +245,7 @@ from this list.
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9) |  |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, the rest prints, exit 9) |  |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |  |
+| `Q114` | note | a code in an inverted box keeps black on white, in a white margin (scanners need it) |  |
 
 ### Images
 

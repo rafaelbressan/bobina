@@ -76,7 +76,9 @@ def braille(im: Image.Image, cell=(12, 24), specks: bool = False) -> list[str]:
     return out
 
 
-def _sgr(cell, color: bool) -> tuple[str, str]:
+def _sgr(cell, color: bool, dark: bool = False) -> tuple[str, str]:
+    """A cell's escapes. dark: it is drawn in a reversed area (an inverted box), so a reversed cell shows plain and
+    every reset goes back to reversed."""
     if not color:
         return "", ""
     codes = []
@@ -87,22 +89,22 @@ def _sgr(cell, color: bool) -> tuple[str, str]:
     if cell.underline:
         codes.append("4")
     if cell.invert:
-        codes.append("7")
+        codes.append("27" if dark else "7")
     if cell.strike:
         codes.append("9")
-    return (f"\x1b[{';'.join(codes)}m", "\x1b[0m") if codes else ("", "")
+    return (f"\x1b[{';'.join(codes)}m", BASE[dark]) if codes else ("", "")
 
 
-def text_lines(row: TextRow, cols: int, color: bool) -> list[str]:
+def text_lines(row: TextRow, cols: int, color: bool, dark: bool = False) -> list[str]:
     """A text row as terminal lines: a letter at N× width takes N columns, at N× height N lines. A row whose spans
     have their own size (Um [BRS]{size=2x} dois) shows every letter on its last line, the baseline they share on
-    paper, under the blank lines its taller letters take."""
+    paper, under the blank lines its taller letters take. dark: inside an inverted box (the colour view)."""
     parts, width = [], 0
     cells = list(reversed(row.cells)) if row.upside_down else row.cells
     align = {"left": "right", "right": "left"}.get(row.align, row.align) if row.upside_down else row.align
     for c in cells:
         sw = row.scale_of(c)[0]
-        on, off = _sgr(c, color)
+        on, off = _sgr(c, color, dark)
         ch = icons.shown(c.ch)  # the terminal cannot draw an icon: a mark in its two columns
         glyph = ch + (" " if c.wide and unicodedata.east_asian_width(ch) not in ("W", "F") else "")
         parts.append(on + glyph + off + " " * (sw - 1) * (2 if c.wide else 1))
@@ -142,11 +144,13 @@ def fit(row: TextRow, cols: int) -> TextRow:
     return replace(row, cells=[*kept, dots])
 
 
-def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: int | None = None) -> list[str]:
+def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: int | None = None,
+          dark: bool = False) -> list[str]:  # fmt: skip
     """The rows as terminal lines, each `frame` columns wide (width()); the paper's text, rules and images keep the
     paper's columns. Text drawn as an image reads as text, reversed only where the paper is white on black (a band;
     inverted words are reversed by their own cells). A table in a raster font is a map of the paper when it fits
-    the paper's columns (Layout.paper_map), else its own wider grid, every cell whole (wide_view)."""
+    the paper's columns (Layout.paper_map), else its own wider grid, every cell whole (wide_view). dark: inside an
+    inverted box, already reversed (_sgr)."""
     cols = profile.columns
     frame = frame or width(rows, profile)
     more = " " * (frame - cols)  # past the paper's columns, in a frame widened for a table in a smaller font
@@ -163,25 +167,26 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
         elif isinstance(r, BitmapRow) and r.kind == "cut":  # the printed cut line between --compact labels
             out.append(("✂ " + "┄" * frame)[:frame])  # (not --- rules or table rules: those are "divider")
         elif isinstance(r, TextRow):
-            out += [ln + more for ln in text_lines(r, cols, color)]
+            out += [ln + more for ln in text_lines(r, cols, color, dark)]
         elif isinstance(r, BitmapRow) and r.box is not None:
             used = r.box.left + 2 + _box_view(r.box, profile)[2]
-            out += [ln + " " * max(0, frame - used) for ln in box_lines(r.box, profile, color)]
+            out += [ln + " " * max(0, frame - used) for ln in box_lines(r.box, profile, color, dark)]
         elif isinstance(r, BitmapRow) and r.columns is not None:
             used = _columns_view(r.columns, profile)[1]
-            out += [ln + " " * max(0, frame - used) for ln in columns_lines(r.columns, profile, color)]
+            out += [ln + " " * max(0, frame - used) for ln in columns_lines(r.columns, profile, color, dark)]
         elif isinstance(r, BitmapRow) and r.kind == "table" and r.text_rows:  # a turned table: its text, standing
             out.append(TURNED_TABLE.center(frame, "┄")[:frame])
             for tr in r.text_rows:
-                out += [ln[:cols] + more for ln in text_lines(TextRow(tr.cells[:cols], tr.scale, "left"), cols, color)]
+                standing = TextRow(tr.cells[:cols], tr.scale, "left")
+                out += [ln[:cols] + more for ln in text_lines(standing, cols, color, dark)]
         elif isinstance(r, BitmapRow) and r.text_rows:
             trs = r.text_rows if r.wide_view else [fit(tr, frame) for tr in r.text_rows]  # wide_view: never cut
             room = max([cols, *(tr.width() for tr in trs)])  # a smaller font's paper line: wider
             for tr in trs:
                 if r.kind == "band":  # white on black on paper, from edge to edge
                     tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
-                ls = [ln + " " * (frame - room) for ln in text_lines(tr, room, color)]
-                out += [f"\x1b[7m{ln}\x1b[0m" if color and r.kind == "band" else ln for ln in ls]
+                ls = [ln + " " * (frame - room) for ln in text_lines(tr, room, color, dark)]
+                out += [f"{FLIP[dark]}{ln}{BASE[dark]}" if color and r.kind == "band" else ln for ln in ls]
         elif isinstance(r, RawRow):
             out.append(f"[raw: {len(r.data)} bytes, not previewed]".center(cols) + more)
         else:
@@ -199,7 +204,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
 
 FRAMES = {"solid": "─│┌┐└┘", "dashed": "╌╎┌┐└┘", "dotted": "┈┊┌┐└┘", "double": "═║╔╗╚╝"}  # a ::: box's line
 DARK_FRAME = "━┃┏┓┗┛"  # a ::: {.box .invert}: black to its edges (in colour, reversed too)
-REVERSE, RESET = "\x1b[7m", "\x1b[0m"
+FLIP = {False: "\x1b[7m", True: "\x1b[27m"}  # reversed, or plain again inside a reversed area
+BASE = {False: "\x1b[0m", True: "\x1b[0;7m"}  # a reset, outside or inside a reversed area
 
 
 def _box_view(b, profile):
@@ -212,11 +218,11 @@ def _box_view(b, profile):
     return sub, inner, b.cols - 2 + inner - sub.columns
 
 
-def box_lines(b, profile, color: bool = False) -> list[str]:
+def box_lines(b, profile, color: bool = False, dark: bool = False) -> list[str]:
     """A ::: box where it is on the paper: ┌─ TITLE ─┐, what it holds between │ and │ (its own rows, drawn by
     lines() at the box's inner width: a box in a box too), └──┘; a turned one standing, under a ↻ mark. Each line
     is b.left + 2 + the room _box_view gives columns wide. An inverted box: heavy lines and, in colour, reversed from
-    side to side (white on black, as a band of text is); a band inside it shows plain again."""
+    side to side (white on black, as a band of text is), what is reversed in it plain again (cell by cell)."""
     from .layout import is_wide
 
     h, v, tl, tr, bl, br = DARK_FRAME if b.invert else FRAMES.get(b.style, FRAMES["solid"])
@@ -230,14 +236,14 @@ def box_lines(b, profile, color: bool = False) -> list[str]:
     out = [lead + mark.center(room + 2, "┄")] if b.turned else []
     cut = lead + v + "┄" * room + v  # the side of a piece of a box cut across turned labels
     out.append(cut if b.open_top else lead + tl + h * (run // 2) + title + h * (run - run // 2) + tr)
-    for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner):
+    inside = dark != b.invert
+    for ln in lines(b.rows, sub, color, max_feed_lines=0, frame=inner, dark=inside):
         out.append(lead + v + " " * left + ln + " " * (room - left - inner) + v)
     out.append(cut if b.open_bottom else lead + bl + h * room + br)
     if not (b.invert and color):
         return out
-    k = len(lead)
-    return [ln[:k] + REVERSE + ln[k:].replace(REVERSE, "\x1b[27m").replace(RESET, RESET[:-1] + ";7m") + RESET
-            for ln in out]  # fmt: skip
+    k, skip = len(lead), 1 if b.turned else 0  # the ↻ mark above a turned box stays as it is
+    return [*out[:skip], *(ln[:k] + FLIP[dark] + ln[k:] + BASE[dark] for ln in out[skip:])]
 
 
 def _columns_view(cv, profile):
@@ -257,12 +263,12 @@ def _columns_view(cv, profile):
     return out, max([0, *(x + w for _, x, w in out)])
 
 
-def columns_lines(cv, profile, color: bool = False) -> list[str]:
+def columns_lines(cv, profile, color: bool = False, dark: bool = False) -> list[str]:
     """A row of :::: {.columns} as a map of the paper: each column's own rows (drawn by lines() at its width: a box
     or columns in it too) at its place on the paper, side by side, moved down as valign= placed it. A label of
     turned columns is drawn standing, as it is read, under a ↻ mark (as a turned table is)."""
     placed, used = _columns_view(cv, profile)
-    drawn = [lines(c.rows, sub, color, max_feed_lines=0, frame=w)
+    drawn = [lines(c.rows, sub, color, max_feed_lines=0, frame=w, dark=dark)
              for c, (sub, _, w) in zip(cv.columns, placed, strict=True)]  # fmt: skip
     tall = max([cv.lines, *(len(ls) for ls in drawn)])  # valign= in the view's own lines, as on paper among dots
     cols = []

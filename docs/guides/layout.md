@@ -85,7 +85,8 @@ PAID
   printer font's look (the same dots). A QR code inside is sized as an image, to fit the room.
 - `bobina view FILE` shows the box in the terminal: `┌─ TABLE ─┐`, the text inside, `└───┘` (`.invert`: `┏━┓`).
 - In an `.invert` box, `.invert` on an image swaps it back (a screenshot's white logo on black stays so); on text it
-  does nothing (`M101`). Thin or small raster text closes up white on black (`F204`).
+  does nothing (`M101`). Thin or small raster text closes up white on black (`F204`). A code stays black on
+  white in a white margin, so it scans (`Q114`).
 - Tested on paper (MTP-II, 18/11): a border title and a band, a dashed frame, the grey, as the preview. Text on
   `.shade`: prefer bold, thin strokes fade on the grey (the top bar of a "T").
 

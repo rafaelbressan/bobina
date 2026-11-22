@@ -1196,7 +1196,9 @@ class Layout:
             self.n.add("M101", ".invert does nothing on a box inside an inverted box: it is white on black already",
                        line, "remove .invert here")  # fmt: skip
             dark = False
-        elif dark and (drawn or "thickness" in a.kv):
+        if dark and a.has("shade"):
+            self.n.add("M101", ".shade does nothing on an inverted box: it is black", line, "remove .shade")
+        if dark and (drawn or "thickness" in a.kv):
             names = [*(f".{s}" for s in drawn), *(["thickness="] if "thickness" in a.kv else [])]
             self.n.add("M101", f"{' '.join(names)}: an inverted box has no line to draw, it is black to its edges",
                        line, f"remove {' '.join(names)}")  # fmt: skip
@@ -1213,6 +1215,7 @@ class Layout:
         outer, was_dark = self.tall_max, self.dark
         try:
             with self.narrow(inner):
+                self.dark = False  # the band is the box's own: inside an inverted box it prints the other way round
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
                 band_pics = [preview.row_image(r, self.p, self.em) for r in band]
@@ -1256,13 +1259,20 @@ class Layout:
         im = Image.new("L", (width, height), 255) if dark else imaging.frame(width, height, style, t, top).convert("L")
         for part, x, py in parts:
             im.paste(part, (x, py))
-        if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
+        if a.has("shade") and not dark:  # the whole inside, 2 dots clear of the frame; the halo: off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
         shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
         if dark:  # one black band from edge to edge, no white between its blocks; a band title stays as it is
-            im = ImageOps.invert(im)
+            plain, im = im, ImageOps.invert(im)
             for part, x, py in parts[:1] if band_im is not None else ():
                 im.paste(part, (x, py))
+            for a0, b0, kind in codes:  # a code stays black on white in its quiet zone: scanners read it
+                keep = _quiet_zone(plain, a0, b0, kind)
+                if keep:
+                    im.paste(plain.crop(keep), keep[:2])
+            if codes:
+                self.n.add("Q114", "a code in an inverted box prints black on white, in a white margin, so it scans",
+                           line, "put it outside the box for an unbroken band")  # fmt: skip
         if ang:
             exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
             im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
@@ -1919,8 +1929,10 @@ class Layout:
         def free(y: int) -> bool:  # a row that cuts no code
             return not any(a < y < b for a, b, _ in spans)
 
+        blank = ImageOps.invert(ink) if framed and framed.invert else ink  # an inverted box: all black lines
+
         def clean(y: int) -> bool:  # a blank line (inside a box's side lines), or a code's edge
-            return _white_row(ink, y, sides) or any(y in (a, b) for a, b, _ in spans)
+            return _white_row(blank, y, sides) or any(y in (a, b) for a, b, _ in spans)
 
         pieces, top, across, through = [], 0, False, []
         while ink.height - top > tall:
@@ -3620,6 +3632,33 @@ def _white_row(im: Image.Image, y: int, sides: int = 0) -> bool:
     """Whether row y of an image (mode L) has no ink between `sides` dots from each edge (a box's side lines): a
     place to cut it between lines."""
     return im.crop((sides, y, max(sides + 1, im.width - sides), y + 1)).getextrema()[0] >= 128
+
+
+def _quiet_zone(im: Image.Image, top: int, bottom: int, kind: str) -> tuple[int, int, int, int] | None:
+    """Where a code drawn in rows top..bottom of `im` (mode L) is, with its quiet zone around it: 10 modules beside
+    a barcode, 4 around a 2D code (a module: its narrowest bar), as far as the image goes; above and below, only over
+    blank rows (never over the text around it). None: no ink there."""
+    found = ImageOps.invert(im.crop((0, top, im.width, bottom))).getbbox()
+    if not found:
+        return None
+    x0, y0, x1, y1 = found[0], top + found[1], found[2], top + found[3]
+    px, module = im.load(), x1 - x0
+    for y in range(y0, y1, max(1, (y1 - y0) // 24)):
+        run = 0
+        for x in range(x0, x1 + 1):
+            if x < x1 and px[x, y] < 128:
+                run += 1
+            elif run:
+                module, run = min(module, run), 0
+    q = module * (10 if kind == "barcode" else 4)
+    x0, x1 = max(0, x0 - q), min(im.width, x1 + q)
+    strip = im.crop((x0, 0, x1, im.height))
+    for _ in range(q if kind != "barcode" else module * 2):
+        if y0 > 0 and _white_row(strip, y0 - 1):
+            y0 -= 1
+        if y1 < im.height and _white_row(strip, y1):
+            y1 += 1
+    return x0, y0, x1, y1
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:
