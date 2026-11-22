@@ -271,6 +271,20 @@ from this list.
 | `B101` | warning | stroke thinner than 2 dots prints broken | R4-01 |
 | `B102` | note | free rotation angles look jagged |  |
 
+### Charts and data= files
+
+| Code | Severity | Meaning | Evidence |
+|---|---|---|---|
+| `C101` | note | what a chart drew: its points, series, X spacing, Y ticks and the values read (check only) |  |
+| `C102` | note | more chart points than its width can show: neighbours averaged (aggregate=max: the largest) |  |
+| `C103` | warning | a chart value is not a number: its row is left out |  |
+| `C104` | note | chart dates out of order: drawn in the order written, evenly spaced |  |
+| `C105` | note | a chart too small for its labels: fewer or smaller labels |  |
+| `C106` | warning | chart= on a table with nothing to draw (no value column, no number): printed as a table |  |
+| `C107` | note | repeated chart labels combined into one point (summed; aggregate= says how) |  |
+| `C108` | warning | a table title names no column of its data= file (the file's columns are listed) |  |
+| `C109` | warning | data= file not found, unreadable or outside the allowed folders: no rows from it |  |
+
 ### Paper and printer
 
 | Code | Severity | Meaning | Evidence |

@@ -7,6 +7,34 @@ FIX = {
     # B drawing
     "B101": "Draw lines at least 2 dots thick (thickness=2), or keep it and silence it with --allow B101.",
     "B102": "Rotate by 90, 180 or 270 degrees for sharp text; other angles are drawn and look jagged.",
+    # C charts
+    "C101": "Nothing to fix: bobina check says how it read the table, so a wrong locale or column shows before paper.",
+    "C102": (
+        "Nothing to fix: the drawing has 2 dots per point. last=N draws only the last N rows, aggregate=max keeps "
+        "the peaks, and a wider chart (width=full) shows more."
+    ),
+    "C103": (
+        "Write the value as a number: 1234.5, R$ 1.234,50 with locale: pt-BR in the front matter, -20. A row with a "
+        "word in a value column is left out; an empty cell is only a gap."
+    ),
+    "C104": "Sort the rows by date (oldest first) and the points are spaced by the time between them.",
+    "C105": (
+        "Give the chart a taller height= (height=30mm), fewer values (y-ticks=2, x-labels=ends) or a smaller size= "
+        "for its labels (size=16px)."
+    ),
+    "C106": (
+        "Put the labels in the first column and numbers in the next ones (one series per column); a sparkline may "
+        "leave the labels empty: | | |."
+    ),
+    "C107": (
+        "Nothing to fix when that is what you meant (a row per product, summed per day). aggregate=max or "
+        "aggregate=mean combines the rows of a label otherwise."
+    ),
+    "C108": "Write each title of the table as a column of the file (the message lists them); the first is the labels.",
+    "C109": (
+        "Check the path (relative to the document) and the format: CSV, TSV, XLSX or JSON. Under --sandbox the file "
+        "must be next to the document or in image_dirs."
+    ),
     # F fonts
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
@@ -229,8 +257,8 @@ FIX = {
     "M315": "Keep template paths inside the allowed folders.",
 }
 
-CATEGORY = {"B": "drawing", "F": "fonts", "Q": "codes", "L": "layout", "I": "images", "P": "printer and paper",
-            "M": "markup and data", "E": "errors"}  # fmt: skip
+CATEGORY = {"B": "drawing", "C": "charts", "F": "fonts", "Q": "codes", "L": "layout", "I": "images",
+            "P": "printer and paper", "M": "markup and data", "E": "errors"}  # fmt: skip
 
 
 def explain(code: str) -> dict | None:

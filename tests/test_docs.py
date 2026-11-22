@@ -41,7 +41,7 @@ def test_every_problem_code_written_in_the_source_is_in_the_catalog():
     import ast
     import re
 
-    code_re = re.compile(r"^[EFILMPQBS]\d{3}$")
+    code_re = re.compile(r"^[EFILMPQBCS]\d{3}$")
     src = Path(__file__).resolve().parents[1] / "src" / "bobina"
     unknown = []
     for path in src.rglob("*.py"):

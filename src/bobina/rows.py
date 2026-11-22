@@ -122,6 +122,7 @@ class BitmapRow:
     code_spans: tuple = ()  # (top, bottom, kind) of each code drawn in it: a turned label never resamples or cuts them
     keep: tuple = ()  # (x0, y0, x1, y1) of each code's white tile in it: an inverted box leaves them black on white
     dark: tuple = ()  # (x0, y0, x1, y1) of each inverted box in it: a turned label cuts across their black rows too
+    view: list[str] | None = None  # what the terminal views show instead of braille (a chart: its labels as text)
 
 
 @dataclass

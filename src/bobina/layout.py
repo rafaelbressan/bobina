@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-from . import icons, imaging, preview, rasterfont, scriptfonts, sources
+from . import charts, icons, imaging, preview, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
 from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
@@ -1076,8 +1076,8 @@ class Layout:
             return self.fence(b, indent)
         if isinstance(b, ImageBlock):
             return self.image(b.src, b.attrs, b.line, b.alt)
-        if isinstance(b, Table):
-            return self.table(b, indent)
+        if isinstance(b, Table):  # a chart, or rows from a data= file: charts.py
+            return charts.table_block(self, b, indent) if charts.claims(b) else self.table(b, indent)
         if isinstance(b, Div):
             if b.attrs.has("columns"):
                 return self.columns(b, indent)

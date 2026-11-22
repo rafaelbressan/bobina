@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import textwrap
 
-GUIDES = ("docs/guides/tables.md", "docs/guides/table-cells.md", "docs/guides/receipts.md")
+GUIDES = ("docs/guides/tables.md", "docs/guides/table-cells.md", "docs/guides/receipts.md", "docs/guides/charts.md")
 
 PLACES = (  # (where the {…} goes, its reach, an example)
     ("the line under the table", "the table", "{style=receipt font=Terminus size=16px}"),
@@ -37,6 +37,12 @@ COLUMNS_PER_LINE = (  # (font, columns on 58 mm, on 80 mm), the 1-column spaces 
     ("Terminus 20px", 38, 57),
     ("IBM Plex Mono 16px", 40, 60),
     ("Spleen 24px", 31, 47),
+)
+
+CHART = (
+    "chart=line|bar|area|sparkline under the table draws it as a chart instead (.with-table: the table too): the "
+    "first column the labels, each next one a series. data=sales.csv under a table of titles only takes its rows "
+    "from the file, chart= or not (docs/guides/charts.md)"
 )
 
 STRETCHED = (
@@ -104,6 +110,7 @@ def help_text() -> str:
             f"    {'':20s}58 mm  80 mm"]  # fmt: skip
     out += [f"    {font:20s}{a:5d}  {b:5d}" for font, a, b in COLUMNS_PER_LINE]
     out += _wrap(STRETCHED, "  ")
+    out += ["", "CHART"] + _wrap(CHART, "  ")
     out += ["", "COLUMN  at the end of its title cell"]
     for key, what in COLUMN.items():
         out += _wrap(what, f"  {key:9s}", 11)
@@ -125,6 +132,7 @@ def help_json() -> dict:
         "table": TABLE_ALSO,
         "columns_per_line": [{"font": f, "58mm": a, "80mm": b} for f, a, b in COLUMNS_PER_LINE],
         "stretched": STRETCHED,
+        "chart": CHART,
         "column": COLUMN,
         "cell": {"classes": list(CELL_CLASSES), "span": SPAN},
         "row": {"classes": list(ROW_CLASSES)},

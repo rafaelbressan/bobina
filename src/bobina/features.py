@@ -56,6 +56,12 @@ FEATURES = {
         "reads right with the paper's right edge up. The first strip that day: a 72 mm label's EAN-13 at module 2 did "
         "not scan, and a box drawn at 75% blurred letters (both changed)",
     },
+    "charts": {
+        "title": "charts drawn from a table (chart=line, bar, area, sparkline)",
+        "where": "tables with chart= (docs/guides/charts.md)",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",
         "where": "tables with style=zebra or .shade (the pattern: SHADE_DOT and SHADE_STEP in imaging.py)",

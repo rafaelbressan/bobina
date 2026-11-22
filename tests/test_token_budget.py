@@ -26,6 +26,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/layout-columns-turned.md": 690,  # set on 17/11, turned columns split from layout-columns.md (not in llms-full)
     "docs/guides/receipts-supermarket.md": 385,  # set on 17/11, split from receipts.md (not in llms-full.txt)
     "docs/guides/counters.md": 260,  # set on 17/11, when a number is taken: split from FORMAT §7.3 (not in llms-full)
+    "docs/guides/charts.md": 1400,  # set on 21/11, with charts (chart=, data=); not in llms-full.txt (FORMAT links it)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,
     "docs/SECURITY.md": 2000,
@@ -34,6 +35,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/problems/README.md": 2500,  # the index: since 17/11 the categories, each code's meaning on their pages
     # one page per category of problem codes (generated; set on 17/11 about 25% above the size then)
     "docs/problems/drawing.md": 110,
+    "docs/problems/charts.md": 360,  # set on 21/11, with charts (C101 to C109)
     "docs/problems/fonts.md": 355,
     "docs/problems/codes.md": 390,
     "docs/problems/layout.md": 430,  # raised on 17/11 for L112, L113, L114 (turned columns): ~20% headroom

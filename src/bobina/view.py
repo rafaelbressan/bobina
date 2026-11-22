@@ -187,6 +187,8 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
                     tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
                 ls = [ln + " " * (frame - room) for ln in text_lines(tr, room, color, dark)]
                 out += [f"{FLIP[dark]}{ln}{BASE[dark]}" if color and r.kind == "band" else ln for ln in ls]
+        elif isinstance(r, BitmapRow) and r.view is not None:  # a chart: braille, its labels as text
+            out += [ln.ljust(frame) for ln in r.view]
         elif isinstance(r, RawRow):
             out.append(f"[raw: {len(r.data)} bytes, not previewed]".center(cols) + more)
         else:
