@@ -35,6 +35,10 @@ FIX = {
         "Check the path (relative to the document) and the format: CSV, TSV, XLSX or JSON. Under --sandbox the file "
         "must be next to the document or in image_dirs."
     ),
+    "C110": (
+        "Nothing to fix when they are a heading or a Total row; put a value under the label to draw it. A label with "
+        "no value between rows with values is a gap in the line."
+    ),
     # F fonts
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",

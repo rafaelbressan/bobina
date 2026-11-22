@@ -34,6 +34,11 @@ TICK = 3  # dots of a tick mark beside an axis
 RATIO = 0.6  # the default height: the chart's width times this
 MIN_PLOT = 24  # dots of drawing a chart keeps between its labels; less: fewer or smaller labels (C105)
 NOT_NUMBER_SAID = 3  # rows left out that are named one by one (C103); the others in one line
+CUT = {
+    "title": ("word of the title is", "words of the title are"),
+    "x": ("X label is", "X labels are"),
+    "legend": ("series name is", "series names are"),
+}  # texts cut with … to fit the chart (C105)
 DASHES = ((), (8, 4), (2, 4), (8, 3, 2, 3))  # a line series' pattern (on, off, …): solid, dashed, dotted, dash-dot
 TYPES_HINT = "chart=line, bar, area or sparkline (docs/guides/charts.md)"
 NOT_CHART = (
@@ -51,7 +56,7 @@ def claims(t: Table) -> bool:
 class Source:
     titles: list[str]  # the title row's text: the labels' column first, then each series
     rows: list[tuple[list[str], int, str]]  # (cells, line in the document, where in a file: "sales.csv row 7" or "")
-    machine: bool = False  # a JSON or XLSX file: its numbers are a program's (1.234 is 1.234 in any locale)
+    numeric: list[list[bool]] | None = None  # per row and cell: a number in its file (datasource.Num), a program's
 
 
 def table_block(lay, t: Table, indent: int) -> list:
@@ -102,14 +107,23 @@ def table_block(lay, t: Table, indent: int) -> list:
 
 def only_rows(t: Table, keep: list[int]) -> Table:
     """The table with only these rows (by index), last= taken off: it was applied to the chart's points."""
-    pick = [i for i in keep if i < len(t.rows)]
+    rows, lines, cells, attrs = aligned(t)
+    pick = [i for i in keep if i < len(rows)]
+    return replace(t, attrs=Attrs(t.attrs.classes, {k: v for k, v in t.attrs.kv.items() if k != "last"}),
+                   rows=[rows[i] for i in pick], row_lines=[lines[i] for i in pick], cells=[cells[i] for i in pick],
+                   row_attrs=[attrs[i] for i in pick])  # fmt: skip
 
-    def of(items: list) -> list:
-        return [items[i] for i in pick if i < len(items)]
 
-    attrs = Attrs(t.attrs.classes, {k: v for k, v in t.attrs.kv.items() if k != "last"})
-    return replace(t, attrs=attrs, rows=of(t.rows), row_lines=of(t.row_lines), cells=of(t.cells),
-                   row_attrs=of(t.row_attrs))  # fmt: skip
+def aligned(t: Table) -> tuple[list, list, list, list]:
+    """A table's rows and, one for each of them, its line, cells' settings and row settings (the lists the parser
+    keeps may be shorter: the missing ones are the defaults)."""
+    n = len(t.rows)
+
+    def padded(items: list, default) -> list:
+        return [*items[:n], *[default() for _ in range(n - len(items))]]
+
+    return (list(t.rows), padded(t.row_lines, lambda: t.line), padded(t.cells, list),
+            padded(t.row_attrs, Attrs))  # fmt: skip
 
 
 def plain(t: Table, chart: bool) -> Table:
@@ -125,8 +139,8 @@ def last_rows(lay, t: Table) -> Table:
     a = Attrs(t.attrs.classes, {k: v for k, v in t.attrs.kv.items() if k != "last"})
     if n is None or n >= len(t.rows):
         return replace(t, attrs=a)
-    return replace(t, attrs=a, rows=t.rows[-n:], row_lines=t.row_lines[-n:], cells=t.cells[-n:] if t.cells else [],
-                   row_attrs=t.row_attrs[-n:] if t.row_attrs else [])  # fmt: skip
+    rows, lines, cells, attrs = aligned(t)
+    return replace(t, attrs=a, rows=rows[-n:], row_lines=lines[-n:], cells=cells[-n:], row_attrs=attrs[-n:])
 
 
 def count(lay, t: Table, key: str, least: int, most: int = 1_000_000) -> int | None:
@@ -191,7 +205,8 @@ def from_file(lay, t: Table, src: Source) -> Source:
                   "write each title as a column of the file; the first title is the labels' column")  # fmt: skip
     out = [([clean(r.get(cols[k], "")) if k is not None else "" for k in pick], line, f"{name} row {n}")
            for n, r in enumerate(rows, 1)]  # fmt: skip
-    return Source(src.titles, out, Path(name).suffix.lower() in (".json", ".xlsx", ".xlsm"))
+    numeric = [[k is not None and isinstance(r.get(cols[k]), datasource.Num) for k in pick] for r in rows]
+    return Source(src.titles, out, numeric)
 
 
 def read(lay, raw: str, line: int) -> tuple[str, list[str], list[dict]] | None:
@@ -439,6 +454,7 @@ class Chart:
         self.axes = kind != "sparkline" and not self.a.has("no-axes")
         self.labels_drawn: list[Label] = []
         self.kept: list[int] | None = None  # with last=N: the source rows of the points kept
+        self.cut = dict.fromkeys(CUT, 0)  # texts cut with …: one C105 for each kind
 
     def at(self, name: str) -> int:
         return self.lay.said_at(self.t, name)
@@ -458,11 +474,15 @@ class Chart:
                            "write the values as numbers: 1234.5, or 1.234,50 with locale: pt-BR")  # fmt: skip
                 return None
             return []  # no rows at all (a file that could not be read: C109 said it)
+        points = self.ends(points)
         points = self.combine(points)
         n = count(self.lay, self.t, "last", 1)
-        if n is not None:
+        if n is not None and n < len(points):
+            used = {i for p in points for i in p.rows}
             points = points[-n:]
-            self.kept = sorted(i for p in points for i in p.rows)
+            kept = {i for p in points for i in p.rows}
+            inside = range(min(kept), max(kept) + 1)  # rows drawn nowhere (C103, empty) inside the kept range too
+            self.kept = sorted(kept | {i for i in inside if i not in used})
         self.dates = self.place(points)
         return self.draw(points)
 
@@ -477,7 +497,7 @@ class Chart:
                 if not txt:
                     values.append(None)
                     continue
-                v = machine_number(txt) if self.src.machine else None
+                v = machine_number(txt) if self.src.numeric and self.src.numeric[k][i] else None
                 v = templating.parse_number(txt, self.decimal) if v is None else v
                 if v is None or not math.isfinite(float(v)):
                     bad = txt
@@ -497,6 +517,19 @@ class Chart:
             self.n.add("C103", f"{more} more row{'s' if more > 1 else ''} with a value that is not a number left out",
                        left[NOT_NUMBER_SAID][2], "bobina check lists the first ones")  # fmt: skip
         return out
+
+    def ends(self, points: list[Point]) -> list[Point]:
+        """Rows with a label and no value before the first row with one or after the last (a sub-heading, a Total):
+        left out, said (C110). Between rows with values they are gaps."""
+        valued = [i for i, p in enumerate(points) if any(v is not None for v in p.values)]
+        a, b = valued[0], valued[-1]
+        out = points[:a] + points[b + 1 :]
+        if out:
+            shown = ", ".join(repr(p.label[:30]) for p in out[:4]) + (" …" if len(out) > 4 else "")
+            self.n.add("C110", f"{len(out)} row{'s' if len(out) > 1 else ''} with a label and no value at the ends "
+                       f"left out of the chart: {shown}", out[0].line,
+                       "a value under each label draws it; a label between values is a gap")  # fmt: skip
+        return points[a : b + 1]
 
     def aggregate(self) -> str:
         how = str(self.a.kv.get("aggregate", "sum"))
@@ -539,18 +572,24 @@ class Chart:
         for i, p in enumerate(points):
             p.x = float(i)
         loc = getattr(self.lay.locale, "locale", None)
-        days = parse_dates([p.label for p in points], loc)
+        valued = [p for p in points if any(v is not None for v in p.values)]
+        days = parse_dates([p.label for p in valued], loc)
         if days is None:
             return False
         back = next((i for i in range(1, len(days)) if days[i] < days[i - 1]), None)
         if back is not None:
-            self.n.add("C104", f"dates out of order: '{points[back].label}' after '{points[back - 1].label}': drawn "
-                       "in the order written, evenly spaced", points[back].line,
+            self.n.add("C104", f"dates out of order: '{valued[back].label}' after '{valued[back - 1].label}': drawn "
+                       "in the order written, evenly spaced", valued[back].line,
                        "sort the rows by date to space the points by time")  # fmt: skip
             return False
         if self.kind != "bar":
-            for p, d in zip(points, days, strict=True):
-                p.x = float((d - days[0]).days)
+            at = {id(p): float((d - days[0]).days) for p, d in zip(valued, days, strict=True)}
+            for i, p in enumerate(points):  # a gap: halfway between the points around it
+                if id(p) not in at:
+                    before = next(at[id(q)] for q in reversed(points[:i]) if id(q) in at)
+                    after = next(at[id(q)] for q in points[i + 1 :] if id(q) in at)
+                    at[id(p)] = (before + after) / 2
+                p.x = at[id(p)]
         return True
 
     # ------------------------------------------------------------------ size and labels
@@ -599,7 +638,7 @@ class Chart:
                       "orientation=vertical turns it along the roll; height= sets its height")  # fmt: skip
         if tall is None:
             tall = lay.p.cell[1] if self.kind == "sparkline" else round(across * RATIO)
-        return across, max(4, tall), False
+        return across, max(STROKE if self.kind == "sparkline" else 4, tall), False
 
     def y_ticks(self) -> int:
         n = count(self.lay, self.t, "y-ticks", 0, 12)
@@ -636,12 +675,18 @@ class Chart:
             plot = (left + STROKE + 3, top, W - 1 - STROKE, bottom - 1)
         else:
             left, texts = 0, []
-            plot = (STROKE, top, W - 1 - STROKE, bottom)  # a stroke's square reaches a dot right and down
-        ok = plot[3] - plot[1] >= (MIN_PLOT if self.kind != "sparkline" else 2) and plot[2] - plot[0] >= MIN_PLOT
+            top = title_h + STROKE // 2  # no axes: a stroke's square, centred on its point, just fits
+            plot = (STROKE, top, W - 1 - STROKE, bottom + STROKE - 1)
+        ok = plot[3] - plot[1] >= (MIN_PLOT if self.kind != "sparkline" else 0) and plot[2] - plot[0] >= MIN_PLOT
         if ok and tv:
             spans = self.y_label_spans(font, texts, tv, lo, hi, plot)
             ok = all(b[0] >= a[1] + (2 * GAP if self.turned else 2) for a, b in zip(spans, spans[1:], strict=False))
         return Geo(font, nticks, tv, lo, hi, left, plot, ok, title_h, legend_h, legend)
+
+    def room(self, g: Geo) -> bool:
+        """Whether the drawing has any room: a stroke's height beside the axes, a dot without them."""
+        x0, y0, x1, y1 = g.plot
+        return x1 - x0 >= STROKE and y1 - y0 >= (STROKE if self.axes else 0)
 
     def y(self, g: Geo, v: float) -> float:
         x0, y0, x1, y1 = g.plot
@@ -666,23 +711,22 @@ class Chart:
         """The title wrapped at its spaces to the chart's width; a word wider than the chart cut with … (C105)."""
         lines: list[str] = []
         for word in self.title().split():
-            word = self.shorten(font, word, W, "a word of the title", say)
+            short = self.shorten(font, word, W)
+            self.cut["title"] += say and short != word
+            word = short
             if lines and font.width(f"{lines[-1]} {word}") <= W:
                 lines[-1] += f" {word}"
             else:
                 lines.append(word)
         return lines
 
-    def shorten(self, font: Font, text: str, width: int, what: str, say: bool) -> str:
-        """text, or as much of it as fits `width` and …; said (C105) when cut and `say`."""
+    def shorten(self, font: Font, text: str, width: int) -> str:
+        """text, or as much of it as fits `width` and … (draw() says how many were cut: C105)."""
         if font.width(text) <= width:
             return text
         cut = text
         while cut and font.width(cut + "…") > width:
             cut = cut[:-1]
-        if say:
-            self.n.add("C105", f"{what} is wider than the chart: '{text[:30]}' printed as '{cut}…'", self.t.line,
-                       "a shorter text, a smaller size= or a wider chart")  # fmt: skip
         return cut + "…"
 
     def x_mode(self):
@@ -704,7 +748,7 @@ class Chart:
         """The legend's items in rows that fit W: [(width, [(x, i), …]), …]."""
         rows, cur, x = [], [], 0
         for i, name in enumerate(self.names):
-            name = self.shorten(font, name or f"#{i + 1}", W - self.swatch_w() - GAP, "a series name", False)
+            name = self.shorten(font, name or f"#{i + 1}", W - self.swatch_w() - GAP)
             w = self.swatch_w() + GAP + font.width(name)
             if cur and x + 12 + w > W:
                 rows.append((x, cur))
@@ -726,8 +770,13 @@ class Chart:
         self.turned = self.turned_labels()
         font, given = self.font()
         nt = self.y_ticks()
-        points = self.thin(points, self.geometry(font, nt, W, H, points))
         fonts = [font, *([self.small()] if not given and font.px > 12 else [])]
+        least = self.geometry(fonts[-1], 0, W, H, points)  # the smallest labels, no Y values: room for a drawing?
+        if not self.room(least):
+            self.n.add("C105", f"a chart {H} dots tall and {W} wide has no room to draw beside its labels: printed "
+                       "as a table", self.t.line, "a taller height= (height=30mm) or a wider width=")  # fmt: skip
+            return None
+        points = self.thin(points, self.geometry(font, nt, W, H, points))
         counts = [nt, *([2] if nt > 2 else [])]
         options = [(f, k, w) for f in fonts for k in counts for w in (0, 1, 2)] + [(fonts[-1], 0, 0)]
         mode = self.x_mode()
@@ -737,10 +786,6 @@ class Chart:
                   and len(self.x_picks(points, self.xs(points, g), g, say=False)) >= ends), None)  # fmt: skip
         if g is None:
             g = self.geometry(*options[-1][:2], W, H, points)
-        if g.plot[3] - g.plot[1] < STROKE or g.plot[2] - g.plot[0] < STROKE:
-            self.n.add("C105", f"a chart {H} dots tall and {W} wide has no room to draw beside its labels: printed "
-                       "as a table", self.t.line, "a taller height= (height=30mm) or a wider width=")  # fmt: skip
-            return None
         if self.axes and (g.font is not font or g.nticks != nt):
             what = []
             if g.nticks != nt:
@@ -772,6 +817,11 @@ class Chart:
         if self.axes:
             self.axes_and_labels(im, d, points, xs, g)
         self.texts(im, d, g, W)
+        for what, n in self.cut.items():
+            if n:
+                one, more = CUT[what]
+                self.n.add("C105", f"{n} {one if n == 1 else more} wider than the chart: cut with …", self.t.line,
+                           "a shorter text, a smaller size= or a wider chart")  # fmt: skip
         self.summary(points, g, turned)
         return [self.row(im, turned)]
 
@@ -880,7 +930,8 @@ class Chart:
             self.labels_drawn.append(Label(s, (0 if self.turned else g.left - TICK - GAP - pic.width, top, pic.width,
                                                pic.height), self.turned))  # fmt: skip
         for i in self.x_picks(points, xs, g):
-            s = self.shorten(f, points[i].label, im.width, "an X label", True)
+            s = self.shorten(f, points[i].label, im.width)
+            self.cut["x"] += s != points[i].label
             w = f.width(s)
             left = max(0, min(round(xs[i] - w / 2), im.width - w))
             d.rectangle((round(xs[i]) - 1, axis + STROKE, round(xs[i]), axis + STROKE + 2), fill=0)
@@ -898,7 +949,7 @@ class Chart:
         def fits(idx: list[int]) -> bool:
             right = -GAP * 2
             for i in idx:
-                w = f.width(self.shorten(f, points[i].label, W, "", False))
+                w = f.width(self.shorten(f, points[i].label, W))
                 left = max(0, min(round(xs[i] - w / 2), W - w))
                 if left < right + GAP * 2:
                     return False
@@ -939,7 +990,8 @@ class Chart:
                     bar(im, d, (x, mid - 6, x + sw - 1, mid + 5), i)
                 else:
                     polyline(d, [(x, mid), (x + sw - 1, mid)], DASHES[i % 4])
-                name = self.shorten(f, self.names[i] or f"#{i + 1}", W - sw - GAP, "a series name", True)
+                name = self.shorten(f, self.names[i] or f"#{i + 1}", W - sw - GAP)
+                self.cut["legend"] += name != (self.names[i] or f"#{i + 1}")
                 im.paste(f.image(name), (x + sw + GAP, y))
                 self.labels_drawn.append(Label(name, (x + sw + GAP, y, f.width(name), f.h), kind="legend", rank=rank))
             y += f.h + 2
@@ -1067,8 +1119,9 @@ def segment(d: ImageDraw.ImageDraw, a: tuple[float, float], b: tuple[float, floa
     """A line from a to b drawn by a STROKE x STROKE square: at least STROKE dots thick across it, whatever its slope
     (a line PIL draws width=2 is 1 dot thick where it is shallow, and prints broken)."""
     (ax, ay), (bx, by) = (round(a[0]), round(a[1])), (round(b[0]), round(b[1]))
-    for dx in range(STROKE):
-        for dy in range(STROKE):
+    span = range(-(STROKE // 2), STROKE - STROKE // 2)  # centred on the line: 2 dots are the one above and it
+    for dx in span:
+        for dy in span:
             d.line([(ax + dx, ay + dy), (bx + dx, by + dy)], fill=0, width=1)
 
 

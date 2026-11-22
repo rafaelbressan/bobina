@@ -458,6 +458,7 @@ Nudges:
 | `C107` | note | repeated chart labels combined |
 | `C108` | warning | a title names no column of the `data=` file |
 | `C109` | warning | `data=` file not read |
+| `C110` | note | label-only chart rows at its ends left out |
 | `F201` | warning | font below its tested minimum size |
 | `F202` | warning | untested font with strokes thinner than 2 dots |
 | `F203` | warning | font not found, a bundled font was used |
@@ -467,8 +468,8 @@ Nudges:
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
 | `F304` | note | font for another script downloaded (once; used offline from then on) |
-| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
-| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
+| `F305` | warning | font for this script not downloaded: letters print as boxes |
+| `F306` | note | no font for the locale's script: English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -554,7 +555,7 @@ Nudges:
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |
 | `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |
 | `M204` | note | no locale for this machine: dates, numbers and money in English |
-| `M205` | warning | the document's locale: is not a locale bobina knows (the machine's is used) |
+| `M205` | warning | the document's `locale:` is unknown (the machine's is used) |
 | `M310` | error | templates cannot read files |
 | `M311` | error | unsafe template operation |
 | `M312` | error | a variable cannot choose a file path |

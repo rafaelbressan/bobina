@@ -20,6 +20,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "C107": ("note", "repeated chart labels combined into one point (summed; aggregate= says how)", ""),
     "C108": ("warning", "a table title names no column of its data= file (the file's columns are listed)", ""),
     "C109": ("warning", "data= file not found, unreadable or outside the allowed folders: no rows from it", ""),
+    "C110": ("note", "rows with a label and no value at a chart's ends are left out (between values: a gap)", ""),
     # F fonts / glyphs
     "F301": ("note", "glyph not in the printer font: line printed as an image", "N5"),
     "F302": ("warning", "glyph missing in every available font", ""),

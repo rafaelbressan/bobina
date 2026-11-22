@@ -177,7 +177,7 @@ def test_a_sparkline_is_one_text_line_tall_without_axes():
     res = build(src)
     im = chart(res)
     assert im.height == 24 and not res.nudges.check_only[0].message.count("ticks 0")
-    assert ink(im, (0, 0, 2, 24)) == 0  # no axis at the left edge: only the line
+    assert ink(im, (0, 0, 1, 24)) == 0  # no axis at the left edge: only the line
     assert chart(build(src.replace("sparkline", "sparkline height=10mm"))).height == 80
 
 
@@ -465,3 +465,82 @@ def test_the_view_never_wraps_ink_from_one_edge_to_the_other():
     im.putpixel((23, 23), 0)
     g = charts.thicken(im)
     assert g.getpixel((0, 0)) == 255 and g.getpixel((0, 23)) == 255 and g.getpixel((23, 0)) == 255
+
+
+# ---------------------------------------------------------------------------------------------------- second review
+
+
+def test_a_files_number_is_a_programs_but_its_text_follows_the_locale(tmp_path):
+    import openpyxl
+
+    (tmp_path / "v.json").write_text('[{"d": "a", "v": 1.5}, {"d": "b", "v": "1.500"}]', encoding="utf-8")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["d", "v"])
+    ws.append(["a", 1.234])
+    ws.append(["b", "1.500"])
+    wb.save(tmp_path / "v.xlsx")
+    pt = "---\nlocale: pt-BR\n---\n| d | v |\n|---|--:|\n{chart=bar data=FILE}\n"
+    assert "values read: 1.5 · 1500" in said(build(pt.replace("FILE", "v.json"), base_dir=str(tmp_path)), "C101")[0]
+    assert "values read: 1.234 · 1500" in said(build(pt.replace("FILE", "v.xlsx"), base_dir=str(tmp_path)), "C101")[0]
+
+
+def test_label_rows_without_values_at_the_ends_are_left_out_and_said():
+    src = "| d | n |\n|---|--:|\n| Week 45 | |\n| Jan 1 | 0 |\n| Jan 2 | 10 |\n| Jan 31 | 0 |\n| Total | |\n"
+    res = build(src + "{chart=line .no-axes}\n")
+    summary = said(res, "C101")[0]
+    assert "3 points" in summary and "by date" in summary
+    (msg,) = said(res, "C110")
+    assert "'Week 45'" in msg and "'Total'" in msg
+    assert peak_x(chart(res)) < 40  # still spaced by time
+    gap = "| d | n |\n|---|--:|\n| Jan 1 | 0 |\n| Jan 2 | |\n| Jan 3 | 4 |\n{chart=line}\n"
+    assert "3 points" in said(build(gap), "C101")[0] and not said(build(gap), "C110")
+
+
+def test_last_that_cuts_nothing_keeps_every_row_of_the_table():
+    src = "| d | n |\n|---|--:|\n| a | 1 |\n| b | lots |\n| c | 3 |\n| | |\n| e | 5 |\n"
+    res = build(src + "{chart=bar last=100 .with-table}\n")
+    assert [ln.split()[0] for ln in text_lines(res)[1:] if ln.strip()] == ["a", "b", "c", "e"]
+    res = build(src + "{chart=bar last=2 .with-table}\n")
+    assert [ln.split()[0] for ln in text_lines(res)[1:] if ln.strip()] == ["c", "e"]
+    res = build("| d | n |\n|---|--:|\n| a | 1 |\n| b | 2 |\n| c | lots |\n| e | 5 |\n{chart=bar last=2 .with-table}\n")
+    assert [ln.split()[0] for ln in text_lines(res)[1:]] == ["b", "c", "e"]  # a row left out inside the kept range
+
+
+def test_no_room_is_said_alone_and_a_tiny_sparkline_still_draws():
+    rows = "".join(f"| {i} | {i % 7} |\n" for i in range(600))
+    res = build(f"| x | n |\n|---|--:|\n{rows}{{chart=line height=4px}}\n")
+    assert said(res, "C105") and not said(res, "C102") and not chart_rows(res)
+    for h in (2, 4, 5):
+        im = chart(build(f"| | |\n|---|--:|\n| | 1 |\n| | 5 |\n| | 3 |\n{{chart=sparkline height={h}px}}\n"))
+        assert im.height == h and ink(im) > 0
+
+
+def test_many_long_words_are_said_once():
+    res = build(
+        SUPPLY
+        + '{chart=line width=half title="Pneumonoultramicroscopicsilicovolcanoconiosis Supercalifragilisticexpialidociousness"}\n'
+    )
+    assert len([m for m in said(res, "C105") if "title" in m]) == 1
+
+
+def test_only_rows_and_last_rows_keep_each_rows_settings_with_it():
+    from dataclasses import replace
+
+    from bobina.model import Attrs, Run, Table
+
+    t = Table(line=9, header=[[Run("a")]], rows=[[[Run("x")]], [[Run("y")]], [[Run("z")]]], row_lines=[2, 3],
+              row_attrs=[Attrs({"bold"})])  # fmt: skip
+    kept = charts.only_rows(t, [2])
+    assert kept.row_lines == [9] and kept.row_attrs == [Attrs()]
+    last = charts.last_rows(None, replace(t, attrs=Attrs(set(), {"last": "1"})))
+    assert last.row_lines == [9] and last.row_attrs == [Attrs()]
+
+
+def test_a_stroke_is_centred_on_its_point():
+    from PIL import Image, ImageDraw
+
+    im = Image.new("1", (20, 20), 1)
+    charts.segment(ImageDraw.Draw(im), (5, 10), (15, 10))
+    assert [y for y in range(20) if im.getpixel((10, y)) == 0] == [9, 10]
+    assert [x for x in range(20) if im.getpixel((x, 10)) == 0] == list(range(4, 16))
