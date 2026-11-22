@@ -1,13 +1,13 @@
 # Tables: styles, fonts and columns
 
-A table in a `.bob.md` is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
+A table is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
 
-- for the whole table, on the line right under it (with or without a blank line): `{style=receipt .compact}`;
+- for the whole table, on the line right under it (blank line or not): `{style=receipt .compact}`;
 - for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`;
 - for one cell, at the end of its text, and for one row, after its closing pipe; a cell over several columns
   (`span=all`): [table-cells.md](table-cells.md).
 
-Everything with the same reach goes in the same `{…}`. Names and values are lowercase. Whole receipts to copy:
+Everything with the same reach goes in one `{…}`. Names and values are lowercase. Whole receipts:
 [receipts.md](receipts.md).
 
 ```markdown
@@ -31,7 +31,8 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
 ## Tables without a title row
 
 Markdown needs a title row. Leave its cells empty (`| | |`) and bobina prints no title and no rule: label on the
-left, value on the right, the way receipts print totals ([receipts.md](receipts.md#totals)).
+left, value on the right, the way receipts print totals ([receipts.md](receipts.md#totals)). Without titles: no
+title band or rule, in any style.
 
 ## Column widths, prefixes and suffixes
 
@@ -75,7 +76,7 @@ One word on the line under the table: `{style=receipt}`.
 [sizes](../FORMAT.md#5-sizes-)), a column as wide as its `0` (a proportional font lines up by the dot). Columns
 per line, spaces included:
 
-| Font | 58 mm (384 dots) | 80 mm (576 dots) |
+| Font | 58 mm | 80 mm |
 |---|---|---|
 | printer font | 32 | 48 |
 | Terminus 12px (its tested minimum) | 64 | 96 |
@@ -85,9 +86,9 @@ per line, spaces included:
 | IBM Plex Mono 16px | 40 | 60 |
 | Spleen 24px (the printer font's look) | 31 | 47 |
 
-`size=` alone uses Terminus (`2x`, `3x`: the printer font's look; `1x2`, `2x1`: the printer font itself,
-stretched: 32 or 16 columns on 58 mm). Below a font's tested minimum: `F201`; not found: `F203`; `header-invert`
-titles under 20px: `F204`.
+`size=` alone uses Terminus (`2x`, `3x`: the printer font's look; `1x2`, `2x1`, any `WxH` with W ≠ H: the printer
+font stretched, 32 ÷ W columns on 58 mm). Below a font's tested minimum: `F201`; not found: `F203`;
+`header-invert` titles under 20px: `F204`.
 
 ## Turned tables
 
@@ -98,7 +99,7 @@ hold along the paper); `orientation=horizontal` never does, narrowing every colu
 
 ## When something is wrong
 
-bobina prints anyway and says what to fix (`bobina check FILE` lists it, printing nothing):
+bobina prints anyway and says what to fix (`bobina check FILE`: without printing):
 
 | Code | When | Example message |
 |---|---|---|

@@ -39,7 +39,10 @@ COLUMNS_PER_LINE = (  # (font, columns on 58 mm, on 80 mm), the 1-column spaces 
     ("Spleen 24px", 31, 47),
 )
 
-STRETCHED = "size=1x2, 2x1: the printer font itself, twice as tall (its columns) or twice as wide (half of them)"
+STRETCHED = (
+    "size=1x2, 2x1, any WxH with W != H: the printer font itself, stretched; its columns divided by W (1x2: all "
+    "of them, each line twice as tall; 2x1: half)"
+)
 
 COLUMN = {
     "width=": "auto (the default: the auto columns share what is left, and the widest text column, left-aligned "

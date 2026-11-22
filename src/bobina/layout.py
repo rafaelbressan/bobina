@@ -679,9 +679,13 @@ class Layout:
         fam = self.raster_family(attrs, role, runs)
         # render=raster on the printer font at 1x2 or 2x1: its stretched cells, drawn as the printer draws them
         # (a raster font cannot stretch: it would scale evenly)
-        emulated = bool(fam == "Spleen" and attrs.kv.get("render") == "raster" and self.stretch(attrs.kv.get("size"))
-                    and self.family(attrs.kv.get("font") or self.fonts.get(role, "native")).lower() == "native"
-                    and not any(r.font for r in runs))  # fmt: skip
+        emulated = bool(
+            fam == "Spleen"
+            and attrs.kv.get("render") == "raster"
+            and self.stretch(attrs.kv.get("size"))
+            and self.family(attrs.kv.get("font") or self.fonts.get(role, "native")).lower() == "native"
+            and not any(r.font or r.mono or r.size for r in runs)
+        )  # a span's own font or size: raster
         if emulated:
             fam = None
         if fam is not None:
@@ -3215,13 +3219,12 @@ class Layout:
                 return row
             # a stretched line cannot hold a 1x │: the quote bars are drawn into it, as text_block does
             return BitmapRow(self.draw_bars(self.em.render_row(row, self.W), indent, 0), t.line, "text",
-                             [TextRow([*self.lead(indent), *cells[len(lead):]], (1, 1), "left", t.line)])  # fmt: skip
+                             [self.native_view(ink, indent, shift, piece[1].view, t.line)])  # fmt: skip
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
         wide = not ink.native and maps is None
         if ink.native:
-            view = [TextRow(_cut([*self.table_lead(ink, indent), *[Cell(" ")] * shift, *ln.view],
-                                 self.cols // ink.wh[0]), ink.wh, "left", t.line) for ln in lines]  # fmt: skip
+            view = [self.native_view(ink, indent, shift, ln.view, t.line) for ln in lines]
         elif wide:  # a smaller font (more character columns than the paper's) or letters the map has no room for:
             view = [TextRow([*self.lead(indent), *ln.view], (1, 1), "left", t.line) for ln in lines]  # its own grid
         else:  # the same or a larger font: a map of the paper, every letter in it
@@ -3229,6 +3232,15 @@ class Layout:
         band = kind == "image" and "band" in piece[3].split()
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]), wide_view=wide)  # fmt: skip
+
+    def native_view(self, ink, indent: int, shift: int, cells: list[Cell], line: int) -> TextRow:
+        """A line of a printer-font table as the terminal views show it: at its scale, or, stretched wider (2x1) in
+        a quote, every line at 1x after the quote's bars (a 1x │ cannot sit in a 2x row), drawn or not."""
+        pad = [Cell(" ")] * shift
+        if ink.wh[0] > 1 and self.bars_in(indent):
+            return TextRow(_cut([*self.lead(indent), *pad, *cells], self.cols), (1, 1), "left", line)
+        return TextRow(_cut([*self.table_lead(ink, indent), *pad, *cells], self.cols // ink.wh[0]), ink.wh, "left",
+                       line)  # fmt: skip
 
     def table_lead(self, ink, indent: int) -> list[Cell]:
         """What comes before a native table line: the quote bars at 1x; stretched wider (2x1), blank cells as wide
