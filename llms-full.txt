@@ -146,18 +146,7 @@ full names. Exit codes: 0 ok · 1 usage · 2 document · 3 strict nudges · 4 un
 not ready · 6 language · 7 confirmation needed/declined · 8 security · 9 a payment or contact code left out (Q111,
 Q112) · 10 newer release.
 
-## Repository
-
-| Path | What |
-|---|---|
-| `src/bobina/` | the package (engine, layout, ESC/POS, preview, CLI) and built-in profiles, templates, fonts |
-| `docs/` | [`FORMAT.md`](docs/FORMAT.md) (the `.bob.md` spec), [`CLI.md`](docs/CLI.md) (commands, options, problems, exit codes), [`SECURITY.md`](docs/SECURITY.md) (threat model), [`guides/batch-printing.md`](docs/guides/batch-printing.md), [`guides/tables.md`](docs/guides/tables.md), [`TESTED.md`](docs/TESTED.md) (what was and was not tested on paper) |
-| `examples/` | documents and data used by the guides (`examples/batch/`) |
-| `spec/conformance/` | test tickets with expected bitmaps — a `bob/1` implementation renders them identically |
-| `tests/` | unit, security and golden tests (no printer needed) |
-| `docs/printers/` | measured capabilities of each profiled printer (`mtp-ii-58.md`) |
-| `contrib/` | Bluetooth boot service for Linux (`install.sh` sets it up) |
-| `tools/` | maintenance scripts: public export and personal-data scan |
+<!-- 'Repository' left out here: see README.md -->
 
 ## Status
 
