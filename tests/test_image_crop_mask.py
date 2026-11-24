@@ -260,7 +260,8 @@ def box_image(res) -> Image.Image:
 
 def test_an_inverted_box_is_one_black_band_with_its_text_white(tmp_path):
     res = build("::: {.box .invert}\nhello\n:::\n")
-    assert codes(res) == []  # .invert is a box setting now (it was M101); tested on paper 24/11 (docs/TESTED.md)
+    assert sorted(codes(res)) == ["F206", "P301"]  # .invert is a box setting now (it was M101), tested on paper 24/11
+    # (docs/TESTED.md); its small white text made bold is not yet (test_inverted_bold.py)
     im = box_image(res)
     assert im.getpixel((0, 0)) == 0 and im.getpixel((W - 1, im.height - 1)) == 0  # black to its edges
     assert 0.6 < ink(im) < 1.0  # with white letters in it
@@ -284,7 +285,7 @@ def test_an_image_inverted_inside_an_inverted_box_keeps_its_own_look(tmp_path):
 
 def test_small_text_in_an_inverted_box_is_said_to_close_up():
     res = build("::: {.box .invert}\nhello {font=Terminus size=16px}\n:::\n")
-    assert said(res, "F204") == ["inverted text at 16px closes up"]
+    assert said(res, "F204") == ["inverted text at 16px closes up"] and "F206" in codes(res)  # bold, and still small
 
 
 def test_invert_inside_an_inverted_box_is_said_to_do_nothing():

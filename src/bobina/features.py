@@ -60,7 +60,8 @@ FEATURES = {
     },
     "inverted-bold": {
         "title": "small white-on-black text made bold (a dot taller in the printer font's look; ESC E under GS B)",
-        "where": "inverted text below raster.invert_bold_below_px: .invert lines and words, band titles, tables",
+        "where": "inverted text below raster.invert_bold_below_px: .invert lines and words, band titles, tables, "
+        "what an inverted box holds",
         "tested_on_paper": False,
         "evidence": "",
     },

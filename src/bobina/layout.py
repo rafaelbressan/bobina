@@ -270,6 +270,8 @@ class Layout:
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
         self.dark = False  # laid out inside a ::: {.box .invert}: printed white on black
         self.dark_lost = False  # ... and in turned columns there: a code's tile is turned with them, not kept
+        self.reversed = False  # laid out to be inverted once more (the band title of a box in an inverted box): its
+        # white is black on paper (whiten)
         self.untested: set[str] = set()  # features not tested on paper this job used that no row records (P301)
         self.whitened: dict[str, set] = {}  # size -> (line, is a table) of the white text made bold: one F206 (run)
 
@@ -570,7 +572,7 @@ class Layout:
         toks: list = []
         fallback = rasterfont.resolve("DejaVu Sans").path
         context = "".join(r.text for r in runs)  # Han next to kana is Japanese (scriptfonts.packs_for)
-        whole, thin = attrs.has("invert"), 0  # thin: the smallest white text made bold (F206)
+        whole, thin = attrs.has("invert") or self.dark, 0  # thin: the smallest white text made bold (F206)
         for r in runs:
             if r.text == "\n":
                 toks.append(rasterfont.Tok("", fallback, px, brk=True))
@@ -580,8 +582,9 @@ class Layout:
                 rfam = "Spleen"
             b = r.bold or bold or extra.get("bold", False)
             rpx = rasterfont.px_for(r.size, self.p, px, self.n, line) if r.size else px
-            heavy = (whole or r.white) != r.invert and self.p.invert_bold(rpx)  # white on black (inverted twice:
-            # black on paper), small
+            white = (whole or r.white) != self.reversed  # in an inverted box, what is not inverted on its own
+            heavy = white != r.invert and self.p.invert_bold(rpx)  # white on black (inverted twice: black on paper),
+            # small
             if heavy and not b and r.text.strip():
                 thin = min(thin or rpx, rpx)
             b = b or heavy
@@ -700,10 +703,12 @@ class Layout:
 
     def whiten(self, cells: list, whole: bool | list[bool], line: int, size_of, table: bool = False,
                untested: bool = True) -> list:  # fmt: skip
-        """The cells that print white on black (whole: on a black band, where a cell's own .invert turns it back to
-        black), when smaller than the paper holds (Profile.invert_bold), heavy and bold
+        """The cells that print white on black (whole: on a black band or in an inverted box, where a cell's own
+        .invert turns it back to black), when smaller than the paper holds (Profile.invert_bold), heavy and bold
         (whiten). size_of(cell): its height in dots and the size said for it (1x, 2x1, 20px). F206 says so when one
         was not bold, P301 that it is not tested on paper (untested=False: a raster bold face, R2-12)."""
+        if self.reversed:  # to be inverted once more: white on black is black on paper
+            whole = [not w for w in whole] if isinstance(whole, list) else not whole
         out, thin = whiten(cells, whole, lambda c: self.p.invert_bold(size_of(c)[0]))
         if untested and any(c is not None and c.heavy for c in out):
             self.untested.add("inverted-bold")
@@ -869,7 +874,7 @@ class Layout:
             return None if sizes[r.size] == scale else sizes[r.size]
 
         cells = self.cells_from_runs(runs, extra, sized)
-        whole = attrs.has("invert")
+        whole = attrs.has("invert") or self.dark  # in an inverted box, its text is white on black
         if any(r.white for r in runs):  # each cell as its run says (a black chat bubble)
             whole = [whole or r.white for r in runs for _ in ([None] if r.text == "\n" else self.text(r.text))]
         cells = self.whiten(cells, whole, line, self.printer_size(scale))
@@ -1291,8 +1296,10 @@ class Layout:
         try:
             with self.narrow(inner):
                 self.dark = False  # the band is the box's own: inside an inverted box it prints the other way round
+                self.reversed = was_dark  # (its title black on paper: not made heavy)
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
+                self.reversed = False
                 band_pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in band]
                 band_im = self.stacked(band_pics, self.W) if band else None
                 if outer and ang % 180 != 90:  # in a turned label: what the frame, its room and a border or band
@@ -1306,7 +1313,7 @@ class Layout:
                 pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
         finally:
-            self.tall_max, self.dark, self.dark_lost = outer, was_dark, was_lost
+            self.tall_max, self.dark, self.dark_lost, self.reversed = outer, was_dark, was_lost, False
         codes = _code_spans(rows, pics)
         keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         if raws:
@@ -1338,7 +1345,7 @@ class Layout:
             im.paste(part, (x, py))
         if a.has("shade") and not dark:  # the whole inside, 2 dots clear of the frame; the halo: off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
-        shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
+        shown = self.border_title(im, title, line, top, stroke, title_y, dark or self.dark) if on_border else ""
         if dark:  # one black band from edge to edge, no white between its blocks; a band title stays as it is
             plain, im = im, ImageOps.invert(im)
             for part, x, py in parts[:1] if band_im is not None else ():
@@ -1411,10 +1418,12 @@ class Layout:
             self.n.add("M101", f"width={given}: a box needs {least // cw} letters (4 inside)", line, BOX_WIDTH_HINT)
         return max(least, w // cw * cw)
 
-    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int) -> str:
+    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int,
+                     white: bool = False) -> str:  # fmt: skip
         """The title across a box's top line (its letters from `y` down), centred, bold in the printer font's look,
-        the line cut around it (half a letter each side); longer than the line holds: cut with … (L109). Returns
-        it as printed."""
+        the line cut around it (half a letter each side); longer than the line holds: cut with … (L109). white: the
+        box prints white on black (an inverted box, or one in it), so its letters are heavy (whiten). Returns it as
+        printed."""
         cw = self.p.cell[0]
         most = max(1, im.width // cw - 6)  # three letters of line each side, as the views draw ┌─ TITLE ─┐
         if columns([Cell(c, wide=is_wide(c)) for c in title]) > most:
@@ -1422,7 +1431,9 @@ class Layout:
                        line, "title-style=band or title-style=inside wrap a long title into lines")  # fmt: skip
             title = fit_columns(title, most - 1).rstrip() + "…"
         cells = [Cell(c, bold=True, wide=is_wide(c)) for c in title]
-        drawn = self.em.line_image(cells)
+        if white:
+            cells = self.whiten(cells, True, line, self.printer_size((1, 1)))
+        drawn = self.em.line_image(cells, drawn=True)
         x, gap = (im.width - drawn.width) // 2, cw // 2
         im.paste(255, (x - gap, top, x + drawn.width + gap, top + stroke))
         im.paste(0, (x, y), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
@@ -2095,6 +2106,8 @@ class Layout:
         cap = self.cols - indent
         for ln in f.content.rstrip("\n").split("\n"):
             cells = [Cell(ch, wide=is_wide(ch)) for ch in self.text(ln)]
+            if self.dark:  # in an inverted box: white on black, small
+                cells = self.whiten(cells, True, f.line, self.printer_size((1, 1)))
             while True:
                 if columns(cells) > cap:
                     self.n.add("L103", f"line longer than {cap} columns wrapped", f.line)
@@ -3240,11 +3253,12 @@ class Layout:
     def table_white(self, t: Table, head, body, style: str, face, wh: tuple[int, int]) -> tuple:
         """A table's cells through whiten: on a black box the titles of style=header-invert or of a title row with
         .invert, each body row with .invert after it, each cell with its own .invert; elsewhere a span's inverted
-        words. P301: Layout.table, once it knows the font."""
+        words. In an inverted box the other way round: what is not on a black box is white. P301: Layout.table,
+        once it knows the font."""
         size = (lambda c: (face[1], f"{face[1]}px")) if face else self.printer_size(wh)
 
         def white(cells, attrs):
-            return self.whiten(cells, _any_class(attrs, "invert"), t.line, size, table=True,
+            return self.whiten(cells, _any_class(attrs, "invert") != self.dark, t.line, size, table=True,
                                untested=False)  # fmt: skip
 
         if head:
@@ -4299,8 +4313,8 @@ def _as_paper(row: TextRow) -> TextRow:
 
 
 def whiten(cells: list, whole: bool | list[bool], small=lambda c: True) -> tuple[list, list]:
-    """The one place that decides which glyphs print white on black: on a black band (whole: for every cell, or one
-    each) the cells not inverted on their own, elsewhere the inverted ones (a cell inverted
+    """The one place that decides which glyphs print white on black: on a black band or in an inverted box (whole:
+    for every cell, or one each) the cells not inverted on their own, elsewhere the inverted ones (a cell inverted
     twice is black on paper: left as it is). Those small(cell) enough (the caller: Profile.invert_bold) are made bold
     and heavy (Cell.heavy: drawn a dot taller where bobina draws them; a space too, so a native run of them is one
     ESC E). And the letters of them that were not bold (F206)."""

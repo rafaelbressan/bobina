@@ -32,7 +32,7 @@ tables, other boxes, [columns](layout-columns.md) (blocks side by side, `:::: {.
 | `width=half` | a narrower box: `full` (the default), `half`, `third`, `50%`, `30mm`, `16ch` (letters) |
 | `.center` `.right` | where a narrower box goes (on the left by default) |
 | `.shade` | a light grey background, kept off the letters |
-| `.invert` | all black, frame and room too; what it holds prints white, its images inverted; plain small text prints thin on paper, prefer bold |
+| `.invert` | all black, frame and room too; what it holds prints white, its images inverted; its text below 48 dots prints bold ([`F206`](white-text.md)) |
 
 A long title wraps into more lines with `band` and `inside`; on the border it is cut with "…" (`L109`).
 
@@ -85,8 +85,8 @@ PAID
   printer font's look (the same dots). A QR code inside is sized as an image, to fit the room.
 - `bobina view FILE` shows the box in the terminal: `┌─ TABLE ─┐`, the text inside, `└───┘` (`.invert`: `┏━┓`).
 - In an `.invert` box, `.invert` on an image swaps it back (a screenshot's white logo on black stays so); on text it
-  does nothing (`M101`). Thin or small raster text closes up white on black (`F204`). A code stays black on
-  white in its quiet zone, so it scans (`Q114`; no room for it, or in turned columns: `Q115`).
+  does nothing (`M101`). Small text prints bold; raster text under 20 px closes up (`F204`). A code stays black
+  on white in its quiet zone, so it scans (`Q114`; no room for it, or in turned columns: `Q115`).
 - Tested on paper (MTP-II, 18/11): a border title and a band, a dashed frame, the grey, as the preview. Text on
   `.shade`: prefer bold, thin strokes fade on the grey (the top bar of a "T").
 

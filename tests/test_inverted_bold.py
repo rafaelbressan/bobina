@@ -1,5 +1,6 @@
 """White text on black below the size the paper holds prints bold (paper, MTP-II 18/11: the printer font at 1x closed
-up, even bold; at 2x it held), and bobina says so (F206)."""
+up, even bold; at 2x it held; 24/11: plain small text in an inverted box printed thin, bold held up), and bobina says
+so (F206)."""
 
 from pathlib import Path
 
@@ -249,10 +250,102 @@ def test_a_black_chat_bubble_still_reads_its_bold_markup():
     assert thin.image != chat.bubble_row(apply_overrides(load(), OFF), "T-7 ok", inverted=True).image  # bold kept
 
 
+# --- inverted boxes ---------------------------------------------------------------------------------------------
+
+BOX = "::: {{.box .invert}}\n{}\n:::\n"
+QR_BESIDE = (
+    "::::: {.box .invert}\n:::: {.columns valign=middle}\n::: {.column width=40%}\n```qr\nhttps://bobina.md\n```\n"
+    ":::\n::: {.column}\naponte a câmera\n:::\n::::\n:::::\n"
+)
+
+
+def box_of(res) -> BitmapRow:
+    return next(r for r in drawn(res) if r.kind == "box")
+
+
+def test_plain_small_text_in_an_inverted_box_prints_bold():
+    src = BOX.format("texto normal pequeno")
+    res, thin = build(src), build(src, overrides=OFF)
+    assert box_of(res).image.height - box_of(thin).image.height <= 1  # BOX_ROOM under a descender grown a dot
+    assert white(box_of(res).image) > white(box_of(thin).image) * 1.3
+    assert said(res, "F206") == ["inverted text printed bold (1x on line 2): ink fills thin white strokes"]
+    assert untested(res) and "F206" not in codes(thin) and not untested(thin)
+
+
+def test_a_column_beside_a_qr_in_an_inverted_box_prints_bold_and_the_qr_keeps_its_tile():
+    res, thin = build(QR_BESIDE), build(QR_BESIDE, overrides=OFF)
+    im, ref = box_of(res).image.convert("L"), box_of(thin).image.convert("L")
+    assert im.size == ref.size and white(im) > white(ref)  # "aponte a câmera" heavier
+    left = (0, 0, im.width * 2 // 5, im.height)  # the QR's column: its white tile, black on white, as before
+    assert im.crop(left) == ref.crop(left) and white(im.crop(left)) > 1000  # a tile, not all black
+    assert "Q114" in codes(res) and said(res, "F206") == [
+        "inverted text printed bold (1x on line 9): ink fills thin white strokes"
+    ]
+
+
+def test_lists_headings_and_tables_in_an_inverted_box_print_bold():
+    for body in ("- one\n- two", "## Total", "| Item | Price |\n|---|---|\n| Rice | 9,00 |", "```\nT-7 10:03\n```"):
+        src = BOX.format(body)
+        res, thin = build(src), build(src, overrides=OFF)
+        assert white(box_of(res).image) > white(box_of(thin).image), body
+        assert untested(res), body
+
+
+def test_a_word_inverted_inside_an_inverted_box_stays_black_and_thin():
+    src = BOX.format("Order [T-7]{.invert} ready")
+    res = build(src)
+    rows = box_of(res).box.rows
+    cells = next(r for r in rows if isinstance(r, TextRow)).cells
+    assert [c.heavy for c in cells if c.ch.strip()] == [True] * 5 + [False] * 3 + [True] * 5  # Order, T-7, ready
+
+
+def test_header_invert_titles_in_an_inverted_box_are_black_on_paper_and_stay_thin():
+    src = BOX.format(BILL + "{style=header-invert}")
+    res, thin = build(src), build(src, overrides=OFF)
+    im, ref = box_of(res).image, box_of(thin).image
+    assert white(im) > white(ref)  # the body rows: white on black, heavy
+    top = (0, 0, im.width, 50)  # the titles' band, white on paper here (the box's black around): as they were
+    assert im.crop(top) == ref.crop(top) and white(im.crop(top)) > 50 * im.width // 2
+    assert said(res, "F206") == ["inverted text printed bold (1x on the table at line 2): ink fills thin white strokes"]
+
+
+def test_a_band_or_border_title_of_an_inverted_box_is_drawn_heavier():
+    for how in ("band", "border"):
+        src = f'::: {{.box .invert title="SALE" title-style={how}}}\nPAID {{size=2x}}\n:::\n'  # 2x: as it was
+        res, thin = build(src), build(src, overrides=OFF)
+        assert white(box_of(res).image) > white(box_of(thin).image), how  # bold already: a dot taller
+        assert "F206" not in codes(res) and untested(res), how
+
+
+def test_a_box_in_an_inverted_box_has_a_black_band_title_and_a_white_border_title():
+    def inner(how: str) -> str:
+        return f'::: {{.box .invert}}\n::: {{.box title="SALE" title-style={how}}}\nPAID {{size=2x}}\n:::\n:::\n'
+
+    band, thin = build(inner("band")), build(inner("band"), overrides=OFF)
+    assert box_of(band).image == box_of(thin).image and not untested(band)  # its band white: the title black, thin
+    border, thin = build(inner("border")), build(inner("border"), overrides=OFF)
+    assert white(box_of(border).image) > white(box_of(thin).image) and untested(border)  # on the black: white
+
+
+def test_a_raster_font_in_an_inverted_box_takes_its_bold_face():
+    res = build(FONT + BOX.format("Thanks {size=24px}"))
+    assert said(res, "F206") == ["inverted text printed bold (24px on line 6): ink fills thin white strokes"]
+    assert "F204" not in codes(res) and not untested(res)  # a real bold face: R2-12 tested it on paper
+
+
+def test_an_inverted_image_in_an_inverted_box_is_unchanged(tmp_path):
+    from PIL import Image
+
+    Image.new("RGB", (200, 60), "white").save(tmp_path / "logo.png")
+    src = BOX.format("![](logo.png){width=half}")
+    res, thin = build(src, base_dir=str(tmp_path)), build(src, base_dir=str(tmp_path), overrides=OFF)
+    assert box_of(res).image == box_of(thin).image and "F206" not in codes(res) and not untested(res)
+
+
 # --- the paper strip ------------------------------------------------------------------------------------------------
 
 
-def test_the_paper_strip_is_about_6_cm_and_only_notes_the_bold():
+def test_the_paper_strip_is_about_9_cm_and_only_notes_the_bold():
     res = build((ROOT / "docs" / "printers" / "strips" / "inverted-bold.bob.md").read_text(encoding="utf-8"))
-    assert set(codes(res)) == {"F206", "P301"}
-    assert 50 <= preview.render(res.rows, res.profile).height * 25.4 / 203 <= 70  # mm
+    assert set(codes(res)) == {"F206", "P301", "Q114"}  # Q114: the QR's white tile in the inverted box
+    assert 80 <= preview.render(res.rows, res.profile).height * 25.4 / 203 <= 100  # mm
