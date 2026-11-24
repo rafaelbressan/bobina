@@ -39,8 +39,8 @@ FEATURES = {
         "where": "documents with ::: {.box .invert} (docs/guides/layout.md)",
         "tested_on_paper": True,
         "evidence": "MTP-II, 24/11 (printed 22/11): a band-title box holding an inverted logo, bold lines, a 2x span "
-        "and plain text, and a box with a QR in its white tile beside two lines, printed as the preview (the QR scanned): the black "
-        "even, the tile white; plain small white text prints thin (bold holds up better)",
+        "and plain text, and a box with a QR in its white tile beside two lines, printed as the preview (the QR "
+        "scanned): the black even, the tile white; plain small white text prints thin (bold holds up better)",
     },
     "columns": {
         "title": "columns side by side (:::: {.columns}), each row of them printed as one image",
