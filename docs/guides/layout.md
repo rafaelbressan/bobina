@@ -32,7 +32,7 @@ tables, other boxes, [columns](layout-columns.md) (blocks side by side, `:::: {.
 | `width=half` | a narrower box: `full` (the default), `half`, `third`, `50%`, `30mm`, `16ch` (letters) |
 | `.center` `.right` | where a narrower box goes (on the left by default) |
 | `.shade` | a light grey background, kept off the letters |
-| `.invert` | all black, frame and room too; what it holds prints white, its images inverted (**⚠ not tested on paper**) |
+| `.invert` | all black, frame and room too; what it holds prints white, its images inverted; plain small text prints thin on paper, prefer bold |
 
 A long title wraps into more lines with `band` and `inside`; on the border it is cut with "…" (`L109`).
 

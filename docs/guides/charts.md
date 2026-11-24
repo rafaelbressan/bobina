@@ -111,5 +111,3 @@ supply
 | `C106` | nothing to draw (no value column): printed as a table |
 | `C107` | repeated labels combined |
 | `C108`, `C109` | a title the file lacks; a file not found or unreadable |
-
-Charts are **⚠ not tested on paper** yet (`P301`).

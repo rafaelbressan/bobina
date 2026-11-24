@@ -58,7 +58,7 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; `chart=line\|bar\|area\|sparkline` and `data=FILE`: [charts](guides/charts.md) ⚠ not tested on paper; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; `chart=line\|bar\|area\|sparkline` and `data=FILE`: [charts](guides/charts.md); a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)); blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`); along the roll: `orientation=vertical` |
@@ -82,7 +82,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 |---|---|
 | `.left` `.center` `.right` `.justify` | alignment (justify spreads spaces on the character grid, or pixels in raster) |
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
-| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black **⚠ not tested on paper.** |
+| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black. |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
 | `.mono` | monospace (the printer font already is) |
 | `.compact` | tables: do not stretch |

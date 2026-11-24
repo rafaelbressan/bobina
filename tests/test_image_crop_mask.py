@@ -260,8 +260,7 @@ def box_image(res) -> Image.Image:
 
 def test_an_inverted_box_is_one_black_band_with_its_text_white(tmp_path):
     res = build("::: {.box .invert}\nhello\n:::\n")
-    assert codes(res) == ["P301"]  # .invert is a box setting now (it was M101); a tall black band: not on paper yet
-    assert "inverted boxes" in said(res, "P301")[0]
+    assert codes(res) == []  # .invert is a box setting now (it was M101); tested on paper 24/11 (docs/TESTED.md)
     im = box_image(res)
     assert im.getpixel((0, 0)) == 0 and im.getpixel((W - 1, im.height - 1)) == 0  # black to its edges
     assert 0.6 < ink(im) < 1.0  # with white letters in it
