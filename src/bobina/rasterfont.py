@@ -16,7 +16,7 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
-from . import paths
+from . import imaging, paths
 
 SIZES_MM = {"small": 1.5, "normal": 2.5, "large": 3.5, "title": 5.0, "huge": 8.0}
 SIZE_RE = re.compile(r"^(\d)x(?:(\d))?$")  # 2x, 1x2: the printer font's multipliers (width x height)
@@ -225,6 +225,8 @@ class Tok:
     tracking: int = 0
     glue: bool = False  # part of the word before it (another script, another font): never a line break before it
     icon: str = ""  # an icon (:fragile:) drawn as a square the height of the letters, not a glyph of the font
+    heavy: bool = False  # white on black below the size the paper holds (layout.whiten): bold, and a synthetic bold
+    # (no bold file: the printer font's look) a dot taller too
 
     @property
     def font(self):
@@ -241,6 +243,22 @@ class Tok:
         return int(round(w + (self.px * 0.1 if self.italic and not self.space else 0)))
 
 
+def _heavy(im: Image.Image, t: Tok, line_h: int, top: int = 0, bottom: int | None = None) -> Image.Image:
+    """The one place a raster glyph is drawn heavy (Tok.heavy): a font without a bold file (the printer font's look)
+    a dot taller, into one more row (a descender in the last row grows into the leading below); a bold face is heavy
+    enough (R2-12). Inverted, its black box (rows top to bottom: a span smaller than its line has its own) stays as
+    it is: only the white ink grows, inside it."""
+    if not t.heavy or "bold" in t.path.lower():
+        return im
+    tall = Image.new("L", (im.width, line_h + 1), 255)
+    tall.paste(im, (0, 0))
+    if not t.invert:
+        return imaging.thicken_down(tall)
+    box = (0, top, im.width, (line_h - 1 if bottom is None else bottom) + 1)
+    tall.paste(imaging.thicken_down(tall.crop(box), 255), box[:2])
+    return tall
+
+
 def draw_tok(t: Tok, ascent: int, line_h: int, line_px: int = 0) -> Image.Image:
     """A token drawn on a line whose letters rise `ascent` dots above the baseline, `line_h` tall. line_px: the
     biggest size on the line; an inverted token smaller than it (a span's size=) gets a box of its own height."""
@@ -248,8 +266,8 @@ def draw_tok(t: Tok, ascent: int, line_h: int, line_px: int = 0) -> Image.Image:
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
     fa, fd = t.font.getmetrics()
+    top, bottom = 0, line_h - 1
     if t.invert:
-        top, bottom = 0, line_h - 1
         if t.px < line_px:  # beside bigger letters (a span's size=): its own letters' height on the baseline
             top, bottom = ascent - fa, ascent + fd - 1
         d.rectangle((0, top, w - 1, bottom), fill=0)
@@ -273,6 +291,7 @@ def draw_tok(t: Tok, ascent: int, line_h: int, line_px: int = 0) -> Image.Image:
             d.text((x, ascent - fa), txt, font=t.font, fill=ink)
             if t.bold and "bold" not in t.path.lower():  # synthetic bold for fonts without a bold file
                 d.text((x + 1, ascent - fa), txt, font=t.font, fill=ink)
+        im = _heavy(im, t, line_h, top, bottom)
     if t.italic and not t.icon:  # an icon is not slanted
         im = im.transform(
             im.size,

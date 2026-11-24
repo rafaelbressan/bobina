@@ -183,8 +183,6 @@ def lines(rows, profile, color: bool = False, max_feed_lines: int = 1, frame: in
             trs = r.text_rows if r.wide_view else [fit(tr, frame) for tr in r.text_rows]  # wide_view: never cut
             room = max([cols, *(tr.width() for tr in trs)])  # a smaller font's paper line: wider
             for tr in trs:
-                if r.kind == "band":  # white on black on paper, from edge to edge
-                    tr = TextRow([type(c)(**{**c.__dict__, "invert": True}) for c in tr.cells], tr.scale, tr.align)
                 ls = [ln + " " * (frame - room) for ln in text_lines(tr, room, color, dark)]
                 out += [f"{FLIP[dark]}{ln}{BASE[dark]}" if color and r.kind == "band" else ln for ln in ls]
         elif isinstance(r, BitmapRow) and r.view is not None:  # a chart: braille, its labels as text

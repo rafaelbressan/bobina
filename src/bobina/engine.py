@@ -183,14 +183,15 @@ class NothingToPrint(JobError):
     code = "E304"
 
 
-def _note_untested(prof, rows, nudges) -> None:
-    """P301 once per label when it uses a feature nobody has seen on paper yet (features.py): the profile's, and
-    the ones a row says it draws (a zebra table)."""
+def _note_untested(prof, rows, nudges, laid: set = frozenset(), own: bool = True) -> None:
+    """P301 once per label when it uses a feature nobody has seen on paper yet (features.py): the profile's, the
+    ones a row says it draws (a zebra table) and the ones the layout used (laid: small white text made bold).
+    own=False: not the profile's (a chat job: what its rows and layouts draw)."""
     from . import features
     from .profile import plain_ascii
     from .rows import BarcodeRow
 
-    on = set(features.of_profile(prof))
+    on = set(features.of_profile(prof)) if own else set()
     used = []
     if "codepage" in on and any(isinstance(r, TextRow) and r.native and not all(plain_ascii(c.ch) for c in r.cells)
                                 for r in rows):  # fmt: skip
@@ -199,7 +200,7 @@ def _note_untested(prof, rows, nudges) -> None:
         used.append("cutter")
     if "native-barcode-imported" in on and any(isinstance(r, BarcodeRow) for r in rows):
         used.append("native-barcode-imported")
-    drawn = {u for r in rows if isinstance(r, BitmapRow) for u in r.untested}
+    drawn = {u for r in rows if isinstance(r, BitmapRow) for u in r.untested} | set(laid)
     used += [f for f in features.untested() if f in drawn]
     if used:
         names = "; ".join(features.FEATURES[u]["title"] for u in used)
@@ -324,10 +325,11 @@ def build(
             literal_asterisks=stars, authored=rendered.authored,
         )  # fmt: skip
         doc.meta_lines = templating.front_matter_lines(source)
-    rows = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs).run()
+    lay = Layout(prof, doc, rendered, nudges, net=net, locale=choice, image_dirs=image_dirs)
+    rows = lay.run()
     if doc.blocks and not any(not isinstance(r, FeedRow) for r in rows):
         nudges.add("L105", "nothing printable: every block was skipped", None, "see the warnings above")
-    _note_untested(prof, rows, nudges)
+    _note_untested(prof, rows, nudges, lay.untested)
     own = meta.get("allow") or []
     if isinstance(own, str):  # allow: L102 or allow: F301,L101, as on the command line
         own = re.split(r"[,\s]+", own)

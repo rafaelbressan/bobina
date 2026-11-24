@@ -58,6 +58,13 @@ FEATURES = {
         "reads right with the paper's right edge up. The first strip that day: a 72 mm label's EAN-13 at module 2 did "
         "not scan, and a box drawn at 75% blurred letters (both changed)",
     },
+    "inverted-bold": {
+        "title": "small white-on-black text made bold (a dot taller in the printer font's look; ESC E under GS B)",
+        "where": "inverted text below raster.invert_bold_below_px: .invert lines and words, band titles, tables, "
+        "what an inverted box holds",
+        "tested_on_paper": False,
+        "evidence": "",
+    },
     "charts": {
         "title": "charts drawn from a table (chart=line, bar, area, sparkline)",
         "where": "tables with chart= (docs/guides/charts.md)",

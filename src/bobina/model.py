@@ -28,6 +28,7 @@ class Run:
     mono: bool = False
     font: str | None = None
     size: str | None = None
+    white: bool = False  # printed white on black by what holds it (a black chat bubble): as on an .invert line
 
 
 @dataclass

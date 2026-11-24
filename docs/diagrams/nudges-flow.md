@@ -208,6 +208,7 @@ from this list.
 | `F203` | warning | font not found, a bundled font was used |  |
 | `F204` | warning | inverted raster text too thin or small | R2-12 |
 | `F205` | warning | font size out of range (6 to 400 px), clamped |  |
+| `F206` | note | small white-on-black text printed bold: ink fills thin white strokes |  |
 
 ### Layout and size
 

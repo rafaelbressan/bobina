@@ -26,6 +26,7 @@ BUDGET = {  # tokens; set on 08/11 about 25% above the size then
     "docs/guides/layout-columns-turned.md": 690,  # set on 17/11, turned columns split from layout-columns.md (not in llms-full)
     "docs/guides/receipts-supermarket.md": 385,  # set on 17/11, split from receipts.md (not in llms-full.txt)
     "docs/guides/counters.md": 260,  # set on 17/11, when a number is taken: split from FORMAT §7.3 (not in llms-full)
+    "docs/guides/white-text.md": 450,  # set on 24/11, white text on black made bold (not in llms-full.txt)
     "docs/guides/charts.md": 1400,  # set on 21/11, with charts (chart=, data=); not in llms-full.txt (FORMAT links it)
     "docs/pay.md": 3000,
     "docs/contact.md": 3000,

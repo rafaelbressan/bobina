@@ -133,7 +133,8 @@ def test_header_invert_prints_the_titles_on_a_black_band_and_the_body_plain():
     assert "Item" in "".join(c.ch for c in band[0].text_rows[0].cells)
     assert not dividers(res)
     assert texts(res) == texts(build(BILL))[1:]  # every body line native, as plain prints it
-    assert not codes(res)  # the printer font's titles are bold and 24 dots: no F204
+    assert codes(res) == ["P301"]  # the printer font's titles are bold and 24 dots: no F204, no F206; drawn a
+    # dot taller, not tested on paper yet
 
 
 # --- zebra --------------------------------------------------------------------------------------------------------

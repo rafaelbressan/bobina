@@ -270,6 +270,10 @@ class Layout:
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
         self.dark = False  # laid out inside a ::: {.box .invert}: printed white on black
         self.dark_lost = False  # ... and in turned columns there: a code's tile is turned with them, not kept
+        self.reversed = False  # laid out to be inverted once more (the band title of a box in an inverted box): its
+        # white is black on paper (whiten)
+        self.untested: set[str] = set()  # features not tested on paper this job used that no row records (P301)
+        self.whitened: dict[str, set] = {}  # size -> (line, is a table) of the white text made bold: one F206 (run)
 
     # ------------------------------------------------------------ quotes
     def bars_in(self, gutter: int) -> list[int]:
@@ -564,10 +568,23 @@ class Layout:
         tracking: int = 0,
         leading: int | None = None,
         indent_dots: int = 0,
+        printer: tuple[int, int] | None = None,
     ) -> list:
+        """printer: the printer-font size this line stands for (a line drawn whole: Thai, Hebrew…), drawn evenly at
+        its height: its white text is made bold as at that size (a 1x2 line as its 24 dots, as a native one)."""
         toks: list = []
         fallback = rasterfont.resolve("DejaVu Sans").path
         context = "".join(r.text for r in runs)  # Han next to kana is Japanese (scriptfonts.packs_for)
+        whole = attrs.has("invert") or self.dark
+        thin: dict[str, None] = {}  # the sizes of white text made bold that was not (F206)
+        light = False  # white text left as it is, not bold (F204 below)
+
+        def small(rpx: int, own: bool = False) -> tuple[bool, str]:  # white text this tall: bold, and said as
+            if printer and not own:
+                w, h = printer
+                return self.p.invert_bold(rpx * min(w, h) // h), f"{w}x" if w == h else f"{w}x{h}"
+            return self.p.invert_bold(rpx), f"{rpx}px"
+
         for r in runs:
             if r.text == "\n":
                 toks.append(rasterfont.Tok("", fallback, px, brk=True))
@@ -577,7 +594,17 @@ class Layout:
                 rfam = "Spleen"
             b = r.bold or bold or extra.get("bold", False)
             rpx = rasterfont.px_for(r.size, self.p, px, self.n, line) if r.size else px
+            white = ((whole or r.white) != self.reversed) != r.invert  # in an inverted box, what is not inverted
+            # on its own; inverted twice: black on paper
+            bolder, size = small(rpx, bool(r.size))
+            heavy = white and bolder
+            if heavy and not b and r.text.strip():
+                thin[size] = None
+            light = light or (white and not b and not heavy and bool(r.text.strip()))
+            b = b or heavy
             path = self.font_path(rfam, b, rpx, line)
+            if heavy and "bold" not in path.lower():  # a synthetic bold (the printer font's look): drawn a dot taller
+                self.untested.add("inverted-bold")  # (rasterfont.draw_tok), not tested on paper
             text = self.text(r.text)
             for piece in re.split(r"( +|\n)", text):
                 if not piece:
@@ -607,6 +634,7 @@ class Layout:
                             underline=r.underline or extra.get("underline", False),
                             strike=r.strike or extra.get("strike", False),
                             invert=r.invert,
+                            heavy=heavy,
                             space=txt.isspace(),
                             glue=k > 0,  # the parts of one word stay on one line
                             icon=icons.name_of(txt) or "" if len(txt) == 1 else "",
@@ -624,8 +652,15 @@ class Layout:
                     box = pimg.crop((0, 0, pimg.width - 6, pimg.height))
                     pimg = Image.new("L", pimg.size, 255)
                     pimg.paste(box, (6, 0))
-            else:
-                t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
+            else:  # a list's number or bullet: white on black and small as its text, bold and heavy too
+                heavy, size = small(px)
+                heavy = heavy and (attrs.has("invert") or self.dark) != self.reversed
+                if heavy and not bold and ptxt.strip():
+                    thin[size] = None
+                path = self.font_path(fam, heavy or bold, px, line)
+                if heavy and "bold" not in path.lower():
+                    self.untested.add("inverted-bold")
+                t = rasterfont.Tok(ptxt, path, px, bold=heavy or bold, heavy=heavy)
                 asc, desc = t.font.getmetrics()
                 pimg = rasterfont.draw_tok(t, asc, asc + desc, px)
         align = attrs.kv.get("align") or next(
@@ -643,6 +678,8 @@ class Layout:
                 line,
                 "nothing to fix; the other words keep their spacing",
             )
+        for size in thin:
+            self.white_note(size, line)
         if not toks:
             return []
 
@@ -672,22 +709,74 @@ class Layout:
             for t in texts
         ]
         wide = self.smaller_font(toks) and any(r.columns() > self.cols for r in view_rows)  # the views widen
-        if (attrs.has("invert") or self.dark) and (px < int(self.p.get("raster.invert_min_px", 20)) or not bold):
-            self.n.add(  # white on black, in its own band or in an inverted box
-                "F204",
-                f"inverted text at {px}px{'' if bold else ' (not bold)'} closes up",
-                line,
-                "use bold and ≥ 20px",
-                "R2-12",
-            )
+        tiny = px < int(self.p.get("raster.invert_min_px", 20))
+        if (attrs.has("invert") or self.dark) and (tiny or light):  # white on black, in its own band or in an
+            # inverted box: bold below raster.invert_bold_below_px (F206), not above it (a light face closes up)
+            hint = "use bold and ≥ 20px" if tiny and light else "use 20px or more" if tiny else "use bold"
+            self.n.add("F204", f"inverted text at {px}px{' (not bold)' if light else ''} closes up", line, hint,
+                       "R2-12")  # fmt: skip
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
             band.paste(im.convert("L"), (0, m))
             band = self.draw_bars(band, indent, 0, rtl)  # black here: white once the band is inverted
-            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows,
-                              wide_view=wide)]  # fmt: skip
+            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band",
+                              [_as_paper(r) for r in view_rows], wide_view=wide)]  # fmt: skip
         return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows, wide_view=wide)]
+
+    def whiten(self, cells: list, whole: bool | list[bool], line: int, size_of, table: bool = False,
+               untested: bool = True) -> list:  # fmt: skip
+        """The cells that print white on black (whole: on a black band or in an inverted box, where a cell's own
+        .invert turns it back to black), when smaller than the paper holds (Profile.invert_bold), heavy and bold
+        (whiten). size_of(cell): its height in dots and the size said for it (1x, 2x1, 20px). F206 says so when one
+        was not bold, P301 that it is not tested on paper (untested=False: a raster bold face, R2-12)."""
+        if self.reversed:  # to be inverted once more: white on black is black on paper
+            whole = [not w for w in whole] if isinstance(whole, list) else not whole
+        out, thin = whiten(cells, whole, lambda c: self.p.invert_bold(size_of(c)[0]))
+        if untested and any(c is not None and c.heavy for c in out):
+            self.untested.add("inverted-bold")
+        for size in dict.fromkeys(size_of(c)[1] for c in thin):
+            self.white_note(size, line, table)
+        return out
+
+    def white_note(self, size: str, line: int, table: bool = False) -> None:
+        """White text at this size made bold on this line (a table's: its first line); said once (white_said)."""
+        self.whitened.setdefault(size, set()).add((line, table))
+
+    def white_said(self, into=None, where: str = "") -> None:
+        """F206 once for the document: every size made bold and where (a receipt with many inverted lines and rows
+        gets one note, not one per line), and the size that keeps its weight. into, where: said in those nudges, at
+        no line, as `where` (text laid out for a picture: a black chat bubble)."""
+        if not self.whitened:
+            return
+        parts = []
+        for size, at in self.whitened.items():
+            lines = sorted(n for n, table in at if not table)
+            tables = sorted(n for n, table in at if table)
+            places = [f"line{'s' if len(lines) > 1 else ''} {', '.join(map(str, lines))}"] if lines else []
+            if tables:
+                many = len(tables) > 1
+                places.append(
+                    f"the table{'s' if many else ''} at line{'s' if many else ''} {', '.join(map(str, tables))}"
+                )
+            parts.append(f"{size} {where}" if where else f"{size} on {' and '.join(places)}")
+        least = int(self.p.get("raster.invert_bold_below_px", 48))
+        k = -(-least // self.p.cell[1])
+        first = None if where else min(n for at in self.whitened.values() for n, _ in at)
+        (into if into is not None else self.n).add(
+            "F206", f"inverted text printed bold ({'; '.join(parts)}): ink fills thin white strokes", first,
+            f"nothing to fix; size={k}x or {least}px and larger keep their weight",
+        )  # fmt: skip
+
+    def printer_size(self, scale: tuple[int, int]):
+        """size_of for whiten: a printer-font cell's height in dots and its size (2x, 1x2), at its own scale (a
+        span's size=) or the line's."""
+
+        def size_of(c: Cell) -> tuple[int, str]:
+            w, h = c.scale or scale
+            return self.p.cell[1] * min(w, h), f"{w}x" if w == h else f"{w}x{h}"
+
+        return size_of
 
     def view_cells(self, toks, room: int) -> list[Cell]:
         """A line of drawn text as cells for the terminal views, every letter the paper shows (in a smaller font,
@@ -783,6 +872,7 @@ class Layout:
                 line=line,
                 attrs=attrs,
                 px=self.p.cell[1] * scale[1],
+                printer=scale,
                 bold=bold or attrs.has("bold"),
                 extra={**extra, **{k: True for k in ("italic", "underline", "strike") if attrs.has(k)}},
                 prefix=prefix,
@@ -811,7 +901,12 @@ class Layout:
             return None if sizes[r.size] == scale else sizes[r.size]
 
         cells = self.cells_from_runs(runs, extra, sized)
-        prefix = prefix or []
+        whole = attrs.has("invert") or self.dark  # in an inverted box, its text is white on black
+        if any(r.white for r in runs):  # each cell as its run says (a black chat bubble)
+            whole = [whole or r.white for r in runs for _ in ([None] if r.text == "\n" else self.text(r.text))]
+        cells = self.whiten(cells, whole, line, self.printer_size(scale))
+        prefix = self.whiten(prefix or [], attrs.has("invert") or self.dark, line, self.printer_size(scale))  # a
+        # list's number, bullet or task box: white as its text
         pw = columns(prefix)
         advance = self.p.cell[0] * scale[0] + self.p.tracking_gap(tracking, scale[0])  # as the printer spaces them
         measure, unit = columns, 1  # columns of the line's size; spans of their own size: dots
@@ -880,7 +975,7 @@ class Layout:
                 )
             )
         if emulated and not attrs.has("invert") and not drawn_bars:
-            return [BitmapRow(self.em.render_row(r, self.W), line, "text", [r]) for r in rows]
+            return [BitmapRow(self.em.render_row(r, self.W, drawn=True), line, "text", [r]) for r in rows]
         if attrs.has("invert"):
             band = self.band(rows, line)
             self.draw_bars(band.image, gutter, 255)  # white, from edge to edge of the band (its margins too)
@@ -888,7 +983,7 @@ class Layout:
         if drawn_bars:
             return [
                 BitmapRow(
-                    self.draw_bars(self.em.render_row(r, self.W), gutter, 0),
+                    self.draw_bars(self.em.render_row(r, self.W, drawn=True), gutter, 0),
                     line,
                     "text",
                     [self.quoted_view(r, indent, gutter)],
@@ -911,14 +1006,16 @@ class Layout:
         """A quoted line taller than its 1x │ (a span's own size): printed as an image with the quote bars drawn
         from its top to its foot; the views show its letters as they are, the bars on each of their lines."""
         bare = replace(row, cells=[replace(c, ch=" ") if c.ch == QUOTE_BAR else c for c in row.cells])
-        return BitmapRow(self.draw_bars(self.em.render_row(bare, self.W), gutter, 0), row.line, "text", [row])
+        return BitmapRow(self.draw_bars(self.em.render_row(bare, self.W, drawn=True), gutter, 0), row.line, "text",
+                         [row])  # fmt: skip
 
     def band(self, rows: list[TextRow], line: int) -> BitmapRow:
         """Continuous inverted band (GS B leaves spaces white, so it goes raster)."""
         m = int(self.p.get("raster.invert_margin_dots", 4))
-        imgs = [self.em.render_row(r, self.W).convert("L") for r in rows]
+        imgs = [self.em.render_row(r, self.W, drawn=True).convert("L") for r in rows]
         out = imaging.vstack(imgs, self.W, "L", margin=m)
-        return BitmapRow(ImageOps.invert(out).convert("1", dither=Image.NONE), line, "band", rows)
+        view = [_as_paper(r) for r in rows]
+        return BitmapRow(ImageOps.invert(out).convert("1", dither=Image.NONE), line, "band", view)
 
     # ------------------------------------------------------------ blocks
     def run(self) -> list:
@@ -928,6 +1025,7 @@ class Layout:
         if self.p.get("marks", "none") in ("tear", "both"):  # printed so that the feed leaves it on the tear bar
             tear_at = max(0, feed - min(feed, max(1, int(self.p.get("margins.tear_dots", 40)))))  # 1 dot after it
         rows.append(FeedRow(feed, mark="tear", tear_at=tear_at))
+        self.white_said()
         return rows
 
     def blocks(self, blocks, indent: int) -> list:
@@ -1003,10 +1101,10 @@ class Layout:
         return ang
 
     def compose(self, rows) -> Image.Image:
-        return self.stacked([preview.row_image(r, self.p, self.em) for r in rows], self.W)
+        return self.stacked([preview.row_image(r, self.p, self.em, drawn=True) for r in rows], self.W)
 
     def rotate(self, rows, ang: float, attrs, line: int) -> BitmapRow:
-        pics = [preview.row_image(r, self.p, self.em) for r in rows]
+        pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows]
         im = self.stacked(pics, self.W)
         codes = _code_spans(rows, pics)
         keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
@@ -1226,9 +1324,11 @@ class Layout:
         try:
             with self.narrow(inner):
                 self.dark = False  # the band is the box's own: inside an inverted box it prints the other way round
+                self.reversed = was_dark  # (its title black on paper: not made heavy)
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
-                band_pics = [preview.row_image(r, self.p, self.em) for r in band]
+                self.reversed = False
+                band_pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in band]
                 band_im = self.stacked(band_pics, self.W) if band else None
                 if outer and ang % 180 != 90:  # in a turned label: what the frame, its room and a border or band
                     above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
@@ -1238,10 +1338,10 @@ class Layout:
                 rows = self.blocks(kids, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
-                pics = [preview.row_image(r, self.p, self.em) for r in rows]
+                pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
         finally:
-            self.tall_max, self.dark, self.dark_lost = outer, was_dark, was_lost
+            self.tall_max, self.dark, self.dark_lost, self.reversed = outer, was_dark, was_lost, False
         codes = _code_spans(rows, pics)
         keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         if raws:
@@ -1273,7 +1373,7 @@ class Layout:
             im.paste(part, (x, py))
         if a.has("shade") and not dark:  # the whole inside, 2 dots clear of the frame; the halo: off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
-        shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
+        shown = self.border_title(im, title, line, top, stroke, title_y, dark or self.dark) if on_border else ""
         if dark:  # one black band from edge to edge, no white between its blocks; a band title stays as it is
             plain, im = im, ImageOps.invert(im)
             for part, x, py in parts[:1] if band_im is not None else ():
@@ -1346,10 +1446,12 @@ class Layout:
             self.n.add("M101", f"width={given}: a box needs {least // cw} letters (4 inside)", line, BOX_WIDTH_HINT)
         return max(least, w // cw * cw)
 
-    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int) -> str:
+    def border_title(self, im: Image.Image, title: str, line: int, top: int, stroke: int, y: int,
+                     white: bool = False) -> str:  # fmt: skip
         """The title across a box's top line (its letters from `y` down), centred, bold in the printer font's look,
-        the line cut around it (half a letter each side); longer than the line holds: cut with … (L109). Returns
-        it as printed."""
+        the line cut around it (half a letter each side); longer than the line holds: cut with … (L109). white: the
+        box prints white on black (an inverted box, or one in it), so its letters are heavy (whiten). Returns it as
+        printed."""
         cw = self.p.cell[0]
         most = max(1, im.width // cw - 6)  # three letters of line each side, as the views draw ┌─ TITLE ─┐
         if columns([Cell(c, wide=is_wide(c)) for c in title]) > most:
@@ -1357,7 +1459,9 @@ class Layout:
                        line, "title-style=band or title-style=inside wrap a long title into lines")  # fmt: skip
             title = fit_columns(title, most - 1).rstrip() + "…"
         cells = [Cell(c, bold=True, wide=is_wide(c)) for c in title]
-        drawn = self.em.line_image(cells)
+        if white:
+            cells = self.whiten(cells, True, line, self.printer_size((1, 1)))
+        drawn = self.em.line_image(cells, drawn=True)
         x, gap = (im.width - drawn.width) // 2, cw // 2
         im.paste(255, (x - gap, top, x + drawn.width + gap, top + stroke))
         im.paste(0, (x, y), ImageOps.invert(drawn))  # its ink only: nothing under it is wiped
@@ -1588,7 +1692,7 @@ class Layout:
                 rows = self.blocks(col.children, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
-                pics = [preview.row_image(r, self.p, self.em) for r in rows] if pictures else []
+                pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows] if pictures else []
         finally:
             self.tall_max = outer
         return rows, raws, pics
@@ -2030,6 +2134,8 @@ class Layout:
         cap = self.cols - indent
         for ln in f.content.rstrip("\n").split("\n"):
             cells = [Cell(ch, wide=is_wide(ch)) for ch in self.text(ln)]
+            if self.dark:  # in an inverted box: white on black, small
+                cells = self.whiten(cells, True, f.line, self.printer_size((1, 1)))
             while True:
                 if columns(cells) > cap:
                     self.n.add("L103", f"line longer than {cap} columns wrapped", f.line)
@@ -2923,14 +3029,18 @@ class Layout:
             head = None
             if not body:
                 return []
-        every = [c for r in ([head] if head else []) + body for c in r]
         stretched = None if face else self.stretch(t.attrs.kv.get("size"))
+        head, body = self.table_white(t, head, body, style, face, stretched or (1, 1))
+        marked = any(c.heavy for r in ([head] if head else []) + body for cell in r for c in cell)
+        every = [c for r in ([head] if head else []) + body for c in r]
         if face:
             ink = _FontInk(self, *face, self.said_at(t, "font=" if "font" in t.attrs.kv else "size="), every)
         else:
             ink = _NativeInk(self, stretched or (1, 1))
             if stretched:
                 self.jagged(stretched, self.said_at(t, "size="))
+        if marked and (face is None or "bold" not in ink.fonts.get(True, "").lower()):  # native, or no bold file:
+            self.untested.add("inverted-bold")  # drawn heavy (P301); a bold face is R2-12's
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
             self.n.add("F204", f"inverted titles at {ink.px}px close up", self.said_at(t, "style="),
                        "use size=20px or more, or style=receipt", "R2-12")  # fmt: skip
@@ -3167,6 +3277,22 @@ class Layout:
         what = "turned table, column widths" if turned else "column widths"
         self.n.add("L108", f"{what}{unit}: {' · '.join(names)} ({extra} = {total})", t.line,
                    'width= at the end of a title cell sets a column: | Price {width=9ch} |')  # fmt: skip
+
+    def table_white(self, t: Table, head, body, style: str, face, wh: tuple[int, int]) -> tuple:
+        """A table's cells through whiten: on a black box the titles of style=header-invert or of a title row with
+        .invert, each body row with .invert after it, each cell with its own .invert; elsewhere a span's inverted
+        words. In an inverted box the other way round: what is not on a black box is white. P301: Layout.table,
+        once it knows the font."""
+        size = (lambda c: (face[1], f"{face[1]}px")) if face else self.printer_size(wh)
+
+        def white(cells, attrs):
+            return self.whiten(cells, _any_class(attrs, "invert") != self.dark, t.line, size, table=True,
+                               untested=False)  # fmt: skip
+
+        if head:
+            whole = Attrs({"invert"} if style == "header-invert" else set())
+            head = [white(c, [_at(t.heads, i, Attrs()), t.head_row, whole]) for i, c in enumerate(head)]
+        return head, [[white(c, [_row(t, k), _cell(t, k, i)]) for i, c in enumerate(r)] for k, r in enumerate(body)]
 
     def table_cell(self, runs, line: int, bold: bool = False) -> list[Cell]:
         """A cell's text as styled cells (**bold**, *italic*, ~~strike~~ as in a paragraph), on one line, without
@@ -3569,7 +3695,7 @@ class Layout:
             if ink.wh[0] == 1 or not self.bars_in(indent):
                 return row
             # a stretched line cannot hold a 1x │: the quote bars are drawn into it, as text_block does
-            return BitmapRow(self.draw_bars(self.em.render_row(row, self.W), indent, 0), t.line, "text",
+            return BitmapRow(self.draw_bars(self.em.render_row(row, self.W, drawn=True), indent, 0), t.line, "text",
                              [self.native_view(ink, indent, shift, piece[1].view, t.line)])  # fmt: skip
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
@@ -3581,6 +3707,16 @@ class Layout:
         else:  # the same or a larger font: a map of the paper, every letter in it
             view = [TextRow(maps[id(ln)], (1, 1), "left", t.line) for ln in lines]
         band = kind == "image" and "band" in piece[3].split()
+        if band and lines and not lines[0].row.has("invert"):  # style=header-invert: its titles as on paper
+            view = [_as_paper(v) for v in view]
+        elif band and lines:  # an inverted row: its cells reversed already (_padded, paper_map), and before them
+            if ink.native:  # the quote bars and indent, white on black from the paper's edge, as on paper
+                k = len(self.lead(indent) if ink.wh[0] > 1 and self.bars_in(indent) else self.table_lead(ink, indent))
+                k += shift
+            else:
+                k = len(self.lead(indent))
+            view = [replace(v, cells=[replace(c, invert=True) if i < k else c for i, c in enumerate(v.cells)])
+                    for v in view]  # fmt: skip
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]), wide_view=wide)  # fmt: skip
 
@@ -3617,7 +3753,7 @@ class Layout:
             at = _offset(s.align, hi - lo - columns(seg))
             part = [Cell(" ")] * at + seg + [Cell(" ")] * (hi - lo - at - columns(seg))
             gap = [Cell(" ", invert=band and col > indent)] * (lo - col)  # a band runs on between its cells
-            out += gap + ([replace(c, invert=True) for c in part] if s.invert or band else part)
+            out += gap + ([replace(c, invert=not c.invert) for c in part] if s.invert or band else part)
             col = hi
         while out and out[-1] == Cell(" "):
             out.pop()
@@ -3916,8 +4052,8 @@ def _padded(
         part = [Cell(" ")] * left + seg + [Cell(" ")] * max(0, free - left)
         gap = [Cell(" ")] if s.last < last else []
         line += part + gap
-        view += [replace(c, invert=True) for c in part + gap] if band else (
-            ([replace(c, invert=True) for c in part] if s.invert else part) + gap)  # fmt: skip
+        view += [replace(c, invert=not c.invert) for c in part + gap] if band else (
+            ([replace(c, invert=not c.invert) for c in part] if s.invert else part) + gap)  # fmt: skip
     while line and line[-1] == Cell(" "):
         line.pop()
     while view and view[-1] == Cell(" "):
@@ -4087,7 +4223,7 @@ class _NativeInk:
         return self.lead(indent) * self.unit
 
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
-        return self.em.render_row(TextRow(ln.cells, self.wh, "left", t.line), width).convert("L")
+        return self.em.render_row(TextRow(ln.cells, self.wh, "left", t.line), width, drawn=True).convert("L")
 
 
 @functools.lru_cache(maxsize=4096)
@@ -4133,7 +4269,7 @@ class _FontInk:
         return self._paths[key]
 
     def tok(self, c: Cell) -> rasterfont.Tok:
-        return rasterfont.Tok(c.ch, self.path(c), self.px, bold=c.bold, italic=c.italic,
+        return rasterfont.Tok(c.ch, self.path(c), self.px, bold=c.bold, italic=c.italic, heavy=c.heavy,
                               icon=icons.name_of(c.ch) or "" if icons.is_icon(c.ch) else "")  # fmt: skip
 
     def adv(self, c: Cell) -> int:
@@ -4206,6 +4342,29 @@ class _FontInk:
             im.paste(part if invert else ImageChops.darker(im.crop(box), part), box[:2])
 
 
+def _as_paper(row: TextRow) -> TextRow:
+    """A line of a black band as the terminal views show it: every cell inverted, but a word inverted on its own,
+    black on paper, not."""
+    return replace(row, cells=[replace(c, invert=not c.invert) for c in row.cells])
+
+
+def whiten(cells: list, whole: bool | list[bool], small=lambda c: True) -> tuple[list, list]:
+    """The one place that decides which glyphs print white on black: on a black band or in an inverted box (whole:
+    for every cell, or one each) the cells not inverted on their own, elsewhere the inverted ones (a cell inverted
+    twice is black on paper: left as it is). Those small(cell) enough (the caller: Profile.invert_bold) are made bold
+    and heavy (Cell.heavy: drawn a dot taller where bobina draws them; a space too, so a native run of them is one
+    ESC E). And the letters of them that were not bold (F206)."""
+    out, thin = [], []
+    wholes = whole if isinstance(whole, list) else [whole] * len(cells)
+    for c, w in zip(cells, wholes, strict=True):
+        if c is not None and w != c.invert and small(c):
+            if not c.bold and not c.ch.isspace():
+                thin.append(c)
+            c = replace(c, bold=True, heavy=True)
+        out.append(c)
+    return out, thin
+
+
 def _justify(cells: list[Cell], cap: int, measure=columns, unit: int = 1) -> list[Cell]:
     """Spaces of the line's size added between words until the line is `cap` wide (in the unit of measure: columns,
     or dots for a line whose spans have their own size, `unit` dots to a space)."""
@@ -4218,5 +4377,5 @@ def _justify(cells: list[Cell], cap: int, measure=columns, unit: int = 1) -> lis
     for i, c in enumerate(cells):
         out.append(c)
         if i in add:
-            out += [Cell(" ")] * add[i]
+            out += [c] * add[i]  # as the space it widens: an inverted, bold run stays one ESC E and one GS B
     return out

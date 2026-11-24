@@ -99,7 +99,9 @@ def test_invert_turns_its_cell_white_on_black_continuously(where):
     im, cell = row.image, 12  # the printer font: 12 dots a column, the last column at the paper's edge
     assert black(im, (im.width - 3 * cell, 0, im.width, im.height)) > 0.6  # the cell: white letters on black
     assert black(im, (0, 0, 5 * cell, im.height)) < 0.3  # the first cell: black letters on paper
-    assert "P301" not in codes(res)
+    assert "zebra" not in row.untested  # P301 here is the bold white letters' (features "inverted-bold"), no grey
+    assert all(c.bold for c in cells_of(res, word))  # white on black at 1x: bold (F206 when it was not)
+    assert ("F206" in codes(res)) == (where == "body")  # the titles were bold already
 
 
 @pytest.mark.parametrize("where", ["title", "body"])
@@ -323,7 +325,7 @@ def test_a_shaded_row_and_an_inverted_cell_in_it():
 def test_a_row_with_a_span_covers_the_span():
     res = build(BILL + "| Rice | 1 | 9,00 |\n| | Discount {span=all} | {.invert}\n")
     row = drawn_with(res, "Discount")
-    assert row.kind == "band" and not codes(res)
+    assert row.kind == "band" and set(codes(res)) == {"F206", "P301"}  # the white Discount made bold
 
 
 @pytest.mark.parametrize("style", ["plain", "receipt", "lines", "grid", "header-invert", "zebra"])
@@ -441,7 +443,7 @@ def test_a_last_cell_that_is_only_braces_is_a_cell_unless_it_is_extra_or_after_t
     extra = build("A | B\n---|---\nCoffee | 9 | {.invert}\n")  # one cell more than the titles: the row's
     assert drawn_with(extra, "Coffee").kind == "band" and lines(extra)[1].endswith("9")
     short = build(BILL + "| | Discount {span=all} | {.invert}\n")  # a short row, after its closing pipe
-    assert drawn_with(short, "Discount").kind == "band" and not codes(short)
+    assert drawn_with(short, "Discount").kind == "band" and set(codes(short)) == {"F206", "P301"}
 
 
 def test_a_title_row_without_outer_pipes_takes_its_braces_too():
@@ -451,7 +453,8 @@ def test_a_title_row_without_outer_pipes_takes_its_braces_too():
 
 def test_several_brace_only_cells_after_the_row_are_merged():
     res = build("| A | B |\n|---|---|\n| a | b | {.invert} | {.bold}\n")
-    assert drawn_with(res, "a").kind == "band" and all(c.bold for c in cells_of(res, "b")) and not codes(res)
+    assert drawn_with(res, "a").kind == "band" and all(c.bold for c in cells_of(res, "b"))
+    assert codes(res) == ["P301"]  # bold already ({.bold}): no F206, only the untested bold white letters
     title = build("| A | B | {.invert} | {.bold}\n|---|---|\n| a | b |\n")
     assert drawn_with(title, "A").kind == "band" and said(title, "M104")
 

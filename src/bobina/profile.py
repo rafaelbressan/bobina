@@ -64,6 +64,11 @@ class Profile:
         measured = [w for w in widths if isinstance(w, int) and not isinstance(w, bool)]  # "2" or true: not a width
         return tracking if sw in measured else tracking * sw
 
+    def invert_bold(self, px: int) -> bool:
+        """Whether white text on black this many dots tall prints bold (raster.invert_bold_below_px): below it, ink
+        fills thin white strokes (MTP-II, paper 18/11: the printer font at 1x, 24 dots, closed up; at 2x it held)."""
+        return px < int(self.get("raster.invert_bold_below_px", 48))
+
     def code39_wide(self) -> int:
         """Modules of a wide Code39 element in the firmware's GS k output (python-barcode draws 3)."""
         return int(self.get("barcode.code39_wide", 3))

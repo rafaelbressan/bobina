@@ -33,6 +33,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "F203": ("warning", "font not found, a bundled font was used", ""),
     "F204": ("warning", "inverted raster text too thin or small", "R2-12"),
     "F205": ("warning", "font size out of range (6 to 400 px), clamped", ""),
+    "F206": ("note", "small white-on-black text printed bold: ink fills thin white strokes", ""),
     # Q codes
     "Q101": ("warning", "QR module too small to scan reliably", "N6, R5-05"),
     "Q102": ("warning", "QR error correction L reads with difficulty", "N6"),

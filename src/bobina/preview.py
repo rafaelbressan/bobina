@@ -9,7 +9,9 @@ from .emulator import Emulator
 from .rows import BarcodeRow, BitmapRow, FeedRow, QRRow, TextRow
 
 
-def row_image(r, profile, em: Emulator):
+def row_image(r, profile, em: Emulator, drawn: bool = False):
+    """A row as the dots it prints. drawn: laid into a picture (a box, columns, a turned block), so a native text
+    row is printed as this image, its heavy cells drawn heavy (Emulator.render_row)."""
     W = profile.width_dots
     if isinstance(r, FeedRow):
         if not r.dots:
@@ -19,7 +21,7 @@ def row_image(r, profile, em: Emulator):
             im.paste(imaging.mark_line(W), (0, min(r.tear_at, r.dots - 1)))
         return im
     if isinstance(r, TextRow):
-        return em.render_row(r, W)
+        return em.render_row(r, W, True if drawn else None)
     if isinstance(r, BitmapRow):
         return r.image
     if isinstance(r, QRRow):
@@ -42,9 +44,10 @@ def barcode_image(r, em):
         return im
 
 
-def render(rows, profile, em: Emulator | None = None) -> Image.Image:
+def render(rows, profile, em: Emulator | None = None, drawn: bool = False) -> Image.Image:
+    """The rows one under the other; drawn: to be printed as this picture (row_image)."""
     em = em or Emulator(profile)
-    parts = [im for im in (row_image(r, profile, em) for r in rows) if im is not None]
+    parts = [im for im in (row_image(r, profile, em, drawn) for r in rows) if im is not None]
     h = sum(p.height for p in parts)
     out = Image.new("1", (profile.width_dots, max(1, h)), 1)
     y = 0

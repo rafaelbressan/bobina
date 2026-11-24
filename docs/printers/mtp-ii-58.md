@@ -108,6 +108,7 @@ receives; above 7, an exact image with `Q113`, never the error text. `width=` pr
 | Checkerboard / hatching | ≥ 2 dots (1 becomes blurry grey) |
 | Minimum text | **12 px Terminus**, 14 px Atkinson Hyperlegible (8 px illegible, 10 px borderline) |
 | Inverted text (white on black) | bold ≥ 20 px with ≥ 4 dots of margin |
+| Inverted printer font | 1x closed up, even bold (a 1-dot hyphen lost); 2x held (18/11): below 48 dots, bold (`F206`) |
 | QR in raster | **module ≥ 4** (2 and 3 did not read), with a 2-module quiet zone kept on the paper: near the paper width the module drops (`Q103`, and `Q101` "it may not scan" below 4); native: always 5-dot modules |
 | Raster band height (`GS v 0`) | **16 rows** (13/11: with 64 rows a light line appears at a random height, a different one on the same image, where the Bluetooth link starves the printer; with 16 none) |
 | Light grey behind text (table zebra, `.shade`) | **2-dot squares every 4 dots**, staggered (16/11: every 3 is heavy, every 6 a texture, 3-dot squares look like accents) |

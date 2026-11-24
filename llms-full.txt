@@ -751,7 +751,7 @@ Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 |---|---|
 | `.left` `.center` `.right` `.justify` | alignment (justify spreads spaces on the character grid, or pixels in raster) |
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
-| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black. |
+| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black. Small: bold ([`F206`](docs/guides/white-text.md) ⚠ not tested on paper) |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
 | `.mono` | monospace (the printer font already is) |
 | `.compact` | tables: do not stretch |
@@ -787,18 +787,18 @@ Fonts are looked up among the **bundled** fonts first (same result on every mach
 IBM Plex Mono, Barlow Condensed, Terminus, Spleen, DejaVu Sans), then among installed fonts (fontconfig).
 A font that cannot be found falls back to Atkinson Hyperlegible (`F203`).
 
-Quality nudges, from the printed tests of the profile:
+Quality nudges (the profile's printed tests):
 - below a font's **tested minimum** → `F201` with the minimum and the evidence;
-- an **untested** font: bobina measures its stem at the requested size and warns below 2 dots (`F202`);
+- an **untested** font: its stem measured at that size, under 2 dots → `F202`;
 - inverted raster text thinner than bold 20 px → `F204`;
-- a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
+- a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`);
   a character no font has → printed as a box (`F302`).
 
-**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): the first time a document needs one, bobina
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): once a document needs one, bobina
 downloads its pinned Noto font (38 KB for Thai, up to 8.3 MB for CJK), says so first (license, size; `F304`) and
 keeps it for offline use. No network, or `bobina config set font_downloads off`: boxes and `F305` (`bobina fonts get
-thai`). Han follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. These lines, and
-Arabic or Hebrew ones, are drawn whole, never letter by letter.
+thai`). Han follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. Such lines, Arabic
+and Hebrew too, are drawn whole.
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
@@ -1128,6 +1128,7 @@ Nudges:
 | `F203` | warning | font not found, a bundled font was used |
 | `F204` | warning | inverted raster text too thin or small |
 | `F205` | warning | font size out of range (6 to 400 px), clamped |
+| `F206` | note | small white-on-black text printed bold: ink fills thin white strokes |
 | `F301` | note | glyph not in the printer font: line printed as an image |
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |

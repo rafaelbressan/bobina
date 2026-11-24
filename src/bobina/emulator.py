@@ -12,7 +12,7 @@ from functools import cache
 from fontTools.ttLib import TTFont
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from . import icons, paths
+from . import icons, imaging, paths
 from .rows import Cell, TextRow
 
 CHECKBOX = {"☐": None, "☑": "check", "☒": "cross"}
@@ -83,10 +83,13 @@ class Emulator:
             d.line((x0 + 3, y0 + 3, x0 + 12, y0 + 12), fill=0, width=2)
             d.line((x0 + 12, y0 + 3, x0 + 3, y0 + 12), fill=0, width=2)
 
-    def line_image(self, cells: list[Cell], tracking: int = 0) -> Image.Image:
-        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell)."""
+    def line_image(self, cells: list[Cell], tracking: int = 0, drawn: bool = False) -> Image.Image:
+        """1x row of cells -> mode 'L' image (cells*12 x 24, plus `tracking` dots after each cell). drawn: printed
+        as this image, so a heavy cell (white on black, small) is drawn a dot taller too; a native row's heavy cell
+        is the printer's ESC E, as any bold."""
         widths = [self.cw * (2 if c.wide else 1) for c in cells]
-        im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), self.ch), 255)
+        heavy = drawn and any(c.heavy for c in cells)  # a descender in the cell's last row grows into the gap below
+        im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), self.ch + heavy), 255)
         x = 0
         for c, w in zip(cells, widths, strict=True):
             g = self.glyph(c.ch, c.wide)
@@ -94,6 +97,10 @@ class Emulator:
                 g2 = Image.new("L", g.size, 255)
                 g2.paste(g, (1, 0))
                 g = _darker(g, g2)
+            if c.heavy and drawn and c.ch != " ":  # the one place a printer-font glyph is drawn heavy: a dot taller,
+                tall = Image.new("L", (g.width, g.height + (not c.invert)), 255)  # into the gap below; an inverted
+                tall.paste(g, (0, 0))  # cell's black box stays its cell: its white grows inside it
+                g = imaging.thicken_down(tall)
             if c.italic:
                 g = g.transform(
                     g.size,
@@ -113,9 +120,9 @@ class Emulator:
             x += w + tracking
         return im
 
-    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int) -> Image.Image:
+    def _gapped(self, cells: list[Cell], tracking: int, sw: int, sh: int, drawn: bool = False) -> Image.Image:
         """Glyphs scaled by GS !, then `tracking` dots after each one, as they are (Profile.tracking_gap)."""
-        glyphs = self.line_image(cells, 0)
+        glyphs = self.line_image(cells, 0, drawn)
         glyphs = glyphs.resize((glyphs.width * sw, glyphs.height * sh), Image.NEAREST)
         widths = [self.cw * (2 if c.wide else 1) * sw for c in cells]
         im = Image.new("L", (max(1, sum(widths) + tracking * len(cells)), glyphs.height), 255)
@@ -138,11 +145,14 @@ class Emulator:
         gap = row.gap if row.gap is not None else int(self.p.get("native.line_gap_dots", 6))
         return min(255, self.ch * row.height() + gap)
 
-    def render_row(self, row: TextRow, width: int) -> Image.Image:
+    def render_row(self, row: TextRow, width: int, drawn: bool | None = None) -> Image.Image:
         """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. A row whose spans have their
-        own size (never native) draws each run at its size, all standing on one baseline."""
+        own size (never native) draws each run at its size, all standing on one baseline. drawn: printed as this
+        image (a row that is not native, or one laid into a band, box, table or column picture: True), so its heavy
+        cells are drawn heavy; else it emulates the native row."""
+        drawn = not row.native if drawn is None else drawn
         runs = row.runs() or [(row.scale, [])]
-        parts = [(s[1], self._scaled(cells, row.tracking, *s)) for s, cells in runs]
+        parts = [(s[1], self._scaled(cells, row.tracking, *s, drawn)) for s, cells in runs]
         tall = max(p.height for _, p in parts)
         base = self.baseline * max(sh for sh, _ in parts)  # the room below it taken once, from the tallest run
         li = Image.new("L", (sum(p.width for _, p in parts), tall), 255)
@@ -159,13 +169,14 @@ class Emulator:
             out = out.rotate(180)
         return out.convert("1", dither=Image.NONE)
 
-    def _scaled(self, cells: list[Cell], tracking: int, sw: int, sh: int) -> Image.Image:
-        """Cells of one size as GS ! scales them (mode 'L'), `tracking` dots after each as the printer spaces it."""
+    def _scaled(self, cells: list[Cell], tracking: int, sw: int, sh: int, drawn: bool = False) -> Image.Image:
+        """Cells of one size as GS ! scales them (mode 'L'), `tracking` dots after each as the printer spaces it;
+        drawn: heavy cells drawn heavy (line_image)."""
         gap = self.p.tracking_gap(tracking, sw)
         if gap != tracking * sw:  # the printer does not scale ESC SP at this width (MTP-II at 2x)
-            li = self._gapped(cells, gap, sw, sh)
+            li = self._gapped(cells, gap, sw, sh, drawn)
         else:
-            li = self.line_image(cells, tracking)
+            li = self.line_image(cells, tracking, drawn)
             if (sw, sh) != (1, 1):
                 li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
         if sw == sh > 1:

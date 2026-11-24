@@ -59,8 +59,16 @@ FIX = {
     "F201": "Use the font at or above its tested size (bobina fonts list shows tested fonts and their minimum sizes).",
     "F202": "Use a tested font (bobina fonts list), a bigger size or bold.",
     "F203": "Check the font name (bobina fonts list); install the font or use a bundled one.",
-    "F204": "Inverted text needs bold and at least 20 px to stay readable.",
+    "F204": (
+        "Inverted raster text needs at least 20 px to stay readable, and bold: below raster.invert_bold_below_px "
+        "(48 by default) bobina makes it bold, above it use **bold** or .bold."
+    ),
     "F205": "Use a font size between 6 and 400 px.",
+    "F206": (
+        "Nothing to fix: white text on black below raster.invert_bold_below_px (48 by default) prints bold, or ink "
+        "fills its thin strokes. To keep its weight, make it bigger (size=2x, 48px); a printer whose paper holds thin "
+        "white text: 0 in its profile (docs/guides/white-text.md)."
+    ),
     # Q codes
     "Q101": "Use a bigger module: ```qr {module=4}``` (3 is the native minimum, 4 in raster).",
     "Q102": "Use error correction M or higher: ```qr {ecc=M}```.",
