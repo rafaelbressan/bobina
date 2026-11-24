@@ -568,11 +568,23 @@ class Layout:
         tracking: int = 0,
         leading: int | None = None,
         indent_dots: int = 0,
+        printer: tuple[int, int] | None = None,
     ) -> list:
+        """printer: the printer-font size this line stands for (a line drawn whole: Thai, Hebrew…), drawn evenly at
+        its height: its white text is made bold as at that size (a 1x2 line as its 24 dots, as a native one)."""
         toks: list = []
         fallback = rasterfont.resolve("DejaVu Sans").path
         context = "".join(r.text for r in runs)  # Han next to kana is Japanese (scriptfonts.packs_for)
-        whole, thin = attrs.has("invert") or self.dark, 0  # thin: the smallest white text made bold (F206)
+        whole = attrs.has("invert") or self.dark
+        thin: dict[str, None] = {}  # the sizes of white text made bold that was not (F206)
+        light = False  # white text left as it is, not bold (F204 below)
+
+        def small(rpx: int, own: bool = False) -> tuple[bool, str]:  # white text this tall: bold, and said as
+            if printer and not own:
+                w, h = printer
+                return self.p.invert_bold(rpx * min(w, h) // h), f"{w}x" if w == h else f"{w}x{h}"
+            return self.p.invert_bold(rpx), f"{rpx}px"
+
         for r in runs:
             if r.text == "\n":
                 toks.append(rasterfont.Tok("", fallback, px, brk=True))
@@ -582,11 +594,13 @@ class Layout:
                 rfam = "Spleen"
             b = r.bold or bold or extra.get("bold", False)
             rpx = rasterfont.px_for(r.size, self.p, px, self.n, line) if r.size else px
-            white = (whole or r.white) != self.reversed  # in an inverted box, what is not inverted on its own
-            heavy = white != r.invert and self.p.invert_bold(rpx)  # white on black (inverted twice: black on paper),
-            # small
+            white = ((whole or r.white) != self.reversed) != r.invert  # in an inverted box, what is not inverted
+            # on its own; inverted twice: black on paper
+            bolder, size = small(rpx, bool(r.size))
+            heavy = white and bolder
             if heavy and not b and r.text.strip():
-                thin = min(thin or rpx, rpx)
+                thin[size] = None
+            light = light or (white and not b and not heavy and bool(r.text.strip()))
             b = b or heavy
             path = self.font_path(rfam, b, rpx, line)
             if heavy and "bold" not in path.lower():  # a synthetic bold (the printer font's look): drawn a dot taller
@@ -638,8 +652,15 @@ class Layout:
                     box = pimg.crop((0, 0, pimg.width - 6, pimg.height))
                     pimg = Image.new("L", pimg.size, 255)
                     pimg.paste(box, (6, 0))
-            else:
-                t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
+            else:  # a list's number or bullet: white on black and small as its text, bold and heavy too
+                heavy, size = small(px)
+                heavy = heavy and (attrs.has("invert") or self.dark) != self.reversed
+                if heavy and not bold and ptxt.strip():
+                    thin[size] = None
+                path = self.font_path(fam, heavy or bold, px, line)
+                if heavy and "bold" not in path.lower():
+                    self.untested.add("inverted-bold")
+                t = rasterfont.Tok(ptxt, path, px, bold=heavy or bold, heavy=heavy)
                 asc, desc = t.font.getmetrics()
                 pimg = rasterfont.draw_tok(t, asc, asc + desc, px)
         align = attrs.kv.get("align") or next(
@@ -657,8 +678,8 @@ class Layout:
                 line,
                 "nothing to fix; the other words keep their spacing",
             )
-        if thin:
-            self.white_note(f"{thin}px", line)
+        for size in thin:
+            self.white_note(size, line)
         if not toks:
             return []
 
@@ -688,10 +709,12 @@ class Layout:
             for t in texts
         ]
         wide = self.smaller_font(toks) and any(r.columns() > self.cols for r in view_rows)  # the views widen
-        if (attrs.has("invert") or self.dark) and px < int(self.p.get("raster.invert_min_px", 20)):
-            self.n.add(  # white on black, in its own band or in an inverted box (below 48 px it is bold: F206)
-                "F204", f"inverted text at {px}px closes up", line, "use 20px or more", "R2-12"
-            )
+        tiny = px < int(self.p.get("raster.invert_min_px", 20))
+        if (attrs.has("invert") or self.dark) and (tiny or light):  # white on black, in its own band or in an
+            # inverted box: bold below raster.invert_bold_below_px (F206), not above it (a light face closes up)
+            hint = "use bold and ≥ 20px" if tiny and light else "use 20px or more" if tiny else "use bold"
+            self.n.add("F204", f"inverted text at {px}px{' (not bold)' if light else ''} closes up", line, hint,
+                       "R2-12")  # fmt: skip
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
@@ -720,27 +743,30 @@ class Layout:
         """White text at this size made bold on this line (a table's: its first line); said once (white_said)."""
         self.whitened.setdefault(size, set()).add((line, table))
 
-    def white_said(self) -> None:
+    def white_said(self, into=None, where: str = "") -> None:
         """F206 once for the document: every size made bold and where (a receipt with many inverted lines and rows
-        gets one note, not one per line), and the size that keeps its weight."""
+        gets one note, not one per line), and the size that keeps its weight. into, where: said in those nudges, at
+        no line, as `where` (text laid out for a picture: a black chat bubble)."""
         if not self.whitened:
             return
         parts = []
         for size, at in self.whitened.items():
             lines = sorted(n for n, table in at if not table)
             tables = sorted(n for n, table in at if table)
-            where = [f"line{'s' if len(lines) > 1 else ''} {', '.join(map(str, lines))}"] if lines else []
+            places = [f"line{'s' if len(lines) > 1 else ''} {', '.join(map(str, lines))}"] if lines else []
             if tables:
                 many = len(tables) > 1
-                where.append(
+                places.append(
                     f"the table{'s' if many else ''} at line{'s' if many else ''} {', '.join(map(str, tables))}"
                 )
-            parts.append(f"{size} on {' and '.join(where)}")
+            parts.append(f"{size} {where}" if where else f"{size} on {' and '.join(places)}")
         least = int(self.p.get("raster.invert_bold_below_px", 48))
         k = -(-least // self.p.cell[1])
-        first = min(n for at in self.whitened.values() for n, _ in at)
-        self.n.add("F206", f"inverted text printed bold ({'; '.join(parts)}): ink fills thin white strokes", first,
-                   f"nothing to fix; size={k}x or {least}px and larger keep their weight")  # fmt: skip
+        first = None if where else min(n for at in self.whitened.values() for n, _ in at)
+        (into if into is not None else self.n).add(
+            "F206", f"inverted text printed bold ({'; '.join(parts)}): ink fills thin white strokes", first,
+            f"nothing to fix; size={k}x or {least}px and larger keep their weight",
+        )  # fmt: skip
 
     def printer_size(self, scale: tuple[int, int]):
         """size_of for whiten: a printer-font cell's height in dots and its size (2x, 1x2), at its own scale (a
@@ -846,6 +872,7 @@ class Layout:
                 line=line,
                 attrs=attrs,
                 px=self.p.cell[1] * scale[1],
+                printer=scale,
                 bold=bold or attrs.has("bold"),
                 extra={**extra, **{k: True for k in ("italic", "underline", "strike") if attrs.has(k)}},
                 prefix=prefix,
@@ -878,7 +905,8 @@ class Layout:
         if any(r.white for r in runs):  # each cell as its run says (a black chat bubble)
             whole = [whole or r.white for r in runs for _ in ([None] if r.text == "\n" else self.text(r.text))]
         cells = self.whiten(cells, whole, line, self.printer_size(scale))
-        prefix = prefix or []
+        prefix = self.whiten(prefix or [], attrs.has("invert") or self.dark, line, self.printer_size(scale))  # a
+        # list's number, bullet or task box: white as its text
         pw = columns(prefix)
         advance = self.p.cell[0] * scale[0] + self.p.tracking_gap(tracking, scale[0])  # as the printer spaces them
         measure, unit = columns, 1  # columns of the line's size; spans of their own size: dots
@@ -3681,6 +3709,14 @@ class Layout:
         band = kind == "image" and "band" in piece[3].split()
         if band and lines and not lines[0].row.has("invert"):  # style=header-invert: its titles as on paper
             view = [_as_paper(v) for v in view]
+        elif band and lines:  # an inverted row: its cells reversed already (_padded, paper_map), and before them
+            if ink.native:  # the quote bars and indent, white on black from the paper's edge, as on paper
+                k = len(self.lead(indent) if ink.wh[0] > 1 and self.bars_in(indent) else self.table_lead(ink, indent))
+                k += shift
+            else:
+                k = len(self.lead(indent))
+            view = [replace(v, cells=[replace(c, invert=True) if i < k else c for i, c in enumerate(v.cells)])
+                    for v in view]  # fmt: skip
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]), wide_view=wide)  # fmt: skip
 
@@ -4341,5 +4377,5 @@ def _justify(cells: list[Cell], cap: int, measure=columns, unit: int = 1) -> lis
     for i, c in enumerate(cells):
         out.append(c)
         if i in add:
-            out += [Cell(" ")] * add[i]
+            out += [c] * add[i]  # as the space it widens: an inverted, bold run stays one ESC E and one GS B
     return out

@@ -183,14 +183,15 @@ class NothingToPrint(JobError):
     code = "E304"
 
 
-def _note_untested(prof, rows, nudges, laid: set = frozenset()) -> None:
+def _note_untested(prof, rows, nudges, laid: set = frozenset(), own: bool = True) -> None:
     """P301 once per label when it uses a feature nobody has seen on paper yet (features.py): the profile's, the
-    ones a row says it draws (a zebra table) and the ones the layout used (laid: small white text made bold)."""
+    ones a row says it draws (a zebra table) and the ones the layout used (laid: small white text made bold).
+    own=False: not the profile's (a chat job: what its rows and layouts draw)."""
     from . import features
     from .profile import plain_ascii
     from .rows import BarcodeRow
 
-    on = set(features.of_profile(prof))
+    on = set(features.of_profile(prof)) if own else set()
     used = []
     if "codepage" in on and any(isinstance(r, TextRow) and r.native and not all(plain_ascii(c.ch) for c in r.cells)
                                 for r in rows):  # fmt: skip

@@ -128,10 +128,15 @@ def _narrow(profile, width: int):
     return dataclasses.replace(profile, width_dots=width)
 
 
-def text_image(profile, text: str, width: int, *, bold: bool = False, align: str = "left", white: bool = False):
+def text_image(profile, text: str, width: int, *, bold: bool = False, align: str = "left"):
     """Text laid out as the printer's own font would print it, as a 1-bit image at most `width` dots wide,
-    cropped to its ink (wrapped like native text: by words). white: to be printed white on black, so small letters
-    are heavy (layout.whiten), its **bold** kept."""
+    cropped to its ink (wrapped like native text: by words)."""
+    return _laid(profile, text, width, bold=bold, align=align)[0]
+
+
+def _laid(profile, text: str, width: int, *, bold: bool = False, align: str = "left", white: bool = False):
+    """text_image, and the Layout that drew it (what it made bold, what it drew not tested on paper). white: to be
+    printed white on black, so small letters are heavy (layout.whiten), its **bold** kept."""
     from dataclasses import replace
 
     from . import preview
@@ -141,14 +146,15 @@ def text_image(profile, text: str, width: int, *, bold: bool = False, align: str
     blocks = [Paragraph(attrs=Attrs({align}), runs=[replace(r, white=white) for r in ([Run(p, bold=bold)] if bold
                                                                                       else runs(p))])
               for p in re.split(r"\n\s*\n", text) if p.strip()]  # fmt: skip
-    rows = Layout(prof, Document(meta={}, blocks=blocks), None, Nudges()).run()[1:-1]
+    lay = Layout(prof, Document(meta={}, blocks=blocks), None, Nudges())
+    rows = lay.run()[1:-1]
     im = preview.render(rows, prof, Emulator(prof), drawn=True)
     from PIL import ImageOps
 
     box = ImageOps.invert(im.convert("L")).getbbox()
     if not box:
-        return im.crop((0, 0, 1, 1))
-    return im.crop((0 if align == "left" else box[0], 0, box[2] if align == "left" else width, box[3]))
+        return im.crop((0, 0, 1, 1)), lay
+    return im.crop((0 if align == "left" else box[0], 0, box[2] if align == "left" else width, box[3])), lay
 
 
 def _short_mark(d, x0: int, x1: int, y: int, kind: str, side: str) -> None:
@@ -229,10 +235,12 @@ def ornament_row(profile, kind: str):
     return BitmapRow(out, 0, "divider")
 
 
-def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: str | None = "user-round"):
+def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: str | None = "user-round",
+               notes: Nudges | None = None):  # fmt: skip
     """The person's message on the right, like a chat app: wrapped inside a rounded bubble (white on black when
     inverted, else a 2-dot frame), the person icon next to its top (icon=None: no icon, the bubble to the edge).
-    full: the bubble spans the paper, the text still on its right."""
+    full: the bubble spans the paper, the text still on its right. notes: where F206 goes when its small white
+    letters are made bold (the row carries P301's feature: Ticket.job)."""
     from PIL import Image, ImageDraw, ImageOps
 
     from . import icons
@@ -241,7 +249,9 @@ def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: 
     w = profile.width_dots
     side = ICON_PX + 6 if icon else 0
     inner = w - side - 2 * PAD - 4
-    words = text_image(profile, text, inner, align="right" if full else "left", white=inverted)
+    words, lay = _laid(profile, text, inner, align="right" if full else "left", white=inverted)
+    if notes is not None:
+        lay.white_said(notes, "in the black bubble")
     bw = (w - side) if full else words.width + 2 * PAD
     bh = words.height + 2 * PAD
     out = Image.new("1", (w, bh), 1)
@@ -257,7 +267,7 @@ def bubble_row(profile, text: str, *, inverted: bool, full: bool = False, icon: 
         out.paste(words, (tx, PAD))
     if icon:
         out.paste(icons.load(icon, ICON_PX), (w - ICON_PX, 0))
-    return BitmapRow(out, 0, "chat")
+    return BitmapRow(out, 0, "chat", untested=tuple(sorted(lay.untested)))
 
 
 @dataclass
@@ -273,17 +283,20 @@ class Ticket:
     def look(self) -> Look:
         return LOOKS[self.style]
 
-    def job(self, parts: list, top: bool = True, feed: bool = True) -> engine.Result:
+    def job(self, parts: list, top: bool = True, feed: bool = True, notes: Nudges | None = None) -> engine.Result:
         """A job of these parts (lists of blocks laid out by bobina, or image rows), a block gap between them;
         top=False: without the top margin, feed=False: without the feed to the tear bar (the answers of one strip
-        follow each other with no paper between them)."""
+        follow each other with no paper between them). notes: said while the image rows were drawn (F206); P301
+        for what the rows and layouts draw that is not tested on paper."""
         gap = int(self.profile.get("margins.block_gap_dots", 12))
-        nudges, rows, blocks = Nudges(), [], []
+        nudges, rows, blocks, laid = Nudges(notes or []), [], [], set()
         for part in parts:
             if isinstance(part, list):
                 if not part:
                     continue
-                got = Layout(self.profile, Document(meta={}, blocks=part), None, nudges).run()[1:-1]
+                lay = Layout(self.profile, Document(meta={}, blocks=part), None, nudges)
+                got = lay.run()[1:-1]
+                laid |= lay.untested
                 blocks += part
             else:
                 got = [part]
@@ -293,6 +306,7 @@ class Ticket:
         frame = Layout(self.profile, Document(meta={}, blocks=[]), None, Nudges()).run()  # [top margin, feed]
         head = [frame[0]] if top else ([FeedRow(gap)] if rows else [])
         rows = head + rows + ([frame[-1]] if feed else [])
+        engine._note_untested(self.profile, rows, nudges, laid, own=False)
         doc = Document(meta={}, blocks=blocks)
         res = engine.Result(doc, rows, nudges, self.profile, None)
         res.source_text = ""
@@ -343,6 +357,7 @@ class Ticket:
         right, the AI's answer on the left (under its icon and name, but in plain)."""
         look, p = self.look, self.profile
         parts: list = []
+        notes = Nudges()  # what the bubbles say
         if separator and look.between:
             if look.between == "dashed-full":
                 parts.append([Divider(attrs=Attrs({"dashed"}))])
@@ -356,14 +371,15 @@ class Ticket:
         if question:
             text = "\n\n".join(paragraphs_text(question))
             if look.person in ("bubble", "box"):
-                parts.append(bubble_row(p, text, inverted=look.person == "bubble", full=look.full))
+                parts.append(bubble_row(p, text, inverted=look.person == "bubble", full=look.full, notes=notes))
             else:
                 if look.above_names:
                     parts.append(rule_row(p))
                 if look.person != "text":
                     parts.append(speaker_row(p, SPEAKER_ICON["person"], self.name, "right", look.under_person))
                 if look.person in ("named-bubble", "named-box"):
-                    parts.append(bubble_row(p, text, inverted=look.person == "named-bubble", icon=None))
+                    parts.append(bubble_row(p, text, inverted=look.person == "named-bubble", icon=None,
+                                            notes=notes))  # fmt: skip
                 else:  # wrapped first, then each line aligned right (never stretched)
                     parts.append([Paragraph(attrs=Attrs({"right"}), runs=[Run(q)])
                                   for q in paragraphs_text(question)])  # fmt: skip
@@ -378,7 +394,7 @@ class Ticket:
         parts.append(paragraphs(answer))
         if look.under_messages:
             parts.append(rule_row(p))
-        return self.job(parts, top, feed)
+        return self.job(parts, top, feed, notes)
 
     def end_of_strip(self) -> engine.Result:
         """The feed to the tear bar that ends a strip (with the tear mark when marks are on)."""

@@ -4,7 +4,7 @@ so (F206)."""
 
 from pathlib import Path
 
-from bobina import chat, escpos, preview
+from bobina import chat, escpos, preview, problem_help, rasterfont
 from bobina.emulator import Emulator
 from bobina.engine import apply_overrides, build
 from bobina.profile import load
@@ -222,10 +222,70 @@ def test_a_raster_line_below_48px_takes_the_bold_face():
     assert "F206" not in codes(build(FONT + "Thanks {.invert size=48px}\n"))
 
 
-def test_f204_is_only_the_size_now():
+def test_f204_below_the_threshold_is_only_the_size():
     res = build(FONT + "Thanks {.invert size=16px}\n")
-    assert said(res, "F204") == ["inverted text at 16px closes up"] and "F206" in codes(res)
-    assert "F204" not in codes(build(FONT + "Thanks {.invert size=48px}\n"))  # regular at 48px held (18/11)
+    assert said(res, "F204") == ["inverted text at 16px closes up"] and "F206" in codes(res)  # bold already
+
+
+def test_f204_still_says_not_bold_at_or_above_the_threshold():
+    res = build(FONT + "Thanks {.invert size=48px}\n")  # a light raster face, not made bold: the 2x evidence is
+    assert said(res, "F204") == ["inverted text at 48px (not bold) closes up"]  # the printer font's
+    assert "F204" not in codes(build(FONT + "**Thanks** {.invert size=48px}\n"))
+    assert said(build(FONT + BOX.format("Thanks {size=48px}")), "F204") == [
+        "inverted text at 48px (not bold) closes up"
+    ]
+
+
+def test_a_heavy_inverted_span_smaller_than_its_line_keeps_its_black_box():
+    path = rasterfont.resolve("Spleen").path
+    asc, desc = rasterfont.Tok("X", path, 32).font.getmetrics()
+
+    def box(heavy: bool) -> tuple[int, int]:
+        t = rasterfont.Tok("x-", path, 16, invert=True, heavy=heavy)
+        im = rasterfont.draw_tok(t, asc, asc + desc, 32)
+        black = [y for y in range(im.height) if any(im.getpixel((x, y)) == 0 for x in range(im.width))]
+        return black[0], black[-1]
+
+    assert box(True) == box(False)  # the white letters grow inside it, never past its top row
+
+
+def test_list_markers_on_white_print_bold_and_heavy():
+    row = drawn(build("1. one {.invert}\n"))[0]
+    assert all(c.heavy and c.bold for c in row.text_rows[0].cells[:2])  # "1." white on black, as its text
+    rows = box_of(build(BOX.format("- one\n- [x] done"))).box.rows
+    marks = [r.cells[0] for r in rows if isinstance(r, TextRow)]
+    assert len(marks) == 2 and all(c.heavy for c in marks)  # the bullet and the drawn task box
+    src = FONT + "1. **one** {.invert}\n"  # a raster font: the number in the bold face too
+    res, thin = drawn(build(src))[0].image, drawn(build(src, overrides=OFF))[0].image
+    left = (0, 0, 30, res.height)
+    assert res.crop(left) != thin.crop(left)
+
+
+def test_justified_white_text_keeps_its_gaps_white_and_bold():
+    words = " ".join(["abcd"] * 9)  # 6 words on the first line (29 of 32 columns): 3 spaces added
+    row = next(r for r in build(f"[{words}]{{.invert}} x {{.justify}}\n").rows if isinstance(r, TextRow))
+    inside = row.cells[: max(i for i, c in enumerate(row.cells) if c.invert) + 1]
+    assert all(c.invert and c.heavy for c in inside)  # one ESC E and one GS B for the run, gaps included
+
+
+def test_a_line_drawn_whole_at_1x2_is_bold_as_a_native_one():
+    src = "שלום ok {.invert size=1x2}\n"  # Hebrew: drawn whole in the printer font's look, 48 dots tall, 1 wide
+    res, thin = build(src), build(src, overrides=OFF)
+    assert "F206" in codes(res) and drawn(res)[0].image != drawn(thin)[0].image
+    assert "F206" in codes(build("ok ok {.invert size=1x2}\n"))  # native: the same
+
+
+def test_an_inverted_table_row_in_a_quote_shows_its_bars_reversed():
+    res = build("> | A | B |\n> |---|---|\n> | a | b | {.invert}\n")
+    row = next(r for r in drawn(res) if r.kind == "band")
+    cells = row.text_rows[0].cells
+    lead = cells[: next(i for i, c in enumerate(cells) if c.ch == "a")]
+    assert lead and all(c.invert for c in lead)  # white on black from the paper's edge, as on paper
+
+
+def test_the_help_names_the_profile_value():
+    for code in ("F204", "F206"):
+        assert "raster.invert_bold_below_px (48 by default)" in problem_help.FIX[code], code
 
 
 # --- chat ----------------------------------------------------------------------------------------------------------
@@ -241,6 +301,13 @@ def test_a_black_chat_bubble_drawn_as_an_image_is_heavy_too():
     for text in ("שלום ok", "★ ok"):  # drawn whole (right to left), a glyph the printer font lacks
         heavy = chat.bubble_row(load(), text, inverted=True).image
         assert heavy != chat.bubble_row(apply_overrides(load(), OFF), text, inverted=True).image, text
+
+
+def test_a_chat_job_with_a_black_bubble_says_f206_and_p301():
+    res = chat.Ticket(load(), "bubbles").ticket("Fine.", question="T-7 ok")
+    assert "F206" in codes(res) and untested(res)
+    plain = chat.Ticket(load(), "plain").ticket("Fine.", question="T-7 ok")
+    assert "F206" not in codes(plain) and not untested(plain)
 
 
 def test_a_black_chat_bubble_still_reads_its_bold_markup():

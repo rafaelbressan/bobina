@@ -787,11 +787,11 @@ Fonts are looked up among the **bundled** fonts first (same result on every mach
 IBM Plex Mono, Barlow Condensed, Terminus, Spleen, DejaVu Sans), then among installed fonts (fontconfig).
 A font that cannot be found falls back to Atkinson Hyperlegible (`F203`).
 
-Quality nudges, from the profile's printed tests:
+Quality nudges (the profile's printed tests):
 - below a font's **tested minimum** → `F201` with the minimum and the evidence;
 - an **untested** font: its stem measured at that size, under 2 dots → `F202`;
-- inverted raster text under 20 px → `F204`;
-- a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
+- inverted raster text thinner than bold 20 px → `F204`;
+- a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`);
   a character no font has → printed as a box (`F302`).
 
 **Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): once a document needs one, bobina

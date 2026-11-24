@@ -11,7 +11,7 @@ box keep their white tile, and images are not text: neither changes.
 
 - The printer font drawn as an image (bands, boxes, tables, columns): bold, and a dot taller, so its 1-dot strokes
   are 2 dots both ways. Native inverted words (`GS B`) get the printer's bold, `ESC E`.
-- A raster font: its bold face (white raster text under 20 px still gives `F204`).
+- A raster font: its bold face. White raster text under 20 px, or not bold at 48 dots and up, gives `F204`.
 - Text already bold stays bold, without the note; `size=2x` (48 dots) and up keeps its weight.
 - ⚠ not tested on paper: a job that uses it gets `P301` until a strip passes
   ([docs/printers/strips/inverted-bold.bob.md](../printers/strips/inverted-bold.bob.md)).
