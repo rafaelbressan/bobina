@@ -245,12 +245,16 @@ def test_a_shortcode_touching_a_value_stays_text():
     assert "A1:x: y" in cells and sum(icons.is_icon(c) for c in cells) == 1
 
 
-def test_raster_font_view_rows_never_pass_the_paper_width():
+def test_raster_font_view_rows_show_what_the_paper_shows():
+    """Every mark the paper's line holds (drawn smaller than two printer columns each: more than the paper's 32
+    columns): one word of 30 icons, wider than the paper, is cut to fill lines (20, then 10), none lost."""
     from bobina.rows import BitmapRow
 
     res = build(":fragile:" * 30 + " {render=raster}\n\n" + "漢" * 30 + " {render=raster}\n")
     views = [v for r in res.rows if isinstance(r, BitmapRow) for v in (r.text_rows or [])]
-    assert views and max(sum(2 if c.wide else 1 for c in v.cells) for v in views) <= res.profile.columns
+    assert [len(v.cells) for v in views[:2]] == [20, 10]  # as the preview draws them
+    assert sum(len(v.cells) for v in views[2:]) == 30
+    assert [n.code for n in res.nudges].count("L101") == 1  # the icons' word; Chinese breaks anywhere: not a cut
 
 
 def test_every_size_up_to_8x_has_its_own_bitmap():

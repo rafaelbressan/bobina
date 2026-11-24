@@ -165,6 +165,8 @@ from this list.
 | `M103` | note | attribute not implemented yet (ignored) |  |
 | `M104` | note | a {…} after a table's title row: GitHub and Obsidian show that table as text |  |
 | `M105` | warning | a ::: block is never closed |  |
+| `M106` | note | four or more asterisks printed as asterisks, not bold (literal_asterisks) |  |
+| `M107` | note | ***text*** read as bold italic: the asterisks do not print |  |
 | `M120` | note | field rendered as Markdown |  |
 | `M121` | warning | raw block removed from a variable |  |
 | `M122` | warning | image removed (not the author's value) |  |
@@ -244,6 +246,8 @@ from this list.
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, the rest prints, exit 9) |  |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, the rest prints, exit 9) |  |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |  |
+| `Q114` | note | a code in an inverted box keeps black on white, in a white margin (scanners need it) |  |
+| `Q115` | warning | a code in an inverted box without its whole white margin, or white on black |  |
 
 ### Images
 
@@ -259,6 +263,7 @@ from this list.
 | `I108` | warning | image outside the document folder and image_dirs (--sandbox, MCP) |  |
 | `I109` | note | what an image looks like (drawing or photo) and how it was printed; the other look is one class away |  |
 | `I110` | note | a turned image prints smaller: its corners need room on the paper |  |
+| `I111` | warning | crop= outside the image: cut to the image, or printed uncropped |  |
 
 ### Drawing
 
@@ -266,6 +271,21 @@ from this list.
 |---|---|---|---|
 | `B101` | warning | stroke thinner than 2 dots prints broken | R4-01 |
 | `B102` | note | free rotation angles look jagged |  |
+
+### Charts and data= files
+
+| Code | Severity | Meaning | Evidence |
+|---|---|---|---|
+| `C101` | note | what a chart drew: its points, series, X spacing, Y ticks and the values read (check only) |  |
+| `C102` | note | more chart points than its width can show: neighbours averaged (aggregate=max: the largest) |  |
+| `C103` | warning | a chart value is not a number: its row is left out |  |
+| `C104` | note | chart dates out of order: drawn in the order written, evenly spaced |  |
+| `C105` | note | a chart too small for its labels: fewer or smaller labels |  |
+| `C106` | warning | chart= on a table with nothing to draw (no value column, no number): printed as a table |  |
+| `C107` | note | repeated chart labels combined into one point (summed; aggregate= says how) |  |
+| `C108` | warning | a table title names no column of its data= file (the file's columns are listed) |  |
+| `C109` | warning | data= file not found, unreadable or outside the allowed folders: no rows from it |  |
+| `C110` | note | rows with a label and no value at a chart's ends are left out (between values: a gap) |  |
 
 ### Paper and printer
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import cache
 
 from fontTools.ttLib import TTFont
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from . import icons, imaging, paths
 from .rows import Cell, TextRow
@@ -36,6 +36,8 @@ class Emulator:
         self.font_name = profile.get("native.emulation_font", "spleen-12x24.otf")
         self.font = _font(self.font_name, self.ch)
         self._glyphs: dict[tuple[str, bool], Image.Image] = {}
+        ink = ImageOps.invert(self.glyph("H", False)).getbbox()
+        self.baseline = ink[3] if ink else self.ch  # dots from the top of a 1x cell to the foot of its letters
 
     def has_glyph(self, ch: str) -> bool:
         return ord(ch) in _cmap(self.font_name) or any(ord(ch) in _cmap(f) for f in FALLBACKS)
@@ -141,23 +143,23 @@ class Emulator:
 
     def row_height(self, row: TextRow) -> int:
         gap = row.gap if row.gap is not None else int(self.p.get("native.line_gap_dots", 6))
-        return min(255, self.ch * row.scale[1] + gap)
+        return min(255, self.ch * row.height() + gap)
 
     def render_row(self, row: TextRow, width: int, drawn: bool | None = None) -> Image.Image:
-        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. drawn: printed as this image
-        (a row that is not native, or one laid into a band, box, table or column picture: True), so its heavy cells
-        are drawn heavy; else it emulates the native row."""
-        sw, sh = row.scale
+        """Full-width mode '1' image of a text row, aligned and scaled like GS ! does. A row whose spans have their
+        own size (never native) draws each run at its size, all standing on one baseline. drawn: printed as this
+        image (a row that is not native, or one laid into a band, box, table or column picture: True), so its heavy
+        cells are drawn heavy; else it emulates the native row."""
         drawn = not row.native if drawn is None else drawn
-        gap = self.p.tracking_gap(row.tracking, sw)
-        if gap != row.tracking * sw:  # the printer does not scale ESC SP at this width (MTP-II at 2x)
-            li = self._gapped(row.cells, gap, sw, sh, drawn)
-        else:
-            li = self.line_image(row.cells, row.tracking, drawn)
-            if (sw, sh) != (1, 1):
-                li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
-        if sw == sh > 1:
-            li = self._sharp_icons(li, row, sw, gap)
+        runs = row.runs() or [(row.scale, [])]
+        parts = [(s[1], self._scaled(cells, row.tracking, *s, drawn)) for s, cells in runs]
+        tall = max(p.height for _, p in parts)
+        base = self.baseline * max(sh for sh, _ in parts)  # the room below it taken once, from the tallest run
+        li = Image.new("L", (sum(p.width for _, p in parts), tall), 255)
+        x = 0
+        for sh, p in parts:
+            li.paste(p, (x, base - self.baseline * sh))
+            x += p.width
         h = self.row_height(row)
         out = Image.new("L", (width, h), 255)
         lw = min(li.width, width)
@@ -167,13 +169,27 @@ class Emulator:
             out = out.rotate(180)
         return out.convert("1", dither=Image.NONE)
 
-    def _sharp_icons(self, li: Image.Image, row: TextRow, k: int, gap: int) -> Image.Image:
+    def _scaled(self, cells: list[Cell], tracking: int, sw: int, sh: int, drawn: bool = False) -> Image.Image:
+        """Cells of one size as GS ! scales them (mode 'L'), `tracking` dots after each as the printer spaces it;
+        drawn: heavy cells drawn heavy (line_image)."""
+        gap = self.p.tracking_gap(tracking, sw)
+        if gap != tracking * sw:  # the printer does not scale ESC SP at this width (MTP-II at 2x)
+            li = self._gapped(cells, gap, sw, sh, drawn)
+        else:
+            li = self.line_image(cells, tracking, drawn)
+            if (sw, sh) != (1, 1):
+                li = li.resize((li.width * sw, li.height * sh), Image.NEAREST)
+        if sw == sh > 1:
+            li = self._sharp_icons(li, cells, sw, tracking, gap)
+        return li
+
+    def _sharp_icons(self, li: Image.Image, cells: list[Cell], k: int, tracking: int, gap: int) -> Image.Image:
         """At 2x-4x the printer scales letters dot by dot; an icon is drawn again from its own size, so its curves
         stay smooth (same stroke width). Inverted, underlined, struck or slanted icons keep the scaled drawing."""
-        if not any(icons.is_icon(c.ch) for c in row.cells):
+        if not any(icons.is_icon(c.ch) for c in cells):
             return li
-        gapped = gap != row.tracking * k
-        for left, c in zip(self.lefts(row.cells, k, gap if gapped else row.tracking, gapped), row.cells, strict=True):
+        gapped = gap != tracking * k
+        for left, c in zip(self.lefts(cells, k, gap if gapped else tracking, gapped), cells, strict=True):
             name = icons.name_of(c.ch)
             if name and not (c.invert or c.underline or c.strike or c.italic):
                 li.paste(_icon_cell(name, self.cw * (2 if c.wide else 1) * k, self.ch * k), (left, 0))

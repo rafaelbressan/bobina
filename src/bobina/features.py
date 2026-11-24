@@ -34,6 +34,14 @@ FEATURES = {
         "93,50) printed as the preview: frame whole, title cut into the border, band black, grey even; on the grey "
         "the thin top bar of a T fades (text on .shade: prefer bold)",
     },
+    "inverted-box": {
+        "title": "inverted boxes (::: {.box .invert}): one black band, what it holds printed white",
+        "where": "documents with ::: {.box .invert} (docs/guides/layout.md)",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 24/11 (printed 22/11): a band-title box holding an inverted logo, bold lines, a 2x span "
+        "and plain text, and a box with a QR in its white tile beside two lines, printed as the preview (the QR "
+        "scanned): the black even, the tile white; plain small white text prints thin (bold holds up better)",
+    },
     "columns": {
         "title": "columns side by side (:::: {.columns}), each row of them printed as one image",
         "where": "documents with :::: {.columns} (docs/guides/layout-columns.md)",
@@ -55,6 +63,14 @@ FEATURES = {
         "where": "inverted text below raster.invert_bold_below_px: .invert lines and words, band titles, tables",
         "tested_on_paper": False,
         "evidence": "",
+    },
+    "charts": {
+        "title": "charts drawn from a table (chart=line, bar, area, sparkline)",
+        "where": "tables with chart= (docs/guides/charts.md)",
+        "tested_on_paper": True,
+        "evidence": "MTP-II, 24/11 (printed 22/11): a line chart with .grid and dates, a two-series bar chart with its "
+        "legend, an area chart with a title and negative values, and a sparkline in a column, printed as the "
+        "preview: 2-dot lines clean, the dotted grey of meta and area even, turned Y labels legible",
     },
     "zebra": {
         "title": "the light grey dots behind table text (style=zebra, .shade on a cell or row)",

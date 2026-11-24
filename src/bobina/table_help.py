@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import textwrap
 
-GUIDES = ("docs/guides/tables.md", "docs/guides/table-cells.md", "docs/guides/receipts.md")
+GUIDES = ("docs/guides/tables.md", "docs/guides/table-cells.md", "docs/guides/receipts.md", "docs/guides/charts.md")
 
 PLACES = (  # (where the {…} goes, its reach, an example)
     ("the line under the table", "the table", "{style=receipt font=Terminus size=16px}"),
@@ -25,6 +25,7 @@ STYLES = {  # every style of layout.TABLE_STYLES (a test checks): how it looks
 }
 
 TABLE_ALSO = (
+    ".bold .italic .underline: every row, titles too; "
     ".compact: narrow, not the paper's width; .center .right: where a narrow table goes; "
     "orientation=auto|vertical|horizontal: auto turns a table that cannot fit (L106)"
 )
@@ -38,9 +39,21 @@ COLUMNS_PER_LINE = (  # (font, columns on 58 mm, on 80 mm), the 1-column spaces 
     ("Spleen 24px", 31, 47),
 )
 
+CHART = (
+    "chart=line|bar|area|sparkline under the table draws it as a chart instead (.with-table: the table too): the "
+    "first column the labels, each next one a series. data=sales.csv under a table of titles only takes its rows "
+    "from the file, chart= or not (docs/guides/charts.md)"
+)
+
+STRETCHED = (
+    "size=1x2, 2x1, any WxH with W != H: the printer font itself, stretched; its columns divided by W (1x2: all "
+    "of them, each line twice as tall; 2x1: half)"
+)
+
 COLUMN = {
     "width=": "auto (the default: the auto columns share what is left, and the widest text column, left-aligned "
-    "with letters, takes the rest of the paper), 7ch (columns of the table's font), "
+    "with letters, takes the rest of the paper; too wide for it, long titles wrap first), 7ch (columns of the "
+    "table's font), "
     "20mm, 30% (of the text room), 96 (dots). A column with a width wraps its text inside it and cuts a longer "
     "word at its edge, without a warning",
     "prefix=": '"R$ " before every body value: never in the title row, never in an empty cell',
@@ -96,6 +109,8 @@ def help_text() -> str:
     out += ["  font=Terminus size=16px: drawn in that font. Columns per line (spaces too):",
             f"    {'':20s}58 mm  80 mm"]  # fmt: skip
     out += [f"    {font:20s}{a:5d}  {b:5d}" for font, a, b in COLUMNS_PER_LINE]
+    out += _wrap(STRETCHED, "  ")
+    out += ["", "CHART"] + _wrap(CHART, "  ")
     out += ["", "COLUMN  at the end of its title cell"]
     for key, what in COLUMN.items():
         out += _wrap(what, f"  {key:9s}", 11)
@@ -116,6 +131,8 @@ def help_json() -> dict:
         "styles": STYLES,
         "table": TABLE_ALSO,
         "columns_per_line": [{"font": f, "58mm": a, "80mm": b} for f, a, b in COLUMNS_PER_LINE],
+        "stretched": STRETCHED,
+        "chart": CHART,
         "column": COLUMN,
         "cell": {"classes": list(CELL_CLASSES), "span": SPAN},
         "row": {"classes": list(ROW_CLASSES)},

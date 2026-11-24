@@ -1,26 +1,4 @@
-# Spans and white text
-
-Two details of styling text ([FORMAT §3](../FORMAT.md)): what a span takes, and how bobina keeps
-white text on black readable.
-
-## A span: part of a line
-
-`[words]{…}` styles part of a line. It takes `.bold` `.italic` `.underline` `.strike` `.invert` `.mono`, `font=`
-and `size=`; anything else (`.center`, `.shade`, `foo=`) does nothing there and gives `M101`: a whole line's `{…}`
-goes at its end.
-
-```markdown
-Total: [R$ 42,00]{.bold size=large}
-[BRS]{size=2x} {.invert}
-```
-
-A line whose words all take one size prints natively at that size (the second line: a 2x band). Sizes mixed on a
-line (`Pay [NOW]{size=2x} please`) print that line as an image in the printer font's look: one line as tall as its
-tallest part, the words on one baseline, each as GS ! would size it (`2x1`: twice as wide; `20px`: exactly). A
-word wider than the line is cut where it fits (`L101`), as on a native line. In a table cell a span's `size=` and `font=` do nothing (`M101`): they go
-on the table's `{…}` line.
-
-## White text on black is bold when small
+# White text on black
 
 Ink spreads into thin white strokes: on the MTP-II (paper, 18/11) white letters of the printer font at 1x (24 dots
 tall) closed up, even bold, and a hyphen, one dot tall, disappeared; at 2x they held. So white text on black

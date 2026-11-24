@@ -81,6 +81,64 @@ def test_a_title_wider_than_its_column_wraps_like_the_body():
     assert "L101" not in codes(res)
 
 
+NFCE = (
+    "| ITEM | CODIGO | DESCRICAO | QTD. | UN. | VL.UNIT(R$) | VL.TOTAL(R$) |\n|---|--:|---|--:|---|--:|--:|\n"
+    "| 001 | 7890000000001 | OVOS BCO CARTELA | 1 | un X | 19.90 | 19.90 |\n"
+    "| 002 | 7890000000002 | LEITE ITAMBE MILK | 1 | un X | 11.98 | 11.98 |\n"
+    "| 003 | 3839 | CEBOLA ROXA KG | 0.520 | kg X | 14.99 | 7.79 |\n"
+    "| 006 | 7890000000006 | PAO INT VALE S/AC | 1 | un X | 15.89 | 15.89 |\n"
+    "{style=receipt font=Terminus size=12px}\n"
+)
+
+
+def test_when_it_does_not_fit_long_titles_wrap_before_the_body_text():
+    res = build(NFCE, profile_name="mtp-ii-58")
+    assert notes(res) == ["column widths in Terminus 12px columns: ITEM 4 · CODIGO 13 · DESCRICAO 17 · QTD. 5 · "
+                          "UN. 4 · VL.UNIT(R$) 7 · VL.TOTAL(R$) 8 (+6 gaps = 64 of 64)"]  # fmt: skip
+    shown = lines(res)
+    assert shown[0].split()[-2:] == ["VL.UNIT", "VL.TOTAL"] and shown[1].split() == ["(R$)", "(R$)"]
+    assert [ln.split()[2:5] for ln in shown[2:]] == [["OVOS", "BCO", "CARTELA"], ["LEITE", "ITAMBE", "MILK"],
+                                                     ["CEBOLA", "ROXA", "KG"], ["PAO", "INT", "VALE"]]  # fmt: skip
+    assert len(shown) == 6 and not codes(res)  # one line per item, nothing cut
+
+
+def test_a_title_wraps_down_to_its_body_and_its_longest_word_never_cut_by_this():
+    doc = ("| QUANTIDADE | DESCRICAO DO PRODUTO | VALOR TOTAL |\n|--:|---|--:|\n"
+           "| 1 | Arroz branco tipo 1 pacote de cinco quilos | 24,90 |\n")  # fmt: skip
+    res = build(doc)
+    assert lines(res)[:2] == ["QUANTIDADE DESCRICAO DO    VALOR", "           PRODUTO         TOTAL"]
+    assert lines(res)[2:] == [
+        "         1 Arroz branco    24,90",
+        "           tipo 1 pacote",
+        "           de cinco quilos",
+    ]
+    assert not codes(res)
+
+
+def test_titles_wrap_first_but_a_given_width_is_kept():
+    doc = NFCE.replace("| CODIGO |", "| CODIGO {width=10ch} |").replace("| QTD. |", "| QTD. {width=6ch} |")
+    said = notes(build(doc, profile_name="mtp-ii-58"))[0]
+    assert "CODIGO 10 · DESCRICAO 17 · QTD. 6 · UN. 4 · VL.UNIT(R$) 8 · VL.TOTAL(R$) 9 (+6 gaps = 64 of 64)" in said
+
+
+def test_a_table_that_fits_keeps_its_titles_whole():
+    res = build("| Item | Quantity ordered |\n|---|--:|\n| Rice | 2 |\n")
+    assert lines(res) == ["Item            Quantity ordered", "Rice                           2"]
+
+
+def test_a_title_wraps_before_a_parenthesis_after_a_letter_but_not_inside_a_number():
+    from bobina.layout import _pieces
+    from bobina.rows import Cell
+
+    def pieces(word: str) -> list[str]:
+        return ["".join(c.ch for c in p) for p in _pieces([Cell(ch) for ch in word])]
+
+    assert pieces("VL.UNIT(R$)") == ["VL.", "UNIT", "(R$)"]
+    assert pieces("10(5)") == ["10(5)"] and pieces("(R$)") == ["(R$)"] and pieces("R$(") == ["R$("]
+    res = build("| PRICE(R$) | X |\n|---|---|\n| 9 | a b c d e f g h i j k l m n o p q r s t u v w x y z |\n")
+    assert lines(res)[:2] == ["PRICE X", "(R$)"] and not codes(res)
+
+
 @pytest.mark.parametrize(
     ("width", "cols"),
     [("6ch", 6), ("12mm", 8), ("25%", 7), ("72", 6), ("72px", 6), ("6.9ch", 6), ("auto", None)],
@@ -195,7 +253,9 @@ def test_a_body_cell_brace_with_only_an_id_or_nothing_stays_text():
 @pytest.mark.parametrize("value", ["abc", "-3ch", "0", "0ch", "0.5ch", "9 ch"])
 def test_an_unreadable_width_is_said_and_the_column_is_auto(value):
     res = build(f'| A {{width="{value}"}} | B |\n|---|---|\n| x | y |\n')
-    assert said(res, "M101") == [f"width={value}"]  # as object_width says it, with the column's units
+    assert said(res, "M101") == [
+        f"width={value} is not a value it takes: auto, the default"
+    ]  # as object_width says it, with the column's units
     hint = next(n.suggestion for n in res.nudges if n.code == "M101")
     assert hint.startswith("auto, 7ch, 20mm, 30% (of the text room)")
     assert notes(res) == ["column widths: A 30 · B 1 (+1 gap = 32 of 32)"]  # auto: as wide as the plain table

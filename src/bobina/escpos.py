@@ -129,11 +129,13 @@ def encode(rows, profile, em: Emulator | None = None) -> bytes:
         # QR and barcodes are graphics too, and raw bytes may hold an image: treated as images (untested on paper)
         after_raster = (
             isinstance(r, (BitmapRow, QRRow, BarcodeRow))
-            or (isinstance(r, TextRow) and not r.native)
+            or (isinstance(r, TextRow) and not (r.native and not r.mixed()))
             or (isinstance(r, RawRow) and GS + b"v0" in r.data)
         )
         if isinstance(r, TextRow):
-            out += text_row(r, em) if r.native else raster(em.render_row(r, profile.width_dots), band)
+            # letters of several sizes never go through GS !: drawn on one baseline (Layout.native_ok says so too)
+            native = r.native and not r.mixed()
+            out += text_row(r, em) if native else raster(em.render_row(r, profile.width_dots), band)
         elif isinstance(r, BitmapRow):
             out += raster(r.image, band)
         elif isinstance(r, QRRow):

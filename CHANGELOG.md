@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.1.6 — 2026-11-24
+
+Charts:
+- A table prints as a chart with `{chart=line|bar|area|sparkline}` under it (`.with-table`: the table too). The first
+  column is the labels, each next column a series, the title row their names (two series: a legend). `data=FILE`
+  reads the rows from a CSV or JSON file. Tested on paper (MTP-II).
+- Values are read in the document's locale (`R$ 1.240,50` with `locale: pt-BR`); a cell that is not a number leaves
+  its row out (C103), repeated labels are summed (C107), `last=N` keeps the last points. Dates space lines and areas
+  by time. `.grid`, `title=`, `x-labels=`, `height=`; Y labels turned along the axis.
+- `bobina help chart` opens the table help at its chart section; a ```` ```chart ```` fence says a chart is a table.
+  The problems C101–C109 have their own pages.
+
+Layout and images:
+- Turned columns: `:::: {.columns orientation=vertical}` lays a label along the roll (`length=72mm` by default),
+  read sideways; content that does not fit goes on in another label. Tested on paper (MTP-II, 18/11).
+- Inverted boxes: `::: {.box .invert}` prints one black band with what it holds white; codes in it keep a white tile
+  with their quiet zone (Q114). Tested on paper: plain small white text prints thin, prefer bold.
+- Images: `crop=x,y,w,h` (pixels or %), `mask=circle|ellipse|rounded`, `.invert`.
+- A span's `size=` (`Total: [R$ 42,00]{size=2x}`) grows only the span, on the line's baseline; it was dropped.
+
+Tables and text:
+- `size=1x2` and `2x1` on a table print the printer font stretched (32 columns at 1x2), no longer Spleen.
+- `.bold`, `.italic`, `.underline` under a table style every row.
+- When a table does not fit, long titles wrap before body text is squeezed.
+- Four or more asterisks in a row (`****TOTAL****`) print as written (M106); `literal_asterisks: false` reads them
+  as Markdown.
+- A word wider than the line in a raster font is cut to fill lines, preferring after `/ ? & = - _ . #` (L101);
+  before, the rest was lost past the paper's edge.
+- `bobina view`: text in a smaller font and dotted rules show as on paper.
+
+Printing:
+- `bobina print a.bob.md b.bob.md --data rows.csv --per-row` prints a 1, b 1, a 2, b 2 … instead of every a, then
+  every b (still the default); the documents of a row share its counter numbers.
+- A counter format may be a plain `{}` (`Senha {}`).
+
+Nudges:
+- A wrong value says what prints instead: `valign=up is not a value it takes: the default`.
+
+Security:
+- Raw blocks in the author's Markdown are found after parsing (in quotes and lists too: M121); a counter width or
+  precision beyond 2 MB is refused (M313).
+
 ## 0.1.5 — 2026-11-18
 
 Layout:

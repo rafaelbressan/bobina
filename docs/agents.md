@@ -11,13 +11,15 @@ every problem has a code, and every command that returns data has `--json`.
    terminal), `bobina preview FILE -o out.png` (the exact image). Print only what the user asked for.
 3. **Read the codes.** Warnings never block: each one has a code, a suggestion and the evidence. `bobina help CODE`
    says what to do; [problems/README.md](problems/README.md) lists every code.
-4. **Try without hardware.** `bobina printer add test --path out.bin` is a file printer: each job's bytes are
+4. **First run.** The first `check`, `preview`, `view` or `print` saves the locale it took from the time zone
+   (`M203`, once). Set it first with `bobina config set locale pt-BR` when the user's language is known.
+5. **Try without hardware.** `bobina printer add test --path out.bin` is a file printer: each job's bytes are
    appended to `out.bin`.
 
 ## Machine output
 
-- `bobina check FILE --json` (and `print`, `preview`) gives `{"stats", "problems"}`; `--problems json|jsonl`
-  writes problems to stderr. Schemas: [schemas/README.md](schemas/README.md).
+- `bobina check FILE --json > problems.json` (and `print`, `preview`) writes `{"stats", "problems"}` to stdout;
+  `--problems json|jsonl` writes the problems to stderr (`> f` would save the human summary). Schemas: [schemas/README.md](schemas/README.md).
 - `bobina help --json` describes every command, option, topic and problem code.
 - Tables: `bobina help table` (`--json`): where each `{…}` goes (`style=receipt` under the table, a column's
   settings in its title cell) and the columns per line in each font.

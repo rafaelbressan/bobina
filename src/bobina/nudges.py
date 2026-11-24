@@ -10,6 +10,17 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     # B drawing
     "B101": ("warning", "stroke thinner than 2 dots prints broken", "R4-01"),
     "B102": ("note", "free rotation angles look jagged", ""),
+    # C charts and data= files
+    "C101": ("note", "what a chart drew: its points, series, X spacing, Y ticks and the values read (check only)", ""),
+    "C102": ("note", "more chart points than its width can show: neighbours averaged (aggregate=max: the largest)", ""),
+    "C103": ("warning", "a chart value is not a number: its row is left out", ""),
+    "C104": ("note", "chart dates out of order: drawn in the order written, evenly spaced", ""),
+    "C105": ("note", "a chart too small for its labels: fewer or smaller labels", ""),
+    "C106": ("warning", "chart= on a table with nothing to draw (no value column, no number): printed as a table", ""),
+    "C107": ("note", "repeated chart labels combined into one point (summed; aggregate= says how)", ""),
+    "C108": ("warning", "a table title names no column of its data= file (the file's columns are listed)", ""),
+    "C109": ("warning", "data= file not found, unreadable or outside the allowed folders: no rows from it", ""),
+    "C110": ("note", "rows with a label and no value at a chart's ends are left out (between values: a gap)", ""),
     # F fonts / glyphs
     "F301": ("note", "glyph not in the printer font: line printed as an image", "N5"),
     "F302": ("warning", "glyph missing in every available font", ""),
@@ -49,6 +60,8 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "native QR with fixed modules: this QR printed as an image",
         "",
     ),
+    "Q114": ("note", "a code in an inverted box keeps black on white, in a white margin (scanners need it)", ""),
+    "Q115": ("warning", "a code in an inverted box without its whole white margin, or white on black", ""),
     # L layout
     "L101": ("warning", "word longer than the line was split", ""),
     "L102": ("note", "long print", ""),
@@ -79,6 +92,7 @@ CATALOG: dict[str, tuple[str, str, str]] = {
         "",
     ),
     "I110": ("note", "a turned image prints smaller: its corners need room on the paper", ""),
+    "I111": ("warning", "crop= outside the image: cut to the image, or printed uncropped", ""),
     # E errors: the job stops, nothing prints (exit code in docs/CLI.md)
     "E101": ("error", "command line usage", ""),
     "E102": ("error", "this command takes one document", ""),
@@ -131,6 +145,8 @@ CATALOG: dict[str, tuple[str, str, str]] = {
     "M103": ("note", "attribute not implemented yet (ignored)", ""),
     "M104": ("note", "a {…} after a table's title row: GitHub and Obsidian show that table as text", ""),
     "M105": ("warning", "a ::: block is never closed", ""),
+    "M106": ("note", "four or more asterisks printed as asterisks, not bold (literal_asterisks)", ""),
+    "M107": ("note", "***text*** read as bold italic: the asterisks do not print", ""),
     "M120": ("note", "field rendered as Markdown", ""),
     "M121": ("warning", "raw block removed from a variable", ""),
     "M122": ("warning", "image removed (not the author's value)", ""),
@@ -199,7 +215,7 @@ class Nudge:
         }
 
 
-CHECK_ONLY = frozenset({"L108"})  # notes only bobina check says: Nudges keeps them apart (Nudges.check_only)
+CHECK_ONLY = frozenset({"L108", "C101"})  # notes only bobina check says: Nudges keeps them apart (Nudges.check_only)
 
 MARK = {"error": "✗", "warning": "!", "note": "·"}
 
@@ -225,6 +241,12 @@ def problems_header(errors: int, warnings: int, notes: int, printed: str) -> str
         f"{n} {w}{'s' if n != 1 else ''}" for n, w in ((errors, "error"), (warnings, "warning"), (notes, "note")) if n
     ]
     return ", ".join(bits) + (f" — {printed}" if printed else "")
+
+
+def not_a_value(key: str, given, then: str) -> str:
+    """The message of an attribute given a value it does not take: what was written, and what prints instead (the
+    suggestion lists the values it takes). One wording, so a reader never meets a bare 'valign=up'."""
+    return f"{key}={given} is not a value it takes: {then}"
 
 
 class Nudges(list):

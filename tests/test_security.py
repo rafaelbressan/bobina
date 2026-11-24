@@ -150,6 +150,17 @@ def test_str_format_is_refused_however_it_is_reached(src, monkeypatch):
     assert "|format" in err.value.nudge.message and "s3cr3t-value" not in str(err.value)
 
 
+@pytest.mark.parametrize(
+    "src",
+    ["{{ (g | attr('format'))(n) }}", "{{ g['format'](n) }}", "{% set f = g.format %}{{ f(n) }}",
+     "{{ [g] | map(attribute='format') | list }}", "{{ seq[n] }}", "{{ ''.__class__ }}", "{{ g.format(n) }}"],
+)  # fmt: skip
+def test_a_refusal_says_the_documents_line_even_when_it_comes_while_running(src):
+    with pytest.raises(SecurityError) as err:
+        build("---\nx: 1\n---\nfirst\n\n" + src + "\n", fields={"g": Tainted("{0}"), "n": Tainted("Bob")})
+    assert err.value.nudge.code == "M311" and err.value.nudge.line == 6, src
+
+
 def test_a_path_rebuilt_one_character_at_a_time_with_str_format_is_refused():
     src = ("{% set ns = namespace(s='') %}{% for c in p %}{% set ns.s = ns.s ~ '{0.nextitem}'.format(loop) %}"
            "{% endfor %}![](/{{ ns.s }})\n")  # fmt: skip

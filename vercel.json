@@ -94,6 +94,21 @@
       "permanent": true
     },
     {
+      "source": "/problems/C:n(\\d{3})",
+      "destination": "/problems/c:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/C:n(\\d{3})/",
+      "destination": "/problems/c:n/",
+      "permanent": true
+    },
+    {
+      "source": "/problems/C:n(\\d{3}).md",
+      "destination": "/problems/c:n.md",
+      "permanent": true
+    },
+    {
       "source": "/problems/E:n(\\d{3})",
       "destination": "/problems/e:n/",
       "permanent": true

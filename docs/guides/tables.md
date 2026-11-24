@@ -1,14 +1,14 @@
 # Tables: styles, fonts and columns
 
-A table in a `.bob.md` is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
+A table is a plain Markdown table. What bobina adds goes in braces `{…}`, one `{…}` for each reach:
 
-- for the whole table, on the line right under it (with or without a blank line): `{style=receipt .compact}`;
+- for the whole table, on the line under it: `{style=receipt .compact}`; as a chart,
+  `{chart=bar}`: [charts.md](charts.md);
 - for one column, at the end of its title cell: `| Price {width=9ch prefix="R$ "} |`;
-- for one cell, at the end of its text, and for one row, after its closing pipe; a cell over several columns
-  (`span=all`): [table-cells.md](table-cells.md).
+- for one cell, at the end of its text; for one row, after its closing pipe; a cell over columns (`span=all`):
+  [table-cells.md](table-cells.md).
 
-Everything with the same reach goes in the same `{…}`. Names and values are lowercase. Whole receipts to copy:
-[receipts.md](receipts.md).
+Everything with the same reach goes in one `{…}`. Names and values are lowercase.
 
 ```markdown
 | Item | Qty | Price |
@@ -19,26 +19,28 @@ Everything with the same reach goes in the same `{…}`. Names and values are lo
 
 ## Columns
 
-- The second line sets each column's alignment, as in any Markdown: `---` left, `--:` right, `:-:` centre.
+- The second line sets each column's alignment: `---` left, `--:` right, `:-:` centre.
 - Each column is as wide as its text, **one column of space** between columns. The table fills the paper: the
   widest text column (left-aligned, with letters) takes the rest; `.compact` keeps it narrow (`.center`, `.right`).
-- The printer font has 32 columns on 58 mm paper and 48 on 80 mm, the spaces included: 4 columns on 58 mm leave
-  29 for text. A cell wraps at its spaces; a word longer than an `auto` column is cut (`L101`).
-- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`; `font=` and `size=` go to the whole table.
+  Too wide: a title wider than its column's values wraps first (at spaces, `.`, `(`), then the text.
+- 4 columns on 58 mm leave 29 of the printer font's 32 for text; 80 mm has 48. A cell wraps at its spaces; a
+  word longer than an `auto` column is cut (`L101`).
+- In a cell: `**bold**`, `*italic*`, `~~strike~~`, `[word]{.invert}`. Under the table, `font=`, `size=`, `.bold`,
+  `.italic` and `.underline` are for every cell, titles too.
 
 ## Tables without a title row
 
 Markdown needs a title row. Leave its cells empty (`| | |`) and bobina prints no title and no rule: label on the
-left, value on the right, the way receipts print totals ([receipts.md](receipts.md#totals)).
+left, value on the right, the way receipts print totals ([receipts.md](receipts.md#totals)). Without titles: no
+title band or rule, in any style.
 
 ## Column widths, prefixes and suffixes
 
 At the end of a column's title cell:
 
-- `width=`: `7ch` (7 columns), `20mm`, `30%` (of the table's text room, the spaces between columns left out:
-  `50%` + `50%` fill it), `96` (dots), or `auto`, the default: the columns without a width share what is left. A
+- `width=`: `7ch` (7 columns), `20mm`, `30%` (of the text room, gaps left out: `50%` + `50%` fill it), `96` (dots), or `auto`, the default: the columns without a width share what is left. A
   column you give a width keeps it: its text wraps inside it, and a word longer than it (a 13-digit code in `7ch`)
-  is **cut at its edge without a warning**: you chose that width.
+  is **cut at its edge without a warning**: you chose that width. A narrow code column: [receipts-supermarket.md](receipts-supermarket.md).
 - `prefix="R$ "`, `suffix=" kg"`: printed before or after every value of the column, never in the title row nor in
   an empty cell. The column's width counts them. A value from `--data` or `--set` stays as it is.
 
@@ -50,7 +52,7 @@ At the end of a column's title cell:
 ```
 
 Without a title row: `| | {prefix="R$ "} |` (still empty).
-`bobina check FILE` says the width each column got (`L108`): `column widths: Product 14 · Price 8 · Sale 8 (+2 gaps =
+`bobina check` says each column's width (`L108`): `column widths: Product 14 · Price 8 · Sale 8 (+2 gaps =
 32 of 32)`. Widths wider than the paper shrink in proportion, `auto` columns keeping 2 (`L107`). With `font=`, `7ch`
 is 7 times that font's `0`.
 
@@ -67,15 +69,13 @@ One word on the line under the table: `{style=receipt}`.
 | `header-invert` | white titles on a black band, no rule | the titles as an image |
 | `zebra` | every other row on light grey dots | the grey rows as images |
 
-Without titles: no title band or rule, in any style.
-
 ## Smaller letters: `font=` and `size=`
 
-`{font=Terminus size=16px}` draws the table as an image in that font (bundled: Terminus, Spleen, IBM Plex Mono,
-Atkinson Hyperlegible, Barlow Condensed, DejaVu Sans; sizes as in [FORMAT §5](../FORMAT.md#5-sizes-)). A column is
-as wide as the font's `0` (a proportional font lines up by the dot). Columns per line, spaces included:
+`{font=Terminus size=16px}` draws the table as an image in that font ([fonts](../FORMAT.md#4-fonts-),
+[sizes](../FORMAT.md#5-sizes-)), a column as wide as its `0` (a proportional font lines up by the dot). Columns
+per line, spaces included:
 
-| Font | 58 mm (384 dots) | 80 mm (576 dots) |
+| Font | 58 mm | 80 mm |
 |---|---|---|
 | printer font | 32 | 48 |
 | Terminus 12px (its tested minimum) | 64 | 96 |
@@ -85,8 +85,9 @@ as wide as the font's `0` (a proportional font lines up by the dot). Columns per
 | IBM Plex Mono 16px | 40 | 60 |
 | Spleen 24px (the printer font's look) | 31 | 47 |
 
-`size=` alone uses Terminus (`2x`, `3x`: the printer font's look). Below a font's tested minimum: `F201`; not
-found: `F203`; `header-invert` titles under 20px: `F204`.
+`size=` alone uses Terminus (`2x`, `3x`: the printer font's look; `1x2`, `2x1`, any `WxH` with W ≠ H: the printer
+font stretched, 32 ÷ W columns on 58 mm). Below a font's tested minimum: `F201`; not found: `F203`;
+`header-invert` titles under 20px: `F204`.
 
 ## Turned tables
 
@@ -97,7 +98,7 @@ hold along the paper); `orientation=horizontal` never does, narrowing every colu
 
 ## When something is wrong
 
-bobina prints anyway and says what to fix (`bobina check FILE`: the same list, nothing printed):
+bobina prints anyway and says what to fix (`bobina check FILE`: without printing):
 
 | Code | When | Example message |
 |---|---|---|

@@ -1,10 +1,9 @@
 """White text on black below the size the paper holds prints bold (paper, MTP-II 18/11: the printer font at 1x closed
-up, even bold; at 2x it held), and bobina says so (F206). And a span's attributes: size= on part of a line, and the
-names a span does not take (M101)."""
+up, even bold; at 2x it held), and bobina says so (F206)."""
 
 from pathlib import Path
 
-from bobina import chat, escpos, preview, rasterfont
+from bobina import chat, escpos, preview
 from bobina.emulator import Emulator
 from bobina.engine import apply_overrides, build
 from bobina.profile import load
@@ -99,18 +98,11 @@ def test_a_heavy_inverted_word_keeps_its_cell_in_a_box():
     assert box.size == thin.size and box != thin  # heavier white, the black box no dot taller
 
 
-def test_a_heavy_stretched_hyphen_stays_two_dots_tall():
-    def tallest(heavy: bool) -> int:
-        path = rasterfont.resolve("Spleen").path
-        t = rasterfont.Tok("-", path, 24, bold=True, invert=True, heavy=heavy, stretch=2.0)
-        asc, desc = t.font.getmetrics()
-        im = rasterfont.draw_tok(t, asc, asc + desc)
-        column = "".join("w" if im.getpixel((im.width // 2, y)) > 127 else "k" for y in range(asc + desc))
-        return max(len(r) for r in column.split("k"))
-
-    assert (tallest(True), tallest(False)) == (2, 1)  # 2x1: thickened at its own size, never squashed back
-    src = "A-B [xy-z]{size=2x1 .invert}\n"
-    assert drawn(build(src))[0].image != drawn(build(src, overrides=OFF))[0].image and "F206" in codes(build(src))
+def test_a_span_at_2x1_on_an_inverted_line_is_heavy_too():
+    src = "A-B [xy-z]{size=2x1} {.invert}\n"  # sizes mixed on a line (drawn, one baseline): 24 dots tall, bold
+    res, thin = build(src), build(src, overrides=OFF)
+    assert white(drawn(res)[0].image) > white(drawn(thin)[0].image) and "F206" in codes(res)
+    assert "2x1 on line 1" in said(res, "F206")[0]
 
 
 def test_the_hyphen_is_two_dots_tall_white_on_black():
@@ -255,72 +247,6 @@ def test_a_black_chat_bubble_still_reads_its_bold_markup():
     assert marked.image == chat.bubble_row(load(), "T-7 ok", inverted=True).image  # no asterisks printed
     thin = chat.bubble_row(apply_overrides(load(), OFF), "**T-7** ok", inverted=True)
     assert thin.image != chat.bubble_row(apply_overrides(load(), OFF), "T-7 ok", inverted=True).image  # bold kept
-
-
-# --- spans ---------------------------------------------------------------------------------------------------------
-
-
-def test_a_span_size_on_part_of_a_line_prints_the_line_as_tall_as_its_tallest_part():
-    res = build("Pay [NOW]{size=2x} please\n")
-    row = drawn(res)[0]
-    assert not [r for r in res.rows if isinstance(r, TextRow)] and row.image.height >= 48
-    assert "".join(c.ch for c in row.text_rows[0].cells).strip() == "Pay NOW please"
-    small = build("Pay NOW please\n")  # one line, not two: the baseline is shared
-    assert len(drawn(res)) == 1 and isinstance(small.rows[1], TextRow)
-
-
-def test_a_word_wider_than_a_mixed_line_is_cut_as_a_native_line_cuts_it():
-    word = "SUPERCALIFRAGILISTIC"
-    res = build(f"Pay [{word}]{{size=4x}} now\n")
-    seen = "".join(c.ch for v in drawn(res)[0].text_rows for c in v.cells).replace(" ", "")
-    assert seen == f"Pay{word}now"  # every letter printed, none cropped at the paper's edge
-    assert said(res, "L101")[0] == f"word '{word}…' split at 8 columns"  # 8 letters of 48 dots: the paper's 384
-    native = build(f"[{word}]{{size=4x}}\n")  # the same word alone: native, the same cut and message
-    assert said(native, "L101")[0] == said(res, "L101")[0]
-
-
-def test_a_mixed_line_sizes_each_span_as_gs_would():
-    def ink(src):  # the ink's width and height
-        res = build(src)
-        box = preview.render(res.rows, res.profile).convert("L").point(lambda v: 255 - v).getbbox()
-        return box[2] - box[0], box[3] - box[1]
-
-    plain, big = ink("a WW b\n"), ink("a [WW]{size=2x} b\n")
-    assert ink("a [WW]{size=2x1} b\n") == (big[0], plain[1])  # twice as wide, as tall as the line
-    assert ink("a [WW]{size=1x2} b\n") == (plain[0], big[1])  # as wide as the line, twice as tall
-    res = build("a [WW]{size=2x1} b [x]{size=20px} c\n")
-    assert not said(res, "F303")  # exact on a drawn line: nothing printed "natively"
-    assert said(build("[x]{size=20px}\n"), "F303") == ["size 20px printed natively at 1x"]  # alone: native
-
-
-def test_a_span_alone_on_its_line_takes_its_size_natively():
-    res = build("[BRS]{size=2x}\n")
-    row = next(r for r in res.rows if isinstance(r, TextRow))
-    assert row.native and row.scale == (2, 2)
-    band = build("[BRS]{size=2x} {.invert}\n")
-    assert drawn(band)[0].text_rows[0].scale == (2, 2) and "F206" not in codes(band)
-
-
-def test_a_named_span_size_is_the_printer_fonts():
-    res = build("Total: [R$ 42,00]{.bold size=large}\n")
-    assert drawn(res)[0].image.height >= 48 and not said(res, "M101")
-
-
-def test_what_a_span_does_not_take_is_said():
-    res = build("A [b]{.bold} [c]{.center} [s]{.shade} [x]{foo=1} [m]{.mono} [i]{#here} end\n")
-    assert said(res, "M101") == [".center .shade foo= on part of a line does nothing: a span takes .bold .italic "
-                                 ".underline .strike .invert .mono font= size="]  # fmt: skip
-    assert not said(build("A [b]{.bold .italic .underline .strike .invert} end\n"), "M101")
-
-
-def test_a_span_around_a_data_value_says_what_it_does_not_take():
-    res = build("Hi [{{ name | markdown }}]{.center} there\n", fields={"name": "**Ana**"})  # spliced as Markdown
-    assert any(m.startswith(".center on part of a line") for m in said(res, "M101"))
-
-
-def test_a_span_in_a_table_cell_says_what_it_does_not_take():
-    res = build("| A | B |\n|---|---|\n| [x]{.center} | y |\n")
-    assert any(".center on part of a line" in m for m in said(res, "M101"))
 
 
 # --- the paper strip ------------------------------------------------------------------------------------------------

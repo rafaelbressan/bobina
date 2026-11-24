@@ -11,7 +11,6 @@ import dataclasses
 import re
 import shutil
 import subprocess
-import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -226,9 +225,8 @@ class Tok:
     tracking: int = 0
     glue: bool = False  # part of the word before it (another script, another font): never a line break before it
     icon: str = ""  # an icon (:fragile:) drawn as a square the height of the letters, not a glyph of the font
-    heavy: bool = False  # white on black below the size the paper holds (layout): bold, and a synthetic bold (no
-    # bold file: the printer font's look) a dot taller too
-    stretch: float = 1.0  # drawn this many times as wide (a printer-font span at 2x1 or 1x2 on a drawn line)
+    heavy: bool = False  # white on black below the size the paper holds (layout.whiten): bold, and a synthetic bold
+    # (no bold file: the printer font's look) a dot taller too
 
     @property
     def font(self):
@@ -240,9 +238,9 @@ class Tok:
 
     def width(self) -> int:
         if self.icon:
-            return round((self.icon_px() + self.tracking) * self.stretch)
+            return self.icon_px() + self.tracking
         w = self.font.getlength(self.text) + self.tracking * len(self.text)
-        return int(round((w + (self.px * 0.1 if self.italic and not self.space else 0)) * self.stretch))
+        return int(round(w + (self.px * 0.1 if self.italic and not self.space else 0)))
 
 
 def _heavy(im: Image.Image, t: Tok, line_h: int) -> Image.Image:
@@ -256,16 +254,18 @@ def _heavy(im: Image.Image, t: Tok, line_h: int) -> Image.Image:
     return imaging.thicken_down(tall, 255 if t.invert else 0)
 
 
-def draw_tok(t: Tok, ascent: int, line_h: int) -> Image.Image:
-    if t.stretch != 1:  # GS ! at 2x1 or 1x2: the glyphs as drawn at their height, as wide as the width says, then
-        plain = draw_tok(dataclasses.replace(t, stretch=1.0, heavy=False), ascent, line_h)  # heavy at that size
-        return _heavy(plain.resize((max(1, t.width()), line_h), Image.NEAREST), t, line_h)
+def draw_tok(t: Tok, ascent: int, line_h: int, line_px: int = 0) -> Image.Image:
+    """A token drawn on a line whose letters rise `ascent` dots above the baseline, `line_h` tall. line_px: the
+    biggest size on the line; an inverted token smaller than it (a span's size=) gets a box of its own height."""
     w = max(1, t.width())
     im = Image.new("L", (w, line_h), 255)
     d = ImageDraw.Draw(im)
+    fa, fd = t.font.getmetrics()
     if t.invert:
-        d.rectangle((0, 0, w - 1, line_h - 1), fill=0)
-    fa, _ = t.font.getmetrics()
+        top, bottom = 0, line_h - 1
+        if t.px < line_px:  # beside bigger letters (a span's size=): its own letters' height on the baseline
+            top, bottom = ascent - fa, ascent + fd - 1
+        d.rectangle((0, top, w - 1, bottom), fill=0)
     ink = 255 if t.invert else 0
     if t.icon:
         from . import icons
@@ -328,18 +328,76 @@ def _unspaced(text: str) -> bool:
 
 
 def _breaks(text: str) -> list[int]:
-    """Offsets where a line may break inside `text`: before a letter, never before a combining mark, after a
-    virama (conjunct) or after a vowel written before its consonant."""
+    """Offsets where a line may break inside `text`: before a letter, never before a combining mark or a skin
+    tone, after a virama (conjunct) or after a vowel written before its consonant."""
+    import unicodedata
 
     out = []
     for i in range(1, len(text)):
         a, b = text[i - 1], text[i]
         if unicodedata.category(b).startswith("M") or b in "\u200c\u200d" or a in "\u200c\u200d":
             continue
-        if unicodedata.combining(a) == 9 or a in PREPOSED:
+        if unicodedata.combining(a) == 9 or a in PREPOSED or "\U0001f3fb" <= b <= "\U0001f3ff":
             continue
         out.append(i)
     return out
+
+
+SOFT_AFTER = frozenset("/?&=-_.#")  # a word longer than the line is cut right after one of these when it can
+
+
+def soft_break(text: str, at: int) -> bool:
+    """Whether a word cut at offset `at` of its `text` is cut where an address reads well: right after / ? & = - _
+    . or # (consulta?|chave=\u2026, gov.|br/\u2026), never between two of them (https:/|/), nor after a . between digits
+    (19.|90 is a decimal; a - between digits, a date or a range, is a fine place). The cut itself is wrap_words'
+    and layout_lines': they prefer the last such place that leaves the line at least half full."""
+    if not 0 < at < len(text) or text[at - 1] not in SOFT_AFTER or text[at] in SOFT_AFTER:
+        return False
+    return not (text[at - 1] == "." and at > 1 and text[at - 2].isdigit() and text[at].isdigit())
+
+
+def _cut(u: list[Tok], room: int) -> tuple[list[Tok], list[Tok]]:
+    """A word (a token and the parts glued to it) wider than a line, cut in two: the head that fills `room` dots,
+    cut at the last soft_break that leaves the line at least half full, else at the last letter that fits (never
+    inside a cluster, an icon or a wide character: _breaks). Nothing fits (one letter or icon wider than the line):
+    that one alone, so nothing is lost; nothing left to cut (one letter or icon): the word whole and no rest."""
+    text = "".join(t.text for t in u)
+    places: list[tuple[int, int, int]] = []  # (token, offset in it, offset in text) of each place that fits
+    x = g = 0
+    for i, t in enumerate(u):
+        if i:
+            places.append((i, 0, g))
+        tw = t.width()
+        if x + tw > room:
+            for o in _breaks(t.text):
+                if x + dataclasses.replace(t, text=t.text[:o]).width() > room:
+                    break
+                places.append((i, o, g + o))
+            break
+        x, g = x + tw, g + len(t.text)
+    if not places:  # the first letter (or icon) alone
+        o = next(iter(_breaks(u[0].text)), 0)
+        if o:
+            places.append((0, o, o))
+        elif len(u) > 1:
+            places.append((1, 0, len(u[0].text)))
+        else:
+            return u, []
+    i, o, _ = places[-1]
+    for p in reversed(places):
+        head = u[: p[0]] + ([dataclasses.replace(u[p[0]], text=u[p[0]].text[: p[1]])] if p[1] else [])
+        if 2 * sum(t.width() for t in head) < room:
+            break
+        if soft_break(text, p[2]):
+            i, o = p[0], p[1]
+            break
+    if not o:
+        return u[:i], [dataclasses.replace(u[i], glue=False), *u[i + 1 :]]
+    t = u[i]
+    return [*u[:i], dataclasses.replace(t, text=t.text[:o])], [
+        dataclasses.replace(t, text=t.text[o:], glue=False),
+        *u[i + 1 :],
+    ]
 
 
 def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
@@ -355,9 +413,18 @@ def _split(t: Tok, room: int) -> tuple[Tok | None, Tok]:
     return dataclasses.replace(t, text=t.text[:best]), dataclasses.replace(t, text=t.text[best:], glue=False)
 
 
+def letter_width(toks: list[Tok]) -> int:
+    """How wide one letter of these tokens is drawn: a digit of the first that is text (no slant), else the first
+    icon. A line narrower than that holds no letter: a word is not cut for it (each letter on a line of its own,
+    off the paper)."""
+    t = next((t for t in toks if not t.icon), None)
+    return dataclasses.replace(t, text="0", italic=False).width() if t else toks[0].width() if toks else 0
+
+
 def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[list[Tok]]:
-    """Tokens as lines `width` dots wide (`hang`: less on the next ones). split(word, at): a word wider than a line
-    is cut where it fits, as a native line cuts it (L101), never cropped; None: it runs past the edge."""
+    """Tokens wrapped at their spaces into lines `width` dots wide (`width - hang` after the first). A word wider
+    than a whole line is cut to fill lines (_cut), never drawn past the paper; split(word, room) is called once for
+    each word that was cut (to say it: L101). A line too narrow for one letter (letter_width) cuts nothing."""
     units: list[list[Tok]] = []  # words: a token and the glued parts after it
     for t in toks:
         if t.glue and units and not units[-1][0].brk and not units[-1][-1].space:
@@ -401,26 +468,16 @@ def layout_lines(toks: list[Tok], width: int, hang: int, split=None) -> list[lis
                 cw -= cur.pop().width()
             lines.append(cur)
             cur, cw, avail = [], 0, width - hang
-        if not cur and tw > avail and split is not None:  # a word wider than the line: as much as fits, the rest on
-            room, k, taken = avail, 0, []  # the next line
-            while k < len(u) and u[k].width() <= room:
-                room -= u[k].width()
-                taken.append(u[k])
-                k += 1
-            head, rest = _split(u[k], room)
-            if head is None and not taken:  # at least one letter a line
-                cut = (_breaks(u[k].text) or [len(u[k].text)])[0]
-                head, rest = (
-                    dataclasses.replace(u[k], text=u[k].text[:cut]),
-                    dataclasses.replace(u[k], text=u[k].text[cut:]),
-                )
-            split("".join(x.text for x in u), sum(len(x.text) for x in taken) + (len(head.text) if head else 0))
-            lines.append(taken + ([head] if head else []))
-            avail = width - hang
-            more = ([dataclasses.replace(rest, glue=False)] if rest.text else []) + u[k + 1 :]
-            if more:
-                units.append([dataclasses.replace(more[0], glue=False), *more[1:]])
-            continue
+        whole, room = u, avail
+        while tw > avail and width - hang >= letter_width(u):  # wider than a whole line: cut to fill lines
+            head, rest = _cut(u, avail)
+            if not rest:  # one letter or icon wider than the line: whole, it sticks out
+                break
+            lines.append(head)
+            u, avail = rest, width - hang
+            tw = sum(x.width() for x in u)
+        if u is not whole and split is not None:
+            split(whole, room)
         cur.extend(u)
         cw += tw
     while cur and cur[-1].space:
@@ -471,7 +528,7 @@ def render_block(
     split=None,
 ) -> tuple[Image.Image, list[list[Tok]]]:
     """The tokens drawn as lines (mode '1'), and each line's tokens in logical order (for the terminal views);
-    split: what to say when a word wider than a line is cut (layout_lines)."""
+    split: layout_lines' (a word cut to fit the line)."""
     pw = prefix.width if prefix else 0
     lines = layout_lines(toks, width - indent - pw, 0, split)
     imgs, texts = [], []
@@ -483,7 +540,8 @@ def render_block(
         row = Image.new("L", (width, h), 255)
         x0 = 0 if rtl else indent + pw  # right to left: indent and bullet on the right
         avail = width - indent - pw
-        parts = [draw_tok(t, ascent, ascent + descent) for t in ln]
+        line_px = max([t.px for t in ln] or [0])  # from the tokens ascent and descent come from
+        parts = [draw_tok(t, ascent, ascent + descent, line_px) for t in ln]
         used = sum(p.width for p in parts)
         gaps = [k for k, t in enumerate(ln) if t.space]
         extra = {}

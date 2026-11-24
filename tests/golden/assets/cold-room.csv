@@ -1,0 +1,9 @@
+hour,celsius,door
+00h,2.5,closed
+03h,1.0,closed
+06h,-0.5,closed
+09h,-1.5,open
+12h,0.5,closed
+15h,3.0,open
+18h,4.5,closed
+21h,3.5,closed

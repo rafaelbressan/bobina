@@ -7,6 +7,38 @@ FIX = {
     # B drawing
     "B101": "Draw lines at least 2 dots thick (thickness=2), or keep it and silence it with --allow B101.",
     "B102": "Rotate by 90, 180 or 270 degrees for sharp text; other angles are drawn and look jagged.",
+    # C charts
+    "C101": "Nothing to fix: bobina check says how it read the table, so a wrong locale or column shows before paper.",
+    "C102": (
+        "Nothing to fix: the drawing has 2 dots per point. last=N draws only the last N rows, aggregate=max keeps "
+        "the peaks, and a wider chart (width=full) shows more."
+    ),
+    "C103": (
+        "Write the value as a number: 1234.5, R$ 1.234,50 with locale: pt-BR in the front matter, -20. A row with a "
+        "word in a value column is left out; an empty cell is only a gap."
+    ),
+    "C104": "Sort the rows by date (oldest first) and the points are spaced by the time between them.",
+    "C105": (
+        "Give the chart a taller height= (height=30mm), fewer values (y-ticks=2, x-labels=ends) or a smaller size= "
+        "for its labels (size=16px)."
+    ),
+    "C106": (
+        "Put the labels in the first column and numbers in the next ones (one series per column); a sparkline may "
+        "leave the labels empty: | | |."
+    ),
+    "C107": (
+        "Nothing to fix when that is what you meant (a row per product, summed per day). aggregate=max or "
+        "aggregate=mean combines the rows of a label otherwise."
+    ),
+    "C108": "Write each title of the table as a column of the file (the message lists them); the first is the labels.",
+    "C109": (
+        "Check the path (relative to the document) and the format: CSV, TSV, XLSX or JSON. Under --sandbox the file "
+        "must be next to the document or in image_dirs."
+    ),
+    "C110": (
+        "Nothing to fix when they are a heading or a Total row; put a value under the label to draw it. A label with "
+        "no value between rows with values is a gap in the line."
+    ),
     # F fonts
     "F301": "Nothing to fix: the line prints as an image (a little slower). Remove that character to keep it native.",
     "F302": "Pick a font that has the character (bobina fonts list) or replace the character.",
@@ -32,7 +64,7 @@ FIX = {
     "F206": (
         "Nothing to fix: white text on black below 48 dots prints bold, or ink fills its thin strokes. To keep its "
         "weight, make it bigger (size=2x, 48px). A printer whose paper holds thin white text: "
-        "raster.invert_bold_below_px in its profile (docs/guides/text-styles.md)."
+        "raster.invert_bold_below_px in its profile (docs/guides/white-text.md)."
     ),
     # Q codes
     "Q101": "Use a bigger module: ```qr {module=4}``` (3 is the native minimum, 4 in raster).",
@@ -58,8 +90,14 @@ FIX = {
         "always 5 dots) or put less data in it (it prints up to version 7). With render=native, module= and width= "
         "have no effect."
     ),
+    "Q114": "Nothing to fix: the code scans. For a band with no white in it, put the code after the box's closing :::.",
+    "Q115": "Give the code room for its margin (a smaller module= or width=), keep it standing (no turned columns, a"
+    " right angle), or put it after the inverted box's closing :::.",
     # L layout
-    "L101": "Add a space or a hyphen to the long word, or use a smaller size.",
+    "L101": (
+        "Add a space or a hyphen to the long word, or use a smaller size; an address prints whole as a QR code "
+        "(```qr```)."
+    ),
     "L102": "Nothing to fix: check the length on the confirmation screen before printing.",
     "L103": "Shorten the line or use a smaller size for the preformatted block.",
     "L104": "Use shorter lines or a smaller size in the rotated block.",
@@ -109,6 +147,8 @@ FIX = {
     "I109": "Nothing to do if it looks right. Otherwise add {.dither} (photo look) or {.threshold} (black and"
     " white); {threshold=60%} sets the cut (higher: more black).",
     "I110": "Nothing to fix if it looks right; a right angle (90, 180, 270) keeps more of its size.",
+    "I111": "crop=x,y,width,height counts from the top-left corner, in pixels of the file (as an image viewer shows"
+    " them) or percentages; keep x + width and y + height within the image's size the message gives.",
     # E errors
     "E101": "Read the hint in the message and bobina COMMAND --help.",
     "E102": "Give this command one document.",
@@ -174,6 +214,12 @@ FIX = {
         "Add a line of colons only (:::) where the block should end: the message lists what it holds now. A line of "
         "colons always closes the innermost open block."
     ),
+    "M106": (
+        "Nothing to fix when the asterisks are a decoration (****EXTRATO****). For bold, write **text**. To read "
+        "every run as Markdown: literal_asterisks: false in the front matter, or bobina config set "
+        "literal_asterisks off."
+    ),
+    "M107": "Nothing to fix for bold italic. To print the asterisks, escape them: \\*\\*\\*TOTAL\\*\\*\\*.",
     "M120": "Nothing to fix: the value was asked to render as Markdown (| markdown).",
     "M121": "Raw blocks cannot come from a value that is not the author's own: put them in the document.",
     "M122": (
@@ -213,15 +259,15 @@ FIX = {
     "M205": "Write a BCP 47 tag (pt-BR, en-US, fr-CA); the message suggests the closest one bobina knows.",
     "M201": "Use CLDR date patterns (dd/MM/yyyy HH:mm), not Moment.js (DD/MM/YYYY).",
     "M310": "Templates cannot read files: put the content in the document.",
-    "M311": 'A counter format takes exactly one {:spec} ("{:d}", "A-{:03}"); other unsafe operations are refused.',
+    "M311": 'A counter format takes exactly one {} or {:spec} ("{}", "A-{:03}"); other unsafe operations are refused.',
     "M312": "A variable cannot choose a file or image path: write the path in the document.",
     "M313": "Simplify the template: a loop or the output passed bobina's limit.",
     "M314": "Variables cannot be used inside raw blocks.",
     "M315": "Keep template paths inside the allowed folders.",
 }
 
-CATEGORY = {"B": "drawing", "F": "fonts", "Q": "codes", "L": "layout", "I": "images", "P": "printer and paper",
-            "M": "markup and data", "E": "errors"}  # fmt: skip
+CATEGORY = {"B": "drawing", "C": "charts", "F": "fonts", "Q": "codes", "L": "layout", "I": "images",
+            "P": "printer and paper", "M": "markup and data", "E": "errors"}  # fmt: skip
 
 
 def explain(code: str) -> dict | None:

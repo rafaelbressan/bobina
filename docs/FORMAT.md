@@ -4,8 +4,8 @@ Status: **draft**. Becomes `bob/1` once frozen. Every feature below is marked
 **✓ implemented** (covered by tests) or **◇ planned** (part of the format, not implemented yet;
 using it gives the note `M103` or `M102`, never an error).
 
-A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (it reads well on GitHub
-or Obsidian) and maps predictably onto narrow, low-resolution printers.
+A `.bob.md` file describes a print for a thermal roll printer. It is valid Markdown (GitHub and Obsidian
+read it) and maps predictably onto narrow, low-resolution printers.
 
 ## 0. Principles
 
@@ -27,7 +27,7 @@ File extension: **`.bob.md`** (canonical); `.bob` is accepted. Encoding: UTF-8.
 ---
 bob: 1                         # format version (informational for now)
 profile: mtp-ii-58             # printer profile; the CLI or the printer config can override it
-locale: pt-BR                  # BCP 47: month names, numbers and money, all in it (`lang:` too); default: the machine's (§7.1)
+locale: pt-BR                  # BCP 47 (`lang:` too): dates, numbers, money; default: the machine's (§7.1)
 timezone: America/Sao_Paulo    # IANA; default: the system zone
 align: left                    # default alignment: left | center | right | justify
 size: normal                   # default text size (§5)
@@ -58,32 +58,33 @@ Every key is optional. Any other key is a **variable** available to the body (`s
 | `**bold**` `*italic*` `~~strike~~` `` `mono` `` | inline styles (table cells too); italic and strike are drawn as raster on printers without them |
 | `- item`, `1. item`, nested lists | bullet `•`, right-aligned numbers; nested items and continuation lines align under the item text |
 | `- [ ] todo`, `- [x] done` | drawn checkboxes; done items struck through. `tasks.done: check` = box only, `plain` = `[ ]`/`[x]` in the printer font (fastest) |
-| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
+| `\| a \| b \|` tables | printer-font grid, bold titles and a rule (empty titles: none); one `{…}` under it: `style=plain\|receipt\|lines\|grid\|header-invert\|zebra`, `font=Terminus size=16px` (~48 columns on 58 mm), `.compact`, `orientation=`; `chart=line\|bar\|area\|sparkline` and `data=FILE`: [charts](guides/charts.md); a column's `{width=9ch prefix="R$ "}` ends its title cell: [guides/tables.md](guides/tables.md); a cell's or row's `{.invert}`, `span=all`: [table-cells](guides/table-cells.md); [receipts](guides/receipts.md); `bobina help table` |
 | `---` | divider (§3) |
 | `> quote` | `│ ` prefix |
 | `::: {.box}` … `:::`, `:::: {.columns}` | a frame ([layout](guides/layout.md)); blocks side by side ([layout-columns](guides/layout-columns.md), `bobina help layout`); along the roll: `orientation=vertical` |
 | `![alt](photo.jpg){…}` | image (§6.5) |
 | `:fragile:`, `:wash-30:` … | an **icon**, 2 columns (`{size=3x}`: big); names and meanings: [guides/icons.md](guides/icons.md). Never from code or data; unknown: `M161` |
 | `<!-- comment -->` | ignored |
-| `\*`, `\#` … | CommonMark escapes: the character is printed literally |
+| `\*`, `\#` … | CommonMark escapes: printed literally |
+| `****TOTAL****` | printed with its asterisks (`M106`) |
 
 ## 3. Attributes `{…}` ✓
 
 Pandoc syntax: `.class`, `key=value`, `key="quoted value"`. They go:
 - at the end of a heading or paragraph line: `# SALE {.invert .center}`; in a paragraph, its line and those above back to the previous `{…}`
-- on a span: `Total: [R$ 42,00]{.bold size=large}` ([what a span takes](guides/text-styles.md))
+- on a span: `Total: [R$ 42,00]{.bold size=large}` (only the span grows; the line prints as an image)
 - on a line of their own: it applies to the **block above** (tables, images, objects): a table followed by `{.compact}` (blank line or not)
 - on a divider: `--- {.dashed thickness=2}`
 
-`Table 4 {.center}` / `Waiter: Ana {.right}` / `Thanks` on 3 lines: centred, right, left.
+`Table 4 {.center}` / `Waiter: Ana {.right}` / `Thanks`: centred, right, left.
 
 | Class | Effect |
 |---|---|
 | `.left` `.center` `.right` `.justify` | alignment (justify spreads spaces on the character grid, or pixels in raster) |
 | `.bold` `.italic` `.underline` `.strike` | style for the whole block or span |
-| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); small: bold (`F206`, ⚠ not tested on paper) |
+| `.invert` | on a block: a **continuous** white-on-black band (raster); on a span: inverted words (native); on a box: all black. Small: bold ([`F206`](guides/white-text.md) ⚠ not tested on paper) |
 | `.flip` | upside down (native `ESC {`, rows sent in reverse order; raster when a row is not native) |
-| `.mono` | monospace (the printer font is already monospace) |
+| `.mono` | monospace (the printer font already is) |
 | `.compact` | tables: do not stretch |
 | `.solid .dashed .dotted .double .wavy .cut` | divider style (`.cut` adds scissors: a place to tear) |
 
@@ -117,15 +118,18 @@ Fonts are looked up among the **bundled** fonts first (same result on every mach
 IBM Plex Mono, Barlow Condensed, Terminus, Spleen, DejaVu Sans), then among installed fonts (fontconfig).
 A font that cannot be found falls back to Atkinson Hyperlegible (`F203`).
 
-Quality nudges, from the printed tests of the profile:
+Quality nudges, from the profile's printed tests:
 - below a font's **tested minimum** → `F201` with the minimum and the evidence;
-- an **untested** font: bobina measures its stem at the requested size and warns below 2 dots (`F202`);
+- an **untested** font: its stem measured at that size, under 2 dots → `F202`;
 - inverted raster text under 20 px → `F204`;
 - a character the printer font lacks (emoji, arrows, `☐`) → that **line only** becomes raster (`F301`, a note);
   a character no font has → printed as a box (`F302`).
 
-**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): bobina downloads their Noto font once and says so
-(`F304`; off or no network: boxes and `F305`): [guides/scripts.md](guides/scripts.md).
+**Other scripts** (Thai, Indic, Khmer, Myanmar, Ethiopic, CJK): once a document needs one, bobina
+downloads its pinned Noto font (38 KB for Thai, up to 8.3 MB for CJK), says so first (license, size; `F304`) and
+keeps it for offline use. No network, or `bobina config set font_downloads off`: boxes and `F305` (`bobina fonts get
+thai`). Han follows `lang:` (ja, ko, zh-TW), else nearby kana or hangul, else Simplified Chinese. Such lines, Arabic
+and Hebrew too, are drawn whole.
 
 `bobina fonts test "FAMILY"` prints a size ladder; `bobina fonts mark "FAMILY" PX` records your minimum.
 
@@ -181,8 +185,7 @@ ABC-123
 
 `type=code128` (default) `ean13 ean8 upca code39 code93 codabar itf` — native on the printer, with an exact
 preview. `module=` (minimum 2), `height=` dots (default 80), `text=below|above|both|none`, `width=` (module ≤ 6). `orientation=auto|horizontal|vertical`:
-`auto` turns a barcode wider than the paper into a **vertical** one along the paper, so it is never cut (`Q110`,
-a warning, since you may not want it); vertical barcodes are raster with module ≥ 4 along the paper and a
+`auto` turns a barcode wider than the paper into a **vertical** one along the paper, so it is never cut (`Q110`); vertical barcodes are raster with module ≥ 4 along the paper and a
 10-module white margin (measured: 2 and 3 did not scan). CODE39 gets the firmware's mod-43 check character in the
 bars (not in the text). 1–250 printable ASCII characters; types the profile does not support → `Q106`; weak types
 (ITF) → `Q107`.
@@ -198,7 +201,7 @@ One block for every payment scheme, with the same attributes: `to=` who receives
 `24,90`, in the scheme's currency), `ref=` your reference, `note=` text for the payer; a few schemes take an extra
 (`city=` Pix, `bic=` SEPA, `currency=` PayPal, `label=` other). `caption=auto|none|"text"`: `auto` prints a line
 under the code with the scheme and the amount (`Pix · R$ 10,00`), or the name. The QR attributes (`width=`,
-`module=`, `ecc=`) work too. Pix is one scheme like the others: `pay {scheme=pix to=… name=… city=…}`. Attributes
+`module=`, `ecc=`) work too. Attributes
 take `{{ }}`, so a receipt per row carries its own amount. Without `amount=` (or with 0) the code is open: the payer
 types it.
 
@@ -217,9 +220,8 @@ types it.
 
 A missing or invalid attribute (an IBAN with a wrong check digit, a UPI ID without `@`, more decimals than the
 currency has) gives `Q111` with a working example, and the code is not printed: the rest of the document is, and
-the command exits with 9 so a script or agent knows (`--allow Q111` for 0). A scheme nobody has scanned with its
-real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). No brand logos (they need
-a licence). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
+the command exits with 9 (`--allow Q111` for 0). A scheme nobody has scanned with its
+real app gives the note `P302`; scan a print before customers use it (docs/TESTED.md). Each scheme's fields, official names and limits: `bobina help pay SCHEME` (`--json` too) and
 [pay.md](pay.md). A value over a limit is an error (`Q111` says how much to cut), never cut.
 An amount that reads two ways (`amount=1.890`) is `Q111` too: write `1890`, `1.890,00` or `1.89`.
 The same value in `| paymoney`, or in `| currency` without a locale (§7.1), is printed as typed with `M202`.
@@ -245,16 +247,18 @@ Raster (the printer has no native Data Matrix; its native PDF417 does not work).
 
 - Path relative to the document; `data:image/…;base64,…` embeds the image (≤ 10 MB).
 - Formats: PNG, JPEG, GIF (first frame), WebP, BMP, TIFF; **SVG** and **PDF pages** (`page=N`, default 1) are
-  rendered straight at the target width (extras `bobina[svg]`, `bobina[pdf]`; missing → `I105`); they print as
+  rendered at the target width (extras `bobina[svg]`, `bobina[pdf]`; missing → `I105`); they print as
   line art unless `.dither` or `dither=`.
 - `https://` URLs only when the command line has `--allow-net` (`I103` otherwise); public hosts only,
   no redirects, ≤ 10 MB (`I106`); every fetch is reported (`I104`). A document cannot enable the network.
-- `width=` as on every object (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
-  `gamma=` (defaults from front matter `image:`, then the profile — tuned on printed ramps).
-- A drawing prints black and white, a photo dithered (`I109` says which; a plain background does not count);
+- `width=` (default: the paper width), `dither=floyd-steinberg|atkinson|bayer|threshold`,
+  `gamma=` (defaults: front matter `image:`, then the profile).
+- A drawing prints black and white, a photo dithered (`I109` says which);
   `.dither`, `.threshold` or `threshold=60%` choose.
-- `rotate=` any angle, then `mirror=x|y|xy` (`.mirror`: x): fitted whole (`I110`). `caption="…"`/`caption=alt`: a line under.
-- Images above 40 megapixels are refused (`I101`), unreadable ones give `I101` and the rest prints.
+- In order: `crop=x,y,w,h` (viewer pixels or `%`; SVG/PDF: `%`; `I111`), `.invert`, `rotate=` any
+  angle, `mirror=x|y|xy` (`.mirror`: x), fitted whole (`I110`), `mask=circle|ellipse|rounded`
+  (`radius=3mm|12|10%`): paper outside.
+- `caption="…"`/`caption=alt`: a line under. Above 40 megapixels or unreadable: `I101`, the rest prints.
 
 ### 6.6 Text ✓
 
@@ -311,7 +315,7 @@ Available: front-matter variables, template fields, `now` and `today` (time zone
 | `titlecase` | by the document language: `{{ "arroz DA fazenda" \| titlecase }}` → Arroz da Fazenda (`en`: Bread of the Day) |
 | `deaccent` | `{{ "São João" \| deaccent }}` → Sao Joao |
 | `camel`, `pascal`, `snake`, `kebab`, `slug` | `{{ "Arroz da Fazenda" \| snake }}` → arroz_da_fazenda (accents removed) |
-| `smallcaps` | `{{ "Arroz" \| smallcaps }}` → Aʀʀᴏᴢ (Unicode small capitals: printed as an image line, `F301`; accented letters stay lowercase) |
+| `smallcaps` | `{{ "Arroz" \| smallcaps }}` → Aʀʀᴏᴢ (an image line, `F301`) |
 
 Number filters read what a person types: `24.90`, `24,90`, `R$ 1.890,00`, `3 dias`. A value that is not a number
 or is ambiguous (`1234.567`, `3 5`) gives `M202`: `currency`/`number`/`percent` print it as typed, `int`/`float`
@@ -358,7 +362,7 @@ Previews, `check` and `--dry-run` only show the next values. A print reserves it
 prints never share one; a job not printed gives them back unless a later print took some after them, and a number
 is never printed twice ([guides/counters.md](guides/counters.md)). The CLI adds `--repeat N` (N
 renders, new values each) and `--copies N` (identical copies); `bobina seq` lists and resets them, and
-`bobina seq set NAME N` starts one at N, even before its first print.
+`bobina seq set NAME N` starts one at N.
 
 ### 7.4 Data is literal
 
@@ -397,7 +401,7 @@ labels:
 - Using one (`template: NAME`), its lookup, the built-ins, `template show`/`new`:
   [guides/templates.md](guides/templates.md).
 - `--ask` (on `print`, `check`, `preview`) asks the fields still missing on the terminal, in the order the
-  template declares them, showing `help`, `example` and the default (`[automatic]` for expressions);
+  template declares them, showing `help`, `example` and the default;
   `type: table` fields take one row per line (`item; qty; price`, empty line to finish). A document without
   `fields:` gets its undeclared `{{ variables }}` asked. Answers are data, exactly like `--set` (literal,
   never Markdown or template code); fields already set by the front matter, `--set` or `--data` columns are
@@ -408,7 +412,7 @@ labels:
 - bobina decides every line break; the printer never wraps.
 - Per line, native when the profile says the printer does it well, raster otherwise — a raster line looks like the
   native ones (the printer font is emulated); `render=` forces it.
-- A print starts with the profile's top margin (fixes the faded start), separates blocks by `block_gap_dots`, and
+- A print starts with the profile's top margin, separates blocks by `block_gap_dots`, and
   ends with enough feed for the last line to clear the tear bar with room to spare (profile `feed_after_dots`,
   or the printer's measured `tear_mm` + 6 mm; `tear_margin_mm` in the printer's config.toml changes the 6 mm).
 - Errors stop a print only for parsing (`DOC`) and security (`M31x`); everything else is a nudge.
@@ -422,24 +426,22 @@ a printer's paper is to the preview.
 
 ## Appendix A — nudge codes
 
-Categories: **B** drawing · **F** fonts · **Q** codes · **L** layout · **I** images · **P** printer · **M** markup and
+Categories: **B** drawing · **C** charts · **F** fonts · **Q** codes · **L** layout · **I** images · **P** printer · **M** markup and
 templates. `bobina help nudges` prints the same list; `allow: [CODE]` or `--allow CODE` silences one.
 
 Errors (`E…`) stop the job: nothing prints. Exit codes are in `docs/CLI.md`.
 
-`E101` command line usage · `E102` this command takes one document · `E103` a job option was given twice with
-different values · `E104` --then / --compact misuse · `E105` --last / --again misuse, or nothing printed yet · `E106`
-only one part can read stdin · `E107` a terminal is needed (confirmation or --ask) · `E201` file not found or
-unreadable · `E202` file type not supported as a target · `E203` image, PDF page or page range not usable · `E204`
-network target needs --allow-net · `E205` nothing to print · `E206` saved label (library) problem · `E207` unknown
-template, profile, font or help topic · `E208` output file problem (exists, format) · `E209` a bobina state file is
-damaged or busy (counters, paper, library, config) · `E301` data file unreadable or in an unsupported format · `E302`
-no data rows (or none match --rows/--where) · `E303` unknown column or sheet · `E304` invalid value (--rows,
---copies-from, --set, length) · `E305` job too large (1000 labels, 100 copies) · `E401` no printer configured or
-unknown printer · `E402` printer unreachable · `E403` printer not ready (paper, cover, error) · `E405` printer busy:
-another bobina job kept it too long · `E406` `bobina init` found no printer to set up · `E501` document error · `E601`
-no AI found, or an unknown AI name · `E602` the AI did not answer · `E701` could not check for a new bobina
-(`bobina update`)
+`E101` command line usage · `E102` one document only · `E103` a job option given twice, differently · `E104`
+--then / --compact misuse · `E105` --last / --again misuse, or nothing printed yet · `E106` only one part reads stdin
+· `E107` a terminal is needed (confirmation or --ask) · `E201` file not found or unreadable · `E202` file type not a
+target · `E203` image, PDF page or range not usable · `E204` network target needs --allow-net · `E205` nothing to
+print · `E206` saved label (library) problem · `E207` unknown template, profile, font or help topic · `E208` output
+file problem · `E209` a state file damaged or busy · `E301` data file unreadable or unsupported · `E302` no data rows
+(or none match --rows/--where) · `E303` unknown column or sheet · `E304` invalid value (--rows, --copies-from, --set,
+length) · `E305` job too large (1000 labels, 100 copies) · `E401` no printer configured, or unknown · `E402` printer
+unreachable · `E403` printer not ready (paper, cover) · `E405` printer busy (another job) · `E406` `bobina init` found
+no printer · `E501` document error · `E601` no AI found, or unknown · `E602` the AI did not answer · `E701` could not
+check for a new bobina
 
 Nudges:
 
@@ -447,6 +449,16 @@ Nudges:
 |---|---|---|
 | `B101` | warning | stroke thinner than 2 dots prints broken |
 | `B102` | note | free rotation angles look jagged |
+| `C101` | note | what a chart drew (`check` only) |
+| `C102` | note | chart points averaged to fit |
+| `C103` | warning | a chart value is not a number: row left out |
+| `C104` | note | chart dates out of order: drawn as written |
+| `C105` | note | chart labels fewer or smaller, to fit |
+| `C106` | warning | `chart=` with nothing to draw: a table |
+| `C107` | note | repeated chart labels combined |
+| `C108` | warning | a title names no column of the `data=` file |
+| `C109` | warning | `data=` file not read |
+| `C110` | note | label-only chart rows at its ends left out |
 | `F201` | warning | font below its tested minimum size |
 | `F202` | warning | untested font with strokes thinner than 2 dots |
 | `F203` | warning | font not found, a bundled font was used |
@@ -457,8 +469,8 @@ Nudges:
 | `F302` | warning | glyph missing in every available font |
 | `F303` | note | size not supported natively, nearest native size used |
 | `F304` | note | font for another script downloaded (once; used offline from then on) |
-| `F305` | warning | font for this script not downloaded (off, or no network): letters print as boxes |
-| `F306` | note | no font for the locale's script (none, or downloads off): English words, its formats |
+| `F305` | warning | font for this script not downloaded: letters print as boxes |
+| `F306` | note | no font for the locale's script: English words, its formats |
 | `Q101` | warning | QR module too small to scan reliably |
 | `Q102` | warning | QR error correction L reads with difficulty |
 | `Q103` | warning | QR wider than the paper |
@@ -472,6 +484,8 @@ Nudges:
 | `Q111` | warning | payment code not built: an attribute is missing or invalid (left out, exit 9) |
 | `Q112` | warning | contact code not built: the network or its value is wrong (left out, exit 9) |
 | `Q113` | note | native QR with fixed modules: this QR printed as an image |
+| `Q114` | note | code in an inverted box: black on white |
+| `Q115` | warning | … its margin short, or reversed |
 | `L101` | warning | word longer than the line was split |
 | `L102` | note | long print |
 | `L103` | warning | preformatted line longer than the paper was wrapped |
@@ -488,17 +502,18 @@ Nudges:
 | `L114` | warning | turned label: a block cut across its lines |
 | `I101` | warning | image not found, unreadable or in an unsupported format |
 | `I102` | note | image downscaled to the paper width |
-| `I103` | warning | network image skipped (the server would see the print; `--allow-net` if trusted) |
-| `I104` | note | image fetched from the network (the server sees the print) |
+| `I103` | warning | network image skipped (`--allow-net` if trusted) |
+| `I104` | note | image fetched from the network |
 | `I105` | warning | PDF/SVG support not installed |
 | `I106` | warning | network source refused (private address, redirect, type, size) |
-| `I107` | warning | `![](a b.png)` is not an image (path with a space): write `![](<a b.png>)` |
+| `I107` | warning | a path with a space: write `![](<a b.png>)` |
 | `I108` | warning | image outside its folder and `image_dirs` (`--sandbox`, MCP) |
 | `I109` | note | an image read as a drawing (black and white) or a photo (dithered) |
 | `I110` | note | a slanted image prints smaller, to fit its corners |
+| `I111` | warning | `crop=` past the image's edges |
 | `P101` | warning | the paper roll is almost over (estimate) |
 | `P102` | warning | the print is longer than the paper left on the roll (estimate) |
-| `P103` | warning | the roll is not as wide as this printer's paper (`paper new --width`; recorded anyway) |
+| `P103` | warning | the roll is narrower than this printer's paper (recorded anyway) |
 | `P104` | note | roll length not set: no paper estimate |
 | `P105` | note | `--compact`: labels print at once, without stops |
 | `P106` | note | `--step` without a terminal: labels print at once |
@@ -515,6 +530,8 @@ Nudges:
 | `M103` | note | attribute not implemented yet (ignored) |
 | `M104` | note | a `{…}` after a table's title row: GitHub shows the table as text |
 | `M105` | warning | a `:::` block is never closed |
+| `M106` | note | 4+ asterisks printed as written (`literal_asterisks: false`: bold) |
+| `M107` | note | `***text***` is bold italic |
 | `M120` | note | field rendered as Markdown |
 | `M121` | warning | raw block removed from a variable |
 | `M122` | warning | image removed (not the author's value) |
@@ -523,15 +540,15 @@ Nudges:
 | `M130` | warning | undefined variable printed as empty |
 | `M131` | warning | required template field is empty |
 | `M140` | warning | counter passed its stop value |
-| `M150` | warning | `--join`: rows of the main source without a match (their joined fields print empty) |
+| `M150` | warning | `--join`: rows of the main source without a match (joined fields empty) |
 | `M151` | warning | `--join`: the joined source repeats a key (the first row is used) |
-| `M152` | warning | `--join`: a column exists in two sources; `{{ col }}` uses the main one, `{{ b.col }}` the other |
+| `M152` | warning | `--join`: a column in two sources; `{{ col }}` is the main one's |
 | `M153` | warning | data values lost: a row with more fields than the header, or values under an empty header |
 | `M154` | warning | the data header repeats a column name (the last one is used) |
 | `M155` | note | a data source was renamed because a column has its name |
-| `M156` | note | an option has no effect here (`--sheet` on a CSV, `--repeat` with `--data`) |
+| `M156` | note | an option has no effect here |
 | `M157` | warning | `--set` replaces a data column of the same name in every row |
-| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name`, `Preço` → `preco` |
+| `M158` | note | data columns renamed to names usable in `{{ }}`: `Product Name` → `product_name` |
 | `M159` | warning | two data columns would get the same usable name; the first keeps it |
 | `M160` | note | Excel formula cells without a saved value print empty |
 | `M161` | warning | no icon with that `:name:` (printed as written) |
@@ -539,7 +556,7 @@ Nudges:
 | `M202` | warning | a value is not a number, or a date moved out of the calendar (printed as it is) |
 | `M203` | note | this machine's locale, from its time zone, saved in config.toml (said once) |
 | `M204` | note | no locale for this machine: dates, numbers and money in English |
-| `M205` | warning | the document's locale: is not a locale bobina knows (the machine's is used) |
+| `M205` | warning | the document's `locale:` is unknown (the machine's is used) |
 | `M310` | error | templates cannot read files |
 | `M311` | error | unsafe template operation |
 | `M312` | error | a variable cannot choose a file path |

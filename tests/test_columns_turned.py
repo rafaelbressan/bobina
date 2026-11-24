@@ -245,7 +245,10 @@ def test_rotate_and_flip_on_turned_columns_are_ignored_and_said(extra, word):
 
 def test_an_unknown_orientation_is_said_and_the_columns_stand():
     res = build(cols("a", "b").replace("vertical", "sideways"))
-    assert "orientation=sideways" in said(res, "M101") and labels(res)[0].image.height < 100
+    assert (
+        "orientation=sideways is not a value it takes: across the paper, the default" in said(res, "M101")
+        and labels(res)[0].image.height < 100
+    )
 
 
 def test_length_on_standing_columns_does_nothing_and_is_said():

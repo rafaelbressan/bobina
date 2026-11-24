@@ -146,6 +146,27 @@ def test_str_format_is_refused_before_any_width(src):
     assert "str.format is not allowed" in refused(src, code="M311")
 
 
+@pytest.mark.parametrize(
+    "fmt", ["{:50000000}", "A-{:>050000000d}", "{:.50000000f}", "{:x>50000000}", "{:9" + "9" * 5000 + "}"]
+)
+def test_a_counter_format_cannot_ask_for_a_field_wider_than_the_output(fmt):
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        msg = refused(f'---\ncounters:\n  t: {{ format: "{fmt}" }}\n---\n{{{{ seq.t }}}}\n')
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert "counter format" in msg and "wider than 2 MB" in msg and peak < 16 * 2**20
+    assert build('---\ncounters:\n  t: { format: "A-{:>08,d}" }\n---\n{{ seq.t }}\n').rows  # a usual one still works
+
+
+def test_a_counter_format_with_a_long_run_of_zeros_is_its_width():
+    res = build('---\ncounters:\n  t: { format: "{:' + "0" * 5000 + '5}" }\n---\n{{ seq.t }}\n')
+    assert "00001" in rendered(res)
+
+
 def test_a_namespace_nested_too_deeply_says_so():
     src = "{% set ns = namespace(x=1) %}{% for i in range(1500) %}{% set ns.x = namespace(y=ns.x) %}{% endfor %}"
     assert refused(src + "{{ ns.x }}") == "the template nests too deeply"

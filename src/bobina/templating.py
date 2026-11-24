@@ -8,6 +8,7 @@ document structure, is never evaluated again, and cannot produce raw printer byt
 
 from __future__ import annotations
 
+import bisect
 import calendar
 import contextlib
 import contextvars
@@ -19,6 +20,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from datetime import time as dtime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -54,6 +56,7 @@ RESERVED = {
     "align",
     "image",
     "tasks",
+    "literal_asterisks",
     "counters",
     "allow",
     "template",
@@ -225,26 +228,55 @@ class Default(str):
     placeholder, for the document (finalize). Never a value's text pasted into the author's Markdown."""
 
     _source: str | None = None
+    _field = ""  # its field's name (M121)
 
 
 class TaintedDefault(Tainted):
     """The same, with data among its values: expressions on it give data."""
 
     _source: str | None = None
+    _field = ""
 
 
-def strip_raw(text: str) -> tuple[str, bool]:
-    """The author's Markdown without raw blocks (```raw, ```RAW, ~~~raw…, closed or not), its line breaks as
-    markdown-it reads them first: (the text, whether one was removed). One helper for f_markdown and finalize."""
-    text = LINE_BREAK.sub("\n", text)
-    out = RAW_FENCE.sub("", text)
-    return out, out != text
+AUTHOR_OPEN, AUTHOR_CLOSE = "\ue002", "\ue003"  # where the author's Markdown goes into the document
+AUTHOR_MARK = re.compile(AUTHOR_OPEN + r"(\d*)" + AUTHOR_OPEN + "|[" + AUTHOR_OPEN + AUTHOR_CLOSE + "]")
 
 
-def author_md(text: str) -> str:
-    """The author's Markdown on its way into the document: without raw blocks (M121 is said where they are
-    written as a value, f_markdown)."""
-    return strip_raw(text)[0]
+class Authored(NamedTuple):
+    """The author's Markdown in the document: what M121 says for it, its first and last lines (0-based)."""
+
+    why: str
+    first: int
+    last: int
+
+
+def author_lines(text: str, said: list[str]) -> tuple[str, dict[int, Authored]]:
+    """The document without the marks finalize put around the author's Markdown (a | markdown value, a field's
+    default), and the lines that Markdown is on (0-based, as markdown-it counts them): the parser drops a raw
+    block that opens on one of them (M121, said[i] for the mark's number). A mark never closed runs to the end."""
+    if AUTHOR_OPEN not in text and AUTHOR_CLOSE not in text:
+        return text, {}
+    out, spans, open_, pos, size = [], [], [], 0, 0
+    for m in AUTHOR_MARK.finditer(text):
+        out.append(text[pos : m.start()])
+        size += m.start() - pos
+        pos = m.end()
+        if m.group(1):
+            open_.append((size, int(m.group(1))))
+        elif m.group(0) == AUTHOR_CLOSE and open_:
+            start, i = open_.pop()
+            spans.append((start, size, i))
+    out.append(text[pos:])
+    clean = "".join(out)
+    spans += [(start, len(clean), i) for start, i in open_]
+    breaks = [m.end() for m in re.finditer(r"\r\n?|\n", clean)]
+    lines: dict[int, Authored] = {}
+    for start, end, i in sorted(spans):
+        if end > start and i < len(said):  # an empty value brings no Markdown
+            first, last = bisect.bisect_right(breaks, start), bisect.bisect_right(breaks, end - 1)
+            for n in range(first, last + 1):
+                lines.setdefault(n, Authored(said[i], first, last))
+    return clean, lines
 
 
 class MdData(str):
@@ -321,6 +353,7 @@ class Rendered:
     values: list[Value]
     counters: CounterStore
     data: list[str] = field(default_factory=list)  # every --data/--set value given to this render
+    authored: dict[int, Authored] = field(default_factory=dict)  # lines of the author's Markdown (author_lines)
 
     def resolve(self, s: str) -> str:
         """`s` with its placeholders as their values' text (a value holds none: finalize scrubs it); one that is no
@@ -379,7 +412,7 @@ def split_front_matter(text: str) -> tuple[dict, str, int]:
 
 # ---------------------------------------------------------------- counters
 
-FMT_RE = re.compile(r"^[^{}]*\{:[^{}]*\}[^{}]*$")
+FMT_RE = re.compile(r"^[^{}]*\{(?::([^{}]*))?\}[^{}]*$")  # one {} or {:spec}; its numbers: width and precision
 
 
 def letters(n: int) -> str:
@@ -419,7 +452,18 @@ class CounterStore:
         self._before: dict[str, object] = {}  # reserve mode: the file's value before this job's first number
         self._wrote: dict[str, int] = {}  # the value this job left in the file
         self._contiguous: dict[str, bool] = {}  # no other job took numbers between this job's reservations
+        self._row: object = None  # --per-row: the data row whose documents share their numbers (share_row)
+        self._row_values: dict[str, list[int]] = {}
+        self._row_read: dict[str, int] = {}
         self.done = False
+
+    def share_row(self, row) -> None:
+        """--per-row: the next document belongs to data row `row`, and the documents of one row read the same
+        numbers, in the order they ask for them (pote #1, tampa #1), as copies of a row repeat its number. A new
+        row takes new numbers; None stops sharing."""
+        if row != self._row:
+            self._row, self._row_values = row, {}
+        self._row_read = {}
 
     def declare(self, decl: dict | None) -> None:
         """A later part of the job (--then) brings its own counters: add them. The same counter declared
@@ -464,6 +508,19 @@ class CounterStore:
         return out, v
 
     def _next_values(self, name: str, n: int) -> list[int]:
+        if self._row is None:
+            return self._take(name, n)
+        shared = self._row_values.setdefault(name, [])  # what an earlier document of this row took
+        at = self._row_read.get(name, 0)
+        out = shared[at : at + n]
+        if len(out) < n:  # this document asks more than the ones before it: new numbers, shared from now on
+            new = self._take(name, n - len(out))
+            shared += new
+            out += new
+        self._row_read[name] = at + n
+        return out
+
+    def _take(self, name: str, n: int) -> list[int]:
         start = int(self.cfg(name).get("start", 1))
         used = self.used.setdefault(name, [])
         if not self.reserve:
@@ -500,10 +557,17 @@ class CounterStore:
             return format(v, "X")
         f = c.get("format")
         if f:
-            if not FMT_RE.match(str(f)):
+            m = FMT_RE.match(str(f))
+            if not m:
                 raise SecurityError(
                     "M311",
-                    f'counter format \'{f}\' must contain exactly one {{:spec}}, e.g. "{{:d}}" or "A-{{:03}}"',
+                    f'counter format \'{f}\' must contain exactly one {{}} or {{:spec}}, e.g. "{{}}" or "A-{{:03}}"',
+                )
+            sizes = [n.lstrip("0") or "0" for n in re.findall(r"\d+", m[1] or "")]  # 0005 is 5, however many zeros
+            if any(len(n) > len(str(MAX_OUTPUT)) or int(n) > MAX_OUTPUT for n in sizes):
+                raise SecurityError(  # measured before it is built, as a printf format is (check_format)
+                    "M313",
+                    f"counter format '{f}' asks for a field wider than {MAX_OUTPUT // 1_000_000} MB",
                 )
             return str(f).format(v)
         return str(v)
@@ -792,6 +856,17 @@ def allowed(node) -> None:
         raise SecurityError("M311", f"{what} is not allowed in templates: {instead}", line)
 
 
+def running_line(tb) -> int | None:
+    """The template's line that was running when a refusal was raised (Jinja gives its frames the template's
+    lines); None when it was raised outside the template."""
+    line = None
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == "<template>":
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return line
+
+
 class _CountingCodeGenerator(CodeGenerator):
     """Compiles templates so that no work escapes bobina's limits: every {% for x in it %} becomes
     {% for x in environment.bobina_loop(it) %}, every `a ~ b` environment.bobina_join((a, b)), and every
@@ -926,8 +1001,7 @@ class Sandbox(ImmutableSandboxedEnvironment):
         __self.loops.tick()
         for a in (*args, *kwargs.values()):
             check_size(a)
-        method = __obj
-        owner, name = getattr(method, "__self__", None), getattr(method, "__name__", "")
+        owner, name = getattr(__obj, "__self__", None), getattr(__obj, "__name__", "")
         if isinstance(owner, str):
             if name in _WIDTH_METHODS:
                 check_widths((*args, *kwargs.values()))
@@ -1335,14 +1409,11 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     @pass_context  # never folded at compile time: a literal reaches it as the Trusted string it is (visit_Const)
     def f_markdown(_context, v):
         # the line breaks markdown-it reads (\r, \r\n), as \n first: what is removed or escaped below by line is
-        # every line it will see (a lone \r once hid a raw block from RAW_FENCE)
+        # every line it will see
         author = isinstance(v, (Trusted, MdSafe))
         text = LINE_BREAK.sub("\n", str(v) if author else _scrubbed(str(v)))
-        if author:  # proven to be the author's own: all of Markdown but raw blocks
-            cleaned, removed = strip_raw(text)
-            if removed:
-                nudges.add("M121", "a raw block inside a variable was removed")
-            return MdSafe(cleaned)
+        if author:  # proven to be the author's own: all of Markdown but raw blocks (finalize marks it, M121)
+            return MdSafe(text)
         from . import icons
 
         if _has_taint(v):
@@ -1368,7 +1439,6 @@ def make_filters(loc: Locale, tz: ZoneInfo, nudges: Nudges, explicit_locale: boo
     }
 
 
-RAW_FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*raw\b.*?(?:^[ \t]*\1[ \t]*$\n?|\Z)", re.S | re.M | re.I)
 LINE_BREAK = re.compile(r"\r\n?")
 
 
@@ -1510,11 +1580,20 @@ def render(
                 n += (len(values[i].text) if i < len(values) else 0) - len(m.group(0))
         return n
 
+    said: list[str] = []  # what M121 says for each mark of the author's Markdown (author_lines)
+
+    def authors(text: str, why: str) -> str:
+        """The author's Markdown, marked: once parsed, a raw block it opens is dropped (M121, why). Inside, no
+        other mark: a default's own {{ x | markdown }} is part of it, and none can be typed in to end it early."""
+        if why not in said:
+            said.append(why)
+        return f"{AUTHOR_OPEN}{said.index(why)}{AUTHOR_OPEN}{AUTHOR_MARK.sub('', text)}{AUTHOR_CLOSE}"
+
     def finalize(v):  # every {{ }}: a placeholder (the only place one is made), or the author's Markdown
         if isinstance(v, (Default, TaintedDefault)) and v._source is not None:  # the author's text, values as
-            return v._source  # placeholders
-        if isinstance(v, MdSafe):  # the author's Markdown: never a raw block, never a reserved character
-            return author_md(_scrubbed(str(v)))
+            return authors(v._source, f"a raw block in the default of field '{v._field}' was removed")  # placeholders
+        if isinstance(v, MdSafe):  # the author's Markdown: never a reserved character
+            return authors(_scrubbed(str(v)), "a raw block inside a variable was removed")
         if isinstance(v, Undefined):
             str(v)
             return ""
@@ -1584,17 +1663,23 @@ def render(
             tainted = tainted or values[i].tainted
             return values[i].text
 
-        text = PH_RE.sub(text_of, made)  # one pass: the text, and whether a value in it was data
+        text = AUTHOR_MARK.sub("", PH_RE.sub(text_of, made))  # one pass: the text, and whether a value in it was
+        # data; without the marks of the author's Markdown in it ({{ t | markdown }}): those are for the document
         out = (TaintedDefault if tainted else Default)(text)
-        out._source, removed = strip_raw(made)
-        if removed:
-            nudges.add("M121", f"a raw block in the default of field {name} was removed")
+        out._source, out._field = made, name
         return out
 
     for k, d in (defaults or {}).items():
         if k not in ctx or ctx[k] in (None, ""):
             try:
-                ctx[k] = default_value(k, env.from_string(str(d)).render(ctx)) if "{{" in str(d) else trust(d)
+                if "{{" in str(d):
+                    own = str(d)
+                    if AUTHOR_MARK.search(own):  # typed in: never a mark of the author's Markdown (M124)
+                        scrubbed.append(True)
+                        own = AUTHOR_MARK.sub("", own)
+                    ctx[k] = default_value(k, env.from_string(own).render(ctx))
+                else:
+                    ctx[k] = trust(d)
             except SecurityError as e:
                 e.nudge.message = f"default of field '{k}': {e.nudge.message}"
                 e.nudge.line = None
@@ -1602,6 +1687,9 @@ def render(
             except Exception as e:  # noqa: BLE001
                 raise ValueError(f"default of field '{k}': {e}") from e
 
+    if AUTHOR_MARK.search(body):  # the document's own text never marks the author's Markdown (author_lines)
+        scrubbed.append(True)
+        body = AUTHOR_MARK.sub("", body)
     try:
         try:
             tpl = env.from_string(body)
@@ -1617,8 +1705,11 @@ def render(
     except TemplateSyntaxError as e:
         raise ValueError(syntax_error(env, body, e, line_offset)) from e
     except JinjaSecurityError as e:
-        raise SecurityError("M311", f"unsafe template operation: {e}") from e
-    except SecurityError as e:  # refused by the allowlist: the line in the document
+        line = running_line(e.__traceback__)
+        raise SecurityError("M311", f"unsafe template operation: {e}", line and line + line_offset) from e
+    except SecurityError as e:  # refused by the allowlist, or while running (attr, map, seq[p]…): its line
+        if e.nudge.line is None and e.nudge.code in ("M310", "M311"):
+            e.nudge.line = running_line(e.__traceback__)
         if e.nudge.line and e.nudge.code in ("M310", "M311"):
             e.nudge.line += line_offset
         raise
@@ -1647,6 +1738,7 @@ def render(
             hint += "; the data and --set give: " + ", ".join(given[:12]) + (" …" if len(given) > 12 else "")
         nudges.add("M130", f"variable '{name}' is not defined", suggestion=hint)
     text = PH_SPLIT.sub(lambda m: m.group(0) if m.group(1) and int(m.group(1)) < len(values) else "", "".join(out))
+    text, authored = author_lines(text, said)
     if RESERVED_CHARS.search(PH_RE.sub("", text)):  # one typed in the template, or no value: never printed
         scrubbed.append(True)
         text = "".join(x if k % 2 else RESERVED_CHARS.sub("", x) for k, x in enumerate(PH_KEEP.split(text)))
@@ -1656,4 +1748,4 @@ def render(
             "characters bobina reserves for its own marks were removed",
             suggestion="nothing to fix: they are private-use characters (U+E000 to U+E004) no text needs",
         )
-    return Rendered(LINE_BREAK.sub("\n", text), values, store, _data_texts(fields))
+    return Rendered(LINE_BREAK.sub("\n", text), values, store, _data_texts(fields), authored)

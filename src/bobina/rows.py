@@ -19,6 +19,7 @@ class Cell:
     italic: bool = False
     strike: bool = False
     wide: bool = False  # occupies two columns (CJK, drawn checkbox)
+    scale: tuple[int, int] | None = None  # its own size, a printer multiplier (a span's size=); None: the row's
     heavy: bool = False  # printed white on black below the size the paper holds (layout.whiten): bold, and drawn a
     # dot taller where bobina draws it (Emulator.line_image); a native one gets the printer's bold, ESC E
 
@@ -43,6 +44,32 @@ class TextRow:
     def columns(self) -> int:
         return columns(self.cells)
 
+    def scale_of(self, c: Cell) -> tuple[int, int]:
+        return c.scale or self.scale
+
+    def mixed(self) -> bool:
+        """A span on it has its own size (Um [BRS]{size=2x} dois): the sizes change along the line."""
+        return any(c.scale and c.scale != self.scale for c in self.cells)
+
+    def width(self) -> int:
+        """Columns at 1x the row takes on the paper: each cell's columns times its own width."""
+        return sum((2 if c.wide else 1) * self.scale_of(c)[0] for c in self.cells)
+
+    def height(self) -> int:
+        """Lines at 1x the row takes: its tallest cell's height (the others stand on its baseline)."""
+        return max([self.scale[1], *(c.scale[1] for c in self.cells if c.scale)])
+
+    def runs(self) -> list[tuple[tuple[int, int], list[Cell]]]:
+        """The cells in runs of one size, left to right: each is drawn at its own size (such a row is never native)."""
+        out: list[tuple[tuple[int, int], list[Cell]]] = []
+        for c in self.cells:
+            s = self.scale_of(c)
+            if out and out[-1][0] == s:
+                out[-1][1].append(c)
+            else:
+                out.append((s, [c]))
+        return out
+
 
 @dataclass
 class Boxed:
@@ -59,6 +86,7 @@ class Boxed:
     row_tops: tuple = ()  # dots from the top of the box's picture to each of its rows (a box cut across labels)
     open_top: bool = False  # a piece of a box cut across turned labels: no frame line on that side (┄ instead)
     open_bottom: bool = False
+    invert: bool = False  # ::: {.box .invert}: white on black on paper (the views reverse it, as a band)
 
 
 @dataclass
@@ -89,11 +117,14 @@ class BitmapRow:
     kind: str = "image"
     text_rows: list | None = None  # for text drawn as an image (inverted bands): shown as text in views
     untested: tuple[str, ...] = ()  # features not tested on paper it draws (features.py, "zebra"): note P301
-    wide_view: bool = False  # a table in a smaller font whose text rows need more columns than the paper: the
-    # terminal views widen their frame to hold them (view.width)
+    wide_view: bool = False  # a table or text in a smaller font whose text rows need more columns than the paper:
+    # the terminal views widen their frame to hold them (view.width)
     box: Boxed | None = None  # a ::: box: the views draw its frame and its content (view.box_lines)
     columns: Columned | None = None  # a row of :::: {.columns}: the views draw them side by side (view.columns_lines)
     code_spans: tuple = ()  # (top, bottom, kind) of each code drawn in it: a turned label never resamples or cuts them
+    keep: tuple = ()  # (x0, y0, x1, y1) of each code's white tile in it: an inverted box leaves them black on white
+    dark: tuple = ()  # (x0, y0, x1, y1) of each inverted box in it: a turned label cuts across their black rows too
+    view: list[str] | None = None  # what the terminal views show instead of braille (a chart: its labels as text)
 
 
 @dataclass

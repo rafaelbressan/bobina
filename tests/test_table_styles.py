@@ -327,6 +327,71 @@ def test_size_alone_draws_terminus_or_the_printer_font_look_at_its_multiples():
     assert big.rows and not codes(big) or set(codes(big)) <= {"L101", "L106"}
 
 
+BILL_TOTALS = "| | |\n|---|--:|\n| TOTAL DO CONSUMO: | 263,70 |\n| SERVICO (10%): | 26,37 |\n"
+
+
+@pytest.mark.parametrize("size,cols", [("1x2", 32), ("1x3", 32), ("2x1", 16), ("4x1", 8)])
+def test_a_stretched_size_keeps_the_printer_font_and_its_columns(size, cols):
+    res = styled(BILL_TOTALS, f"size={size}", profile_name="mtp-ii-58")
+    rows = [r for r in res.rows if isinstance(r, TextRow)]
+    w, h = int(size[0]), int(size[2])
+    assert rows and all(r.native and r.scale == (w, h) for r in rows)  # GS !
+    assert max(r.columns() for r in rows) == cols  # the value at the right edge
+    assert "F303" not in codes(res)
+    if w == 1:  # as many columns as at 1x: one line each, nothing wraps
+        assert "".join(c.ch for c in rows[0].cells).split() == ["TOTAL", "DO", "CONSUMO:", "263,70"]
+        assert len(rows) == 2
+
+
+def test_a_stretched_size_says_its_columns_and_draws_its_styles_with_the_printer_font_look():
+    said = [n.message for n in styled(BILL_TOTALS, "size=1x2", profile_name="mtp-ii-58").notes if n.code == "L108"]
+    assert said and "printer-font 1x2 columns" in said[0] and "32 of 32" in said[0]
+    grid, plain = styled(BILL, "style=grid size=1x2"), styled(BILL, "style=grid")
+    assert len(drawn(grid)) == len(drawn(plain))  # the same rows, each as many columns wide, 24 dots taller
+    assert [g.image.height - p.image.height for g, p in zip(drawn(grid), drawn(plain), strict=True)][1:] == [24] * 5
+    assert "F303" not in codes(grid)
+    assert "F303" in codes(styled(BILL, "size=5x2"))  # jagged, as a paragraph says
+
+
+def test_a_stretched_table_in_a_quote_keeps_its_bar():
+    tall = build("> | | |\n> |---|--:|\n> | TOTAL: | 9,00 |\n> {size=1x2}\n")
+    row = next(r for r in tall.rows if isinstance(r, TextRow))
+    assert row.cells[0].ch == "│" and row.scale == (1, 2)
+    wide = build("> | | |\n> |---|--:|\n> | TOTAL: | 9,00 |\n> {size=2x1}\n")
+    row = next(r for r in wide.rows if isinstance(r, BitmapRow) and r.kind == "text")
+    assert row.text_rows[0].cells[0].ch == "│"
+    assert ink(row.image.crop((0, 0, 12, row.image.height))) > 0  # the bar, drawn
+
+
+def test_render_raster_on_a_stretched_paragraph_draws_the_printer_font_stretched():
+    native = build("TOTAL A PAGAR: {size=1x2}\n")
+    drawn_ = build("TOTAL A PAGAR: {size=1x2 render=raster}\n")
+    row = next(r for r in drawn_.rows if isinstance(r, BitmapRow))
+    assert row.kind == "text" and row.text_rows[0].scale == (1, 2)
+    assert drawn_.image.tobytes() == native.image.tobytes()  # the same dots, sent as an image
+    assert "F303" not in codes(drawn_)
+
+
+@pytest.mark.parametrize("size", ["1x2", "2x1"])
+@pytest.mark.parametrize("text", ["Pay `x=1` now", "Pay [big]{size=2x} now", "Pay [it]{font=Terminus} now"])
+def test_a_stretched_raster_paragraph_with_a_code_or_a_sized_span_stays_drawn_in_a_raster_font(size, text):
+    res = build(f"{text} {{size={size} render=raster}}\n")
+    raster = build(f"{text} {{font=Spleen size={size}}}\n")  # the raster path: the span keeps its own font or size
+    assert res.image.tobytes() == raster.image.tobytes()
+    assert "F303" in codes(res)  # Spleen scales evenly: said, as before
+
+
+def test_a_stretched_wide_table_in_a_quote_views_every_line_alike_with_its_bar():
+    import re
+
+    res = build("> | Item | Price |\n> |---|--:|\n> | Tea | 9,00 |\n> | Pie | 8,00 |\n> | Cake | 7,00 |\n"
+                "> {size=2x1 style=zebra}\n")  # fmt: skip
+    shown = [re.sub(ANSI, "", ln) for ln in view_of(res)]
+    rows = [ln for ln in shown if any(w in ln for w in ("Item", "Tea", "Pie", "Cake"))]
+    assert len(rows) == 4 and all(ln.startswith("│ ") for ln in rows)  # the bar on plain and shaded rows
+    assert len({ln.index(",") for ln in rows if "," in ln}) == 1  # the prices line up
+
+
 def test_font_problems_are_said_as_in_paragraphs():
     assert "F201" in codes(styled(BILL, "font=Terminus size=10px"))
     assert "F203" in codes(styled(BILL, 'font="No Such Font 123" size=16px'))

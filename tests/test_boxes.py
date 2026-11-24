@@ -185,7 +185,7 @@ def test_title_on_a_band_is_white_on_black_across_the_top():
 def test_a_wrong_title_style_is_said_with_the_three_values():
     for bad in ("faixa", "BAND"):
         res = build(f'::: {{.box title="X" title-style={bad}}}\ny\n:::\n')
-        assert said(res, "M101") == [f"title-style={bad}"]
+        assert said(res, "M101") == [f"title-style={bad} is not a value it takes: border, the default"]
         assert [n.suggestion for n in res.nudges if n.code == "M101"] == ["border, inside or band"]
 
 
@@ -447,7 +447,7 @@ def test_a_turned_box_is_shown_where_it_prints():
 @pytest.mark.parametrize("src", ["::: {.box align=middle}\nx\n:::\n", "```qr {align=middle}\nhello\n```\n"])
 def test_a_wrong_align_is_said(src):
     res = build(src)
-    assert said(res, "M101") == ["align=middle"]
+    assert said(res, "M101") == ["align=middle is not a value it takes: the default"]
     assert [n.suggestion for n in res.nudges if n.code == "M101"] == ["left, center or right"]
 
 

@@ -12,6 +12,8 @@ from markdown_it import MarkdownIt
 from markdown_it.tree import SyntaxTreeNode
 from mdit_py_plugins.attrs import attrs_plugin
 
+from .charts import CLASSES as CHART_CLASSES
+from .charts import KEYS as CHART_KEYS
 from .model import (
     Attrs,
     Block,
@@ -28,7 +30,7 @@ from .model import (
     Run,
     Table,
 )
-from .nudges import Nudges
+from .nudges import Nudges, SecurityError
 from .templating import PH_CLOSE, PH_OPEN, PH_RE
 
 PH_SPLIT = re.compile(f"({PH_OPEN}\\d+{PH_CLOSE})")  # a value's placeholder, kept by re.split
@@ -89,9 +91,10 @@ TASK_RE = re.compile(r"^\[([ xX])\]\s+")
 TOKEN_RE = re.compile(r"""\.[\w-]+|\#[\w-]+|[\w-]+=(?:"[^"]*"|'[^']*'|[^\s"']+)""")
 
 
-TABLE_ONLY = frozenset({"style"})  # keys only a table's {…} line takes (style=receipt); elsewhere: unknown
+TABLE_ONLY = frozenset({"style", *CHART_KEYS})  # keys only a table's {…} line takes (style=, a chart's: charts.py)
+TABLE_CLASSES = CHART_CLASSES  # classes only a table's {…} line takes (a chart's)
 CAPTION_KEYS = frozenset({"caption", "caption-align"})  # images and codes: a line under them, placed on its own
-IMAGE_KEYS = CAPTION_KEYS | {"mirror"}  # mirror=x|y|xy: images only
+IMAGE_KEYS = CAPTION_KEYS | {"mirror", "crop", "mask", "radius"}  # images only (mirror=x|y|xy, mask=circle)
 CODES = ("qr", "barcode", "datamatrix", "pdf417")
 WORD_BLOCKS = {"contact"}  # blocks that take a word after their kind: ```contact whatsapp
 
@@ -183,6 +186,76 @@ def _icons_rule(state) -> None:
                 child.content = out.replace("a\x01", PH_OPEN).replace("\x02a", PH_CLOSE)
 
 
+STAR_RUN = 4  # asterisks in a row from which they are decoration (****TOTAL****), never emphasis
+STAR_QUOTE = re.compile(rf"\*{{{STAR_RUN},}}(?:[^*]*?\*{{{STAR_RUN},}})?")  # a run, with its text and closing run
+_LITERAL_STARS: contextvars.ContextVar[bool] = contextvars.ContextVar("bobina_literal_stars", default=True)
+
+
+def _star_run_rule(state, silent: bool) -> bool:
+    """Four or more asterisks in a row print as written: receipts frame text with them (****EXTRATO****), and in
+    CommonMark they only make bold inside bold. Runs before emphasis, so it never sees them; an escaped \\* is
+    taken first by the escape rule. Off with literal_asterisks: false (front matter or config.toml)."""
+    pos = state.pos
+    if state.src[pos] != "*" or not _LITERAL_STARS.get():
+        return False
+    end = pos
+    while end < state.posMax and state.src[end] == "*":
+        end += 1
+    if end - pos < STAR_RUN:
+        return False
+    if not silent:
+        state.push("text", "", 0).content = state.src[pos:end]
+    state.pos = end
+    return True
+
+
+def _stars_rule(state) -> None:
+    """Lists, for M106 and M107, the asterisk runs kept as written and the ***text*** read as bold italic (an em
+    and a strong opened by the same three asterisks): env["stars"] holds (line, kind, text). A run left in a text
+    token is one _star_run_rule kept (an escaped one is still text_special here); a token's meta does not survive
+    the attrs plugin, so the text is read."""
+    keep = _LITERAL_STARS.get()
+    for tok in state.tokens:
+        if tok.type != "inline" or not tok.children:
+            continue
+        line = tok.map[0] if tok.map else 0
+        kids = tok.children
+        for i, child in enumerate(kids):
+            if child.type in ("softbreak", "hardbreak"):
+                line += 1
+            elif keep and child.type == "text" and (m := STAR_QUOTE.search(ATTR_TAIL.sub("", child.content))):
+                said = m.group(0) if len(m.group(0)) <= 40 else m.group(0)[:39] + "…"  # the run, not the line
+                state.env.setdefault("stars", []).append((line, "run", said))
+            elif child.type in ("em_open", "strong_open") and child.markup in ("*", "**"):
+                # ***text*** alone: both opened by the same asterisks, one text, both closed together
+                seq = [k for k in kids[i + 1 : i + 8] if k.type != "text" or k.content][:4]  # emphasis leaves ""
+                outer = child.type.removesuffix("_open")
+                inner = "strong" if outer == "em" else "em"
+                shape = [f"{inner}_open", "text", f"{inner}_close", f"{outer}_close"]
+                if [k.type for k in seq] == shape and seq[0].markup in ("*", "**"):
+                    state.env.setdefault("stars", []).append((line, "bold-italic", seq[1].content))
+
+
+def _star_notes(found: list[tuple[int, str, str]], nudges: Nudges, off: int) -> None:
+    """One note for the runs printed as asterisks (M106), one for ***text*** read as bold italic (M107): at the
+    first line, the others named in the message."""
+    for kind, code in (("run", "M106"), ("bold-italic", "M107")):
+        hits = [(ln + 1 + off, text) for ln, k, text in found if k == kind]
+        if not hits:
+            continue
+        lines = sorted({ln for ln, _ in hits})
+        more = f" (also line{'s' if len(lines) > 2 else ''} {', '.join(map(str, lines[1:]))})" if len(lines) > 1 else ""
+        if code == "M106":
+            msg = f"{hits[0][1]} printed as asterisks, not bold{more}"
+            hint = "for bold, write **text**; literal_asterisks: false in the front matter reads them as Markdown"
+        else:
+            words = hits[0][1].strip()
+            esc = "\\*\\*\\*"
+            msg = f"***{words}*** prints {words} in bold italic, without the asterisks{more}"
+            hint = f"to print the asterisks, write {esc}{words}{esc}"
+        nudges.add(code, msg, lines[0], hint)
+
+
 DIV_LINE = re.compile(r"(:{3,})(?:(?=\{)|\s+|$)(.*)")  # ::: {…}, ::: word, or a line of colons only (a closer)
 
 
@@ -211,13 +284,11 @@ def _md(icons: bool = True) -> MarkdownIt:
     md.enable(["table", "strikethrough"])
     md.use(attrs_plugin, spans=True)
     md.block.ruler.before("fence", "fenced_div", _div_rule, {"alt": ["paragraph", "reference", "blockquote", "list"]})
+    md.inline.ruler.before("emphasis", "star_run", _star_run_rule)
+    md.core.ruler.before("text_join", "stars", _stars_rule)
     if icons:
         md.core.ruler.before("text_join", "icons", _icons_rule)
     return md
-
-
-SPAN_CLASSES = frozenset({"bold", "italic", "underline", "strike", "invert", "mono"})  # what [text]{…} takes
-SPAN_KEYS = frozenset({"font", "size", "id"})
 
 
 def _span_attrs(node) -> Attrs:
@@ -282,11 +353,6 @@ def inline_runs(node, base: Run | None = None) -> list[Run]:
                         mono=st.mono or a.has("mono"),
                         font=a.kv.get("font", st.font),
                         size=a.kv.get("size", st.size),
-                        idle=(
-                            *st.idle,
-                            *(f".{k}" for k in sorted(a.classes - SPAN_CLASSES)),
-                            *(f"{k}=" for k in sorted(set(a.kv) - SPAN_KEYS)),
-                        ),
                     ),
                 )
             elif t == "link":
@@ -433,8 +499,11 @@ class _Splice:
     one inside a paragraph, a heading, a list item or a table cell, its text with its emphasis and line breaks. In a
     code span, a code block or an attribute it stays the plain value (resolved later, as {{ d }})."""
 
-    def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=()):
+    def __init__(self, values: list | None = None, nudges: Nudges | None = None, off: int = 0, lines=(),
+                 authored: dict | None = None):  # fmt: skip
         self.values, self.nudges, self.off = values or [], nudges, off
+        self.authored = authored or {}  # lines of the author's Markdown (a | markdown value, a default): M121
+        self.said_raw: set[str] = set()
         self.line = 0  # the document line (1-based, offset) of the block being read: refusals inside it go there
         self.parsed: dict[str, tuple[list[Block], list[tuple[str, str]]]] = {}
         self.said: set[tuple[str, str]] = set()  # each refusal once per value (by its text: a loop repeats it)
@@ -500,9 +569,52 @@ class _Splice:
                 continue
             out.append(replace(r, bold=r.bold or st.bold, italic=r.italic or st.italic, strike=r.strike or st.strike,
                                underline=r.underline or st.underline, invert=r.invert or st.invert,
-                               mono=r.mono or st.mono, font=st.font, size=st.size,
-                               idle=(*r.idle, *st.idle)))  # fmt: skip
+                               mono=r.mono or st.mono, font=st.font, size=st.size))  # fmt: skip
         return out
+
+    def authors_raw(self, node, line: int) -> bool:
+        """A raw block the author's Markdown opens (a | markdown value, a field's default: Rendered.authored),
+        however it is written (in a quote, a list, after a no-break space): dropped, said once for each value
+        where the value is written (M121). Raw blocks are the document's own. One the document opens with such a
+        value inside: M314, as for any value."""
+        first, end = node.map or (0, 0)
+        a = self.authored.get(first)
+        if a is not None:
+            self.say_raw(a)
+            return True
+        if any(i in self.authored for i in range(first + 1, end)):
+            raise SecurityError("M314", "variables cannot be used inside raw blocks", line)
+        return False
+
+    def say_raw(self, a) -> None:
+        if a.why not in self.said_raw:
+            self.said_raw.add(a.why)
+            self.nudges.add("M121", a.why, a.first + 1 + self.off, "write the raw block in the document itself")
+
+    def close_raw(self, text: str) -> str:
+        """`text` without the raw blocks the author's Markdown leaves open: never closed, one would run to the end
+        of the document and take what follows the value with it. Its lines up to the value's end are blank
+        (M121), so every line keeps its number."""
+        if not self.authored:
+            return text
+        lines = re.split(r"\r\n?|\n", text)
+        for _ in range(len(self.authored)):
+            if not any("```" in lines[i] or "~~~" in lines[i] for i in self.authored if i < len(lines)):
+                break
+            cut = None
+            for t in _md().parse("\n".join(lines), {}):
+                a = self.authored.get(t.map[0]) if t.type == "fence" and t.map else None
+                if a and t.map[1] - 1 > a.last and not _closes(lines[t.map[1] - 1], t.markup):
+                    info, chosen = self.kind((t.info or "").strip())
+                    if not chosen and _fence_kind(info)[0].lower() == "raw":
+                        cut = (t.map[0], a)
+                        break
+            if cut is None:
+                break
+            first, a = cut
+            lines[first : a.last + 1] = [""] * (a.last + 1 - first)
+            self.say_raw(a)
+        return "\n".join(lines)
 
     def kind(self, info: str) -> tuple[str, bool]:
         """A fence's info string with the author's own values in its kind word opened (```{{ 'qr' }}, ```{{ k }}
@@ -620,17 +732,24 @@ def parse(
     base_dir: str = ".",
     meta: dict | None = None,
     values: list | None = None,
+    literal_asterisks: bool = True,
+    authored: dict[int, str] | None = None,
 ) -> Document:
     """values: the render's values (Rendered.values): those rendered as Markdown that are not the author's own are
-    spliced in after the document is parsed, so they never meet its source (_Splice)."""
-    token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text)))
+    spliced in after the document is parsed, so they never meet its source (_Splice). literal_asterisks: four or
+    more asterisks in a row print as written (_star_run_rule). authored: the lines of the author's Markdown
+    (Rendered.authored), where no raw block may open (M121)."""
+    token = _SPLICE.set(_Splice(values, nudges, line_offset, re.split(r"\r\n?|\n", text), authored))
+    stars = _LITERAL_STARS.set(literal_asterisks)
     try:
         return _parse(text, nudges, line_offset, base_dir, meta)
     finally:
+        _LITERAL_STARS.reset(stars)
         _SPLICE.reset(token)
 
 
 def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dict | None) -> Document:
+    text = _splice().close_raw(text)
     lines = _Source(re.split(r"\r\n?|\n", text))  # as markdown-it counts them (its maps index these)
     tails = _title_tails(lines)
     while True:  # a {…} after a title row is taken out first: GFM would not see a table with one cell too many
@@ -648,6 +767,7 @@ def _parse(text: str, nudges: Nudges, line_offset: int, base_dir: str, meta: dic
     doc = Document(meta=meta or {}, base_dir=base_dir)
     doc.blocks = _blocks(root.children, nudges, line_offset, src)
     _unknown_icons(env.get("icons_unknown", []), nudges, line_offset)
+    _star_notes(env.get("stars", []), nudges, line_offset)
     return doc
 
 
@@ -875,7 +995,9 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
                 )
             am = ATTRS_ONLY.fullmatch(raw)
             if am and out and (a0 := parse_attrs(am.group(1))) is not None:  # attribute line: applies above
-                check_attrs(a0, ln, nudges, extra=TABLE_ONLY if isinstance(out[-1], Table) else frozenset())
+                table = isinstance(out[-1], Table)
+                check_attrs(a0, ln, nudges, extra=TABLE_ONLY if table else frozenset(),
+                            classes=TABLE_CLASSES if table else frozenset())  # fmt: skip
                 out[-1].attrs = out[-1].attrs.merged(a0)
                 if isinstance(out[-1], Table):
                     _attr_lines(out[-1], a0, ln)
@@ -935,21 +1057,13 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
             out.append(Divider(line=ln))
         elif t in ("fence", "code_block"):
             info, chosen = _splice().kind((n.info or "").strip())
-            kind, a, arg = info, Attrs(), ""
-            m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
-            if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
-                kind, arg = m.group(1), m.group(2) or ""
-                if m.group(3) is not None:
-                    a = parse_attrs(m.group(3)) or Attrs()
-            elif info.split(maxsplit=1)[0].lower() in WORD_BLOCKS:  # ```contact whatsapp business: the block
-                kind, rest = info.split(maxsplit=1)  # still says what is wrong (Q112), never prints as text
-                attrs = re.search(r"\{(.*)\}\s*$", rest)
-                arg = rest[: attrs.start()].strip() if attrs else rest.strip()
-                a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
+            kind, arg, a = _fence_kind(info)
             k = kind.lower()  # pay and contact check their own keys; the old pix gets one clear warning
             if chosen:  # ```{{ lang }}: only the author chooses what a block is
                 nudges.add(*FROM_DATA["kind"], ln, "write the kind in the document: ```qr, ```text")
                 kind, k, a, arg = "text", "text", Attrs(), ""
+            if k == "raw" and _splice().authors_raw(n, ln):
+                continue
             check_attrs(
                 a, ln, nudges, keys=k not in ("pay", "pix", "contact"),
                 extra=IMAGE_KEYS if k == "image" else CAPTION_KEYS if k in CODES else frozenset(),
@@ -960,6 +1074,30 @@ def _blocks(nodes, nudges: Nudges, off: int, src: list[str]) -> list[Block]:
         elif n.children:
             out.extend(_blocks(n.children, nudges, off, src))
     return out
+
+
+def _closes(line: str, markup: str) -> bool:
+    """`line` is the closing fence of a fence opened with `markup` (inside quotes and lists too): one the document
+    closes is dropped whole, as written (_Splice.authors_raw), not cut at the value's end."""
+    if not markup:
+        return False
+    return re.fullmatch(rf"[>\s]*{re.escape(markup[0])}{{{len(markup)},}}\s*", line) is not None
+
+
+def _fence_kind(info: str) -> tuple[str, str, Attrs]:
+    """A fence's kind as written, its word (```contact whatsapp) and its attributes, from its info string."""
+    kind, a, arg = info, Attrs(), ""
+    m = re.match(r"^([\w-]*)(?:\s+([\w.+\-]+))?\s*(?:\{(.*)\})?\s*$", info)  # : {{ x }}
+    if m and (m.group(2) is None or m.group(1).lower() in WORD_BLOCKS):
+        kind, arg = m.group(1), m.group(2) or ""
+        if m.group(3) is not None:
+            a = parse_attrs(m.group(3)) or Attrs()
+    elif info.split(maxsplit=1)[0].lower() in WORD_BLOCKS:  # ```contact whatsapp business: the block
+        kind, rest = info.split(maxsplit=1)  # still says what is wrong (Q112), never prints as text
+        attrs = re.search(r"\{(.*)\}\s*$", rest)
+        arg = rest[: attrs.start()].strip() if attrs else rest.strip()
+        a = (parse_attrs(attrs.group(1)) if attrs else None) or Attrs()
+    return kind, arg, a
 
 
 def _attr_lines(tb: Table, a: Attrs, line: int) -> None:
@@ -1168,7 +1306,7 @@ def _table(n, ln, nudges: Nudges, src: list[str]) -> Table:
     body = n.children[-1] if n.children and n.children[-1].type == "tbody" else None
     if body and body.children and (a := _row_attrs(body.children[-1], src)) is not None:
         at = _line(body.children[-1], ln - _line(n, 0))
-        check_attrs(a, at, nudges, extra=TABLE_ONLY)
+        check_attrs(a, at, nudges, extra=TABLE_ONLY, classes=TABLE_CLASSES)
         tb.attrs = a
         _attr_lines(tb, a, at)
         body.children.pop()

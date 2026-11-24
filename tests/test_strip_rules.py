@@ -228,3 +228,133 @@ def test_a_later_part_brings_its_own_counter_settings(kit):
     with pytest.raises(common.Fail) as e:
         common.load_job(a)
     assert "declared differently" in str(e.value) and e.value.problems()[0].source == "part 2 (cnt2.bob.md)"
+
+
+# --- --per-row: the files of a part take turns, row by row ---------------------------------------------------
+
+
+def test_files_of_a_part_print_one_after_the_other_without_per_row(kit):
+    words, _ = job("pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv")
+    assert words == ["Pote 1 arroz", "Pote 2 feijao", "Pote 3 cafe", "Tampa 4 arroz", "Tampa 5 feijao", "Tampa 6 cafe"]
+
+
+def test_per_row_takes_turns_and_a_row_shares_its_number(kit):
+    words, joins = job("pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row")
+    assert words == ["Pote 1 arroz", "Tampa 1 arroz", "Pote 2 feijao", "Tampa 2 feijao", "Pote 3 cafe", "Tampa 3 cafe"]
+    assert joins == ["tear"] * 5
+
+
+def test_per_row_compact_cuts_between_every_label(kit):
+    words, joins = job("pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row", "--compact")
+    assert [w.split()[0] for w in words] == ["Pote", "Tampa"] * 3
+    assert joins == ["cut"] * 5
+
+
+def test_per_row_counters_own_and_shared(kit):
+    (kit / "tag.bob.md").write_text("Tag {{ seq.tag }} pote {{ seq.pote }}\n")
+    a = cargs.parse_args(
+        cargs.make_parser(), ["print", "pote.bob.md", "tag.bob.md", "a.bob.md", "--data", "cozinha.csv", "--per-row"]
+    )
+    res, *_ = common.load_job(a)
+    words, _ = job("pote.bob.md", "tag.bob.md", "a.bob.md", "--data", "cozinha.csv", "--per-row")
+    assert words[:6] == ["Pote 1 arroz", "Tag 1 pote 1", "A", "Pote 2 feijao", "Tag 2 pote 2", "A"]
+    assert res.stats()["counters"] == {"pote": ["1", "2", "3"], "tag": ["1", "2", "3"]}  # 3 numbers spent, not 6
+    assert [m["file"] for m in res.label_meta[:3]] == ["pote", "tag", "a"]
+    assert [m["i"] for m in res.label_meta] == [1, 1, 1, 2, 2, 2, 3, 3, 3]  # {i}: inside its document
+    res.keep({0, 1, 2, 3})  # stopped after pote 2: row 2's number is spent, row 3's goes back
+    assert res.kept_counters == {"pote": ["1", "2"], "tag": ["1"]}
+
+
+def test_per_row_copies_repeat_the_row_group(kit):
+    words, _ = job("pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row", "--copies-from", "n")
+    assert words == [
+        "Pote 1 arroz",
+        "Tampa 1 arroz",
+        "Pote 1 arroz",
+        "Tampa 1 arroz",
+        "Pote 2 feijao",
+        "Tampa 2 feijao",
+    ]
+    words, _ = job(
+        "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--rows", "1-2", "--per-row", "--copies", "2"
+    )
+    assert words == ["Pote 1 arroz", "Tampa 1 arroz", "Pote 2 feijao", "Tampa 2 feijao"] * 2  # the whole part again
+
+
+def test_per_row_alone_is_a_note(kit):
+    found, res = nudges("pote.bob.md", "--data", "cozinha.csv", "--per-row")
+    assert found == [("M156", "")] and len(res.labels) == 3
+    assert "one document" in res.visible_nudges()[0].message
+    found, res = nudges("a.bob.md", "b.bob.md", "--per-row")
+    assert found == [("M156", "part 1 (a.bob.md)")] and len(res.labels) == 2
+    assert "without --data" in res.visible_nudges()[0].message
+
+
+def test_per_row_belongs_to_its_part(kit):
+    words, joins = job(
+        "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--where", "n!=0", "--per-row", "--compact",
+        "--then", "pote.bob.md", "tampa.bob.md", "--data", "lavanderia.xlsx", "--sheet", "Lav", "--compact",
+    )  # fmt: skip
+    assert words == ["Pote 1 arroz", "Tampa 1 arroz", "Pote 2 feijao", "Tampa 2 feijao",
+                     "Pote 3 sabao", "Pote 4 esponja", "Tampa 5 sabao", "Tampa 6 esponja"]  # fmt: skip
+    assert joins == ["cut"] * 7
+    from bobina import history
+
+    a = cargs.parse_args(cargs.make_parser(), ["print", "a.bob.md", "--then", "pote.bob.md", "tampa.bob.md",
+                                               "--data", "cozinha.csv", "--per-row"])  # fmt: skip
+    res, *_ = common.load_job(a)
+    assert history._parts(res) == [{"part": 1, "file": "a"}, {"part": 2, "file": "pote", "per_row": True},
+                                   {"part": 2, "file": "tampa", "per_row": True}]  # fmt: skip
+
+
+def test_per_row_preview_files_in_paper_order(kit):
+    from bobina import cli
+
+    out = kit / "out"
+    argv = ["preview", "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row", "-o"]
+    assert cli.main([*argv, str(out / "{n}-{file}-{i}-{item}.png")]) == cli.OK
+    assert sorted(p.name for p in out.iterdir()) == ["1-pote-1-arroz.png", "2-tampa-1-arroz.png",
+        "3-pote-2-feijao.png", "4-tampa-2-feijao.png", "5-pote-3-cafe.png", "6-tampa-3-cafe.png"]  # fmt: skip
+
+
+def test_per_row_problems_name_the_file(kit, capsys):
+    from bobina import cli
+
+    code = cli.main(["check", "pote.bob.md", "nope.bob.md", "--data", "cozinha.csv", "--per-row"])
+    assert code != cli.OK and "part 1 (nope.bob.md): file not found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("per_row", [[], ["--per-row"]])
+def test_per_row_reports_every_broken_document(kit, capsys, per_row):
+    from bobina import cli
+
+    (kit / "mau.bob.md").write_text("{% include 'x' %}\n")
+    (kit / "mau2.bob.md").write_text("{{ x.y( }}\n")
+    (kit / "div.bob.md").write_text("Div {{ 10 // (n|int) }}\n")  # fails only on cafe's row (n=0), the third
+    cli.main(["check", "pote.bob.md", "mau.bob.md", "mau2.bob.md", "--data", "cozinha.csv", *per_row])
+    e = capsys.readouterr().err
+    assert e.startswith("2 errors") and "(mau.bob.md)" in e and "(mau2.bob.md)" in e
+    cli.main(["check", "div.bob.md", "mau.bob.md", "pote.bob.md", "--data", "cozinha.csv", *per_row])
+    e = capsys.readouterr().err
+    assert e.startswith("2 errors") and "(div.bob.md): template error" in e and "(mau.bob.md)" in e
+
+
+def test_check_names_the_document_of_each_data_columns_line(kit, capsys):
+    from bobina import cli
+
+    cli.main(["check", "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row"])
+    out = capsys.readouterr().out
+    assert "data columns, part 1 (pote.bob.md: cozinha.csv): item, n" in out
+    assert "data columns, part 1 (tampa.bob.md: cozinha.csv): item, n" in out
+
+
+def test_again_after_several_documents_points_to_last(kit, capsys):
+    from bobina import cli
+
+    assert cli.main(["printer", "add", "loja", "--path", str(kit / "printer.bin")]) == cli.OK
+    argv = ["print", "pote.bob.md", "tampa.bob.md", "--data", "cozinha.csv", "--per-row", "--yes", "--quiet"]
+    assert cli.main(argv) == cli.OK
+    capsys.readouterr()
+    assert cli.main(["print", "--again", "--yes"]) == cli.USAGE
+    e = capsys.readouterr().err
+    assert "a job of several documents (--then, several files or --per-row) can be reprinted as is with --last" in e

@@ -27,6 +27,7 @@ STAGES = [
     ("Codes (QR, barcodes, Pix)", ("Q",)),
     ("Images", ("I",)),
     ("Drawing", ("B",)),
+    ("Charts and data= files", ("C",)),
     ("Paper and printer", ("P",)),
 ]
 

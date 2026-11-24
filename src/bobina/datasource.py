@@ -111,13 +111,22 @@ def _delimited(p: Path, delimiter: str | None, notes: list) -> list[dict[str, st
     return out
 
 
+class Num(str):
+    """A value that was a number in its file (a JSON number, an Excel numeric cell), written as text like every value:
+    a chart reads it as a program's number (1.234 is 1.234 in any locale), never with the document's locale."""
+
+    __slots__ = ()
+
+
 def _cell(v) -> str:
     if v is None:
         return ""
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, float) and v.is_integer():
-        return str(int(v))
+        return Num(int(v))
+    if isinstance(v, (int, float)):
+        return Num(v)
     if isinstance(v, datetime):
         return v.date().isoformat() if v.time() == time(0) else v.isoformat(sep=" ", timespec="minutes")
     if isinstance(v, date):
@@ -146,7 +155,7 @@ def _xcell(c) -> str:
             return sign + str(abs(int(v))).zfill(len(fmt))  # -5 at 000 is -005, as in Excel
         if isinstance(v, float) and not v.is_integer():
             short = f"{v:.15g}"  # 15 significant digits, what Excel shows: 0.1+0.2 is 0.3, not 0.30000000000000004
-            return short if "e" not in short else repr(v)
+            return Num(short if "e" not in short else repr(v))
     return _cell(v)
 
 

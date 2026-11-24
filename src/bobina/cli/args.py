@@ -43,9 +43,11 @@ TEXT
     font=Terminus size=16px (drawn in that font: ~48 columns on 58 mm); empty titles | | |: no title row
     a column: | Price {width=9ch prefix="R$ " suffix=" un"} | at the end of its title cell (bobina help table)
     a cell: | 9,00 {.bold .invert .shade .right} | | | Discount {span=all} |; a row: | TOTAL | 9,00 | {.invert}
+    as a chart: {chart=line|bar|area|sparkline}; rows from a file: {data=sales.csv} (bobina help chart)
   ---  or  --- {.dashed|.dotted|.double|.wavy|.cut thickness=2}
   ![alt](photo.jpg){width=50% dither=atkinson gamma=1.5 .left}     <!-- comments are ignored -->
-  ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade} … ::: (docs/guides/layout.md)
+    crop=x,y,w,h (pixels of the file or %) mask=circle|ellipse|rounded radius=3mm .invert rotate=90 mirror=x
+  ::: {.box title="TABLE" title-style=border|inside|band .dashed width=half .shade .invert} … ::: (bobina help layout)
   :::: {.columns wrap=wrap valign=middle} ::: {.column width=40%} … ::: ::: {.column} … ::: ::::  (bobina help layout)
 
 OBJECTS (fenced blocks)
@@ -78,7 +80,7 @@ A line of three or more colons and {…} opens a block; a line of colons only cl
 outer block more colons (::::) so the file reads well, and close it with as many. Values need quotes only when
 they have a space.
 
-BOX: a frame around blocks
+BOX: a frame around blocks (.invert: the whole box black, what it holds white)
   ::: {.box title="TABLE" title-style=border|inside|band .dashed|.dotted|.double width=half .center .shade}
   # 109 {.center size=huge}
   :::
@@ -116,6 +118,7 @@ bobina help data — one label per row (guide: docs/guides/batch-printing.md)
   … --rows 2-5                                           data rows 2 to 5 (1 = first after the header)
   … --data a=prices.xlsx --join b=catalog.json --on name   two sources: {{ a.price }} {{ b.id }}
   … --set unit=kg                                        one value for every label
+  bobina print jar.bob.md lid.bob.md --data rows.csv --per-row   jar 1, lid 1, jar 2, lid 2 … (a row: one seq)
   bobina check label.bob.md --data rows.csv              paper length, problems and the data columns
   bobina preview label.bob.md --data rows.csv -o 'labels/{column}.png'   one PNG per label ({n} {i} too)
 
@@ -196,6 +199,10 @@ NAMED = {"pay", "contact"}  # topics that take a second word: bobina help pay pi
 # Topics that are other names, so bobina help does not list them again: "commands" is what bobina help prints
 # without a topic, and "problems" is the docs' name for nudges.
 ALSO_NAMED = frozenset({"commands", "problems"})
+# Words people and agents try first for something that lives under another topic: charts are tables
+# (chart= under one), images are in the format's summary. bobina help chart opens the table help, not "chat?".
+TOPIC_WORDS = {"chart": "table", "charts": "table", "graph": "table", "graphs": "table",
+               "image": "format", "images": "format"}  # fmt: skip
 # The topics bobina help lists, in the footer of its own help.
 SHOWN = [t for t in TOPICS if t not in ALSO_NAMED]
 # The same list with the other things it takes, for the help command's description, an unknown topic's error and
@@ -263,6 +270,7 @@ def _help_text(topic: str, name: str | None = None) -> str:
 
 def cmd_help(args):
     topic, as_json, name = args.topic, getattr(args, "json", False), getattr(args, "name", None)
+    topic = TOPIC_WORDS.get(topic.lower(), topic) if topic else topic
     topic = topic.lower() if topic and topic.lower() in TOPICS else topic
     if name and topic not in NAMED:
         raise Fail(USAGE, f"only 'bobina help pay SCHEME' and 'bobina help contact NETWORK' take a second word "
@@ -483,6 +491,16 @@ ALSO_KNOWN = {  # words people type for an option, by meaning (English and Portu
     "--allow-net": ["--internet", "--net", "--network", "--online", "--web"],
     "--sandbox": ["--untrusted", "--safe-mode", "--seguro", "--isolado", "--confined"],
     "--copies-from": ["--qty-column", "--quantidade", "--qtd", "--copies-column"],
+    "--per-row": [
+        "--interleave",
+        "--intercalar",
+        "--alternate",
+        "--alternar",
+        "--by-row",
+        "--row-by-row",
+        "--por-linha",
+        "--collate",
+    ],
     "--set-all": ["--set-every", "--global-set"],
     "--json": ["--machine"],
     "--last": ["--ultimo", "--reprint", "--repeat-last"],
@@ -689,6 +707,11 @@ def make_parser():
             "--where", action="append", metavar="COL=VAL", help="--data: keep rows where COL=VAL, COL!=VAL or COL~=TEXT"
         )
         p.add_argument("--copies-from", metavar="COL", help="--data: copies of each row from this column (0 skips)")
+        p.add_argument(
+            "--per-row",
+            action="store_true",
+            help="--data with several files: each row's documents in turn (a 1, b 1, a 2, b 2), sharing its seq",
+        )
         p.add_argument("--repeat", type=int, default=1, metavar="N", help="N renders, each with new counter values")
         p.add_argument("--copies", type=int, default=1, metavar="N", help="N identical copies")
         p.add_argument("--ask", action="store_true", help="ask the missing template fields on the terminal")

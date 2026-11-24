@@ -11,11 +11,11 @@ from dataclasses import dataclass, field, replace
 
 from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-from . import icons, imaging, preview, rasterfont, scriptfonts, sources
+from . import charts, icons, imaging, preview, rasterfont, scriptfonts, sources
 from .emulator import CHECKBOX, Emulator
 from .model import Attrs, Div, Divider, Document, Fence, Heading, ListBlock, Paragraph, Quote, Run, Table
 from .model import Image as ImageBlock
-from .nudges import Nudges, SecurityError
+from .nudges import Nudges, SecurityError, not_a_value
 from .rows import BarcodeRow, BitmapRow, Boxed, Cell, Column, Columned, FeedRow, QRRow, RawRow, TextRow, columns
 from .templating import PH_RE, RESERVED_CHARS, Rendered
 
@@ -29,10 +29,14 @@ CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # never let text carry prin
 SIZE_RE = rasterfont.SIZE_RE
 UNIT_RE = re.compile(r"^(\d+(?:\.\d+)?)(px|mm)$")
 QUOTE_BAR = "│"  # in front of the lines of a > quote, in the gutter it leaves (checked like any glyph: F301)
+GS_MAX = 8  # the largest multiplier GS ! takes, in width and in height
+MULTIPLIER_RE = re.compile(r"^(\d+)x(?:(\d+))?$")  # 2x, 1x2, and those GS ! cannot take (0x, 17x)
+MULTIPLIER_HINT = "2x, 3x, 1x2 or a name: small, normal, large, title, huge"
 QUOTE_GUTTER = 2  # columns (at 1x) a quote takes: its bar and a space
 TABLE_MIN = 6  # orientation=auto turns a table whose columns cannot keep this many characters (or their own width)
 TURN_FREE_MM = 80  # … when the turned table is no longer than this, or than twice the standing one
-TABLE_CLASSES = {"compact", "left", "center", "right", "flip"}  # what a table takes; the rest: M101
+TABLE_TEXT = ("bold", "italic", "underline")  # on a table's {…} line: every cell's text, titles too (they add up)
+TABLE_CLASSES = {"compact", "left", "center", "right", "flip", *TABLE_TEXT}  # what a table takes; the rest: M101
 TABLE_KEYS = {"align", "orientation", "width", "rotate", "id", "font", "size", "style"}
 TABLE_STYLES = ("plain", "receipt", "lines", "grid", "header-invert", "zebra")  # style= on a table; plain: the default
 CELL_HINT = (
@@ -42,17 +46,17 @@ CELL_HINT = (
 TABLE_HINT = (
     "a table takes "
     + ", ".join([*(f".{c}" for c in sorted(TABLE_CLASSES)), *(f"{k}=" for k in sorted(TABLE_KEYS - {"id"}))])
-    + " and #id (docs/guides/tables.md)"
+    + " and #id (docs/guides/tables.md); a chart: chart=line|bar|area|sparkline, data=FILE (bobina help chart)"
 )
 OBJECT_WIDTH_HINT = "full, half, third, 50%, 30mm or dots (200)"
 BOX_LINES = ("solid", "dashed", "dotted", "double")  # a box's frame: the divider's lines
 TITLE_STYLES = ("border", "inside", "band")  # title-style=: on the top line (the default), first line, black band
-BOX_TAKES = (frozenset({"box", *BOX_LINES, "left", "center", "right", "shade", "flip"}),
+BOX_TAKES = (frozenset({"box", *BOX_LINES, "left", "center", "right", "shade", "flip", "invert"}),
              frozenset({"title", "title-style", "thickness", "width", "align", "rotate", "id"}))  # fmt: skip
 BLOCK_TAKES = (frozenset({"flip"}), frozenset({"rotate", "id"}))  # a ::: block that is not a box
 BOX_HINT = (
     'a box takes title="…" title-style=border|inside|band .solid .dashed .dotted .double thickness= width= .center '
-    ".right .shade (docs/guides/layout.md)"
+    ".right .shade .invert (docs/guides/layout.md)"
 )
 BOX_WIDTH_HINT = "full, half, third, 50%, 30mm or 16ch (letters)"
 COLUMNS_TAKES = (frozenset({"columns", "flip"}),
@@ -110,12 +114,15 @@ def _groups(cells: list[Cell]) -> list[list[Cell]]:
 
 def _pieces(word: list[Cell]) -> list[list[Cell]]:
     """A word in the pieces a table cell may wrap between: after . - / between two letters (VL.|TOTAL, e-|mail),
-    never inside a number (18,00, 15/11)."""
+    before a ( after a letter (UNIT|(R$)), never inside a number (18,00, 15/11)."""
     out, start = [], 0
     for k in range(1, len(word) - 1):
         if word[k].ch in ".-/" and word[k - 1].ch.isalpha() and word[k + 1].ch.isalpha():
             out.append(word[start : k + 1])
             start = k + 1
+        elif word[k].ch == "(" and word[k - 1].ch.isalpha() and k > start:
+            out.append(word[start:k])
+            start = k
     return [*out, word[start:]]
 
 
@@ -141,7 +148,9 @@ def word_tokens(cells: list[Cell], pieces: bool = False) -> list[tuple[list[Cell
 def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list[Cell]]:
     """Greedy word wrap of word_tokens into lines of at most cap columns (cap - hang after the first): the spaces
     before a word that starts a line are dropped. A word longer than a line is cut, never between the two columns
-    of a wide character; split(word, room) is called once for each word that was cut (to say it: L101). A wide
+    of a wide character: right after the last / ? & = - _ . # that leaves the line at least half full
+    (rasterfont.soft_break: an address reads gov.|br/consulta?|chave=…), else at the last letter that fits;
+    split(word, room) is called once for each word that was cut (to say it: L101). A wide
     character on a line narrower than itself is put there whole (it sticks out: nothing to cut). measure: how wide
     cells are, in the unit of cap (columns; a table in a raster font measures in its own unit)."""
     lines: list[list[Cell]] = []
@@ -155,15 +164,22 @@ def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list
         elif cur:
             cur += gap
             width += measure(gap)
-        whole, room = word, avail
+        whole, room, done = word, avail, 0
+        text = "".join(c.ch[:1] or " " for c in word)  # one letter per cell: soft_break's offsets are cells
         while ww > avail and len(word) > 1:  # a word longer than a full line
             k, take = 0, 0
             while k < len(word) and take + measure(word[k : k + 1]) <= avail:
                 take += measure(word[k : k + 1])
                 k += 1
             k = max(k, 1)  # a wide character on a line of one column: on a line of its own, never lost
+            for j in range(k, 0, -1):  # the last soft place that leaves the line at least half full
+                if 2 * measure(word[:j]) < avail:
+                    break
+                if rasterfont.soft_break(text, done + j):
+                    k = j
+                    break
             lines.append(word[:k])
-            word, avail = word[k:], cap - hang
+            word, avail, done = word[k:], cap - hang, done + k
             ww = measure(word)
         if word is not whole:
             split(whole, room)
@@ -176,6 +192,8 @@ def wrap_words(tokens, cap: int, hang: int, split, measure=columns) -> list[list
 _IMAGES: dict = {}  # finished image rows (local files, data: URIs) of this process; oldest dropped first
 _IMAGES_MAX = 64
 IMAGE_ONLY = ("mirror", "threshold", "dither")  # attributes that only images read (as classes or keys)
+CROP_HINT = "x,y,width,height: pixels of the file or percentages, crop=0,0,25%,15%"
+MASK_RADIUS = "10%"  # mask=rounded without radius=: of the shorter side
 MIRRORS = {"x": (True, False), "y": (False, True), "xy": (True, True), "yx": (True, True)}
 OBJECTS = ("qr", "barcode", "pay", "contact", "datamatrix", "pdf417")  # and images: sized by width=, placed by .left…
 FRACTIONS = {"full": 1.0, "half": 1 / 2, "third": 1 / 3}  # width=full|half|third on every object
@@ -250,6 +268,8 @@ class Layout:
         self.within = ""  # "column": laid out in a column of :::: {.columns} (narrow)
         self.wrapping = False  # those columns move what does not fit (wrap=wrap): a hint does not suggest it
         self.tall_max: int | None = None  # in a turned label: its height, which a code is laid out to fit
+        self.dark = False  # laid out inside a ::: {.box .invert}: printed white on black
+        self.dark_lost = False  # ... and in turned columns there: a code's tile is turned with them, not kept
         self.untested: set[str] = set()  # features not tested on paper this job used that no row records (P301)
         self.whitened: dict[str, set] = {}  # size -> (line, is a table) of the white text made bold: one F206 (run)
 
@@ -280,18 +300,22 @@ class Layout:
 
     def view_with_bars(self, cells: list[Cell], gutter: int, rtl: bool = False) -> list[Cell]:
         """What the terminal views show for a row printed as an image: its words after the bars (before them, right
-        to left), within the paper's columns."""
+        to left), every letter (a smaller font has more of them than the paper's columns: the views widen)."""
         lead = self.lead(gutter)
         if not any(c.ch == QUOTE_BAR for c in lead):
             return cells
-        room = max(0, self.cols - gutter)
-        return [*cells[:room], *reversed(lead)] if rtl else [*lead, *cells[:room]]
+        return [*cells, *reversed(lead)] if rtl else [*lead, *cells]
 
     # ------------------------------------------------------------ helpers
     def document_size(self, meta: dict) -> str:
         """The front matter's size: (normal when absent). One it cannot read is said once, at its line, and every
         block uses normal instead (never one problem per block)."""
         size = str(meta.get("size", "normal"))
+        m = MULTIPLIER_RE.match(size)
+        if m and not all(1 <= int(k) <= GS_MAX for k in m.groups(m.group(1))):
+            self.n.add("M101", f"size: {size} in the front matter: the printer font takes 1x to {GS_MAX}x, normal is "
+                       "used", self.doc.meta_lines.get("size"), MULTIPLIER_HINT)  # fmt: skip
+            return "normal"
         if size in self.p.get("native.sizes", {}) or rasterfont.readable(size, self.p):
             return size
         self.n.add("M101", f"size: {size} in the front matter is not a size: normal is used",
@@ -304,43 +328,59 @@ class Layout:
         s = RESERVED_CHARS.sub("", s)  # a placeholder a template cut in two: never printed as a glyph
         return CTRL.sub("", s.replace("\t", "    ")).translate(SPACES)
 
-    def scale_for(self, size: str | None, line: int, say: bool = True) -> tuple[int, int]:
-        """A size as GS ! scales (width, height); say=False: without saying what it does (F303, M101), only to
-        compare sizes."""
+    def scale_for(self, size: str | None, line: int, fallback: tuple[int, int] | None = None,
+                  span: bool = False) -> tuple[int, int]:  # fmt: skip
+        """A size= as printer-font multipliers (width, height). A multiplier GS ! cannot take (0x, 9x): M101 and
+        `fallback` (a span: its line's; a heading: its own), else the document's size. span: said as a span's."""
         if not size:
             size = self.size
         named = self.p.get("native.sizes", {})
         if size in named:
             return tuple(named[size])
-        m = SIZE_RE.match(size)
+        m = MULTIPLIER_RE.match(size)
         if m:
             w = int(m.group(1))
             h = int(m.group(2) or m.group(1))
-            return (w, h)
+            if 1 <= w <= GS_MAX and 1 <= h <= GS_MAX:
+                return (w, h)
+            where = " on a span" if span else ""
+            self.n.add("M101", f"size={size}{where}: the printer font takes 1x to {GS_MAX}x", line, MULTIPLIER_HINT)
+            return fallback or (self.scale_for(None, line) if size != self.size else (1, 1))
         m = UNIT_RE.match(size)
         if m:
             v = float(m.group(1))
             dots = v if m.group(2) == "px" else self.p.mm_to_dots(v)
             s = max(1, min(4, round(dots / self.p.cell[1])))
-            if say:
-                self.n.add(
-                    "F303",
-                    f"size {size} printed natively at {s}x",
-                    line,
-                    "set a raster font (fonts: body: Atkinson Hyperlegible) for exact sizes",
-                )
+            said = f"on a span: the printer font's nearest, {s}x" if span else f"printed natively at {s}x"
+            self.n.add("F303", f"size {size} {said}", line,
+                       "set a raster font (fonts: body: Atkinson Hyperlegible) for exact sizes")  # fmt: skip
             return (s, s)
-        if say:
-            self.n.add("M101", f"unknown size '{size}'", line, "small, normal, large, title, huge, 2x, 1x2, 20px, 3mm")
+        self.n.add("M101", f"unknown size '{size}'", line, "small, normal, large, title, huge, 2x, 1x2, 20px, 3mm")
         return (1, 1)
 
-    def cells_from_runs(self, runs: list[Run], extra: dict) -> list[Cell | None]:
-        """Runs -> cells; None marks a forced line break."""
+    @staticmethod
+    def stretch(size) -> tuple[int, int] | None:
+        """(width, height) of a printer multiplier taller than wide or wider than tall (1x2, 2x1): the printer font
+        stretches its cells (GS !) and keeps its columns, where a raster font can only scale evenly (F303)."""
+        m = SIZE_RE.match(str(size or ""))
+        wh = (int(m.group(1)), int(m.group(2))) if m and m.group(2) else (0, 0)
+        return wh if min(wh) > 0 and wh[0] != wh[1] else None  # 1x0: a size of nothing (F205, as before)
+
+    def jagged(self, scale: tuple[int, int], line: int) -> None:
+        """F303 for a multiplier the printer draws jagged (above 4x on most)."""
+        ok = self.p.get("native.scales_ok", [1, 2, 3, 4])
+        if scale[0] not in ok or scale[1] not in ok:
+            self.n.add("F303", f"size {scale[0]}x{scale[1]} is jagged on this printer", line, "use up to 4x", "N1")
+
+    def cells_from_runs(self, runs: list[Run], extra: dict, sized=None) -> list[Cell | None]:
+        """Runs -> cells; None marks a forced line break. sized(run): the GS ! size of a span's own size= (None:
+        the line's), kept on each of its cells."""
         out: list[Cell | None] = []
         for r in runs:
             if r.text == "\n":
                 out.append(None)
                 continue
+            own = sized(r) if sized and r.size else None
             for ch in self.text(r.text):
                 if ch == "\n":
                     out.append(None)
@@ -354,28 +394,41 @@ class Layout:
                         italic=r.italic or extra.get("italic", False),
                         strike=r.strike or extra.get("strike", False),
                         wide=is_wide(ch),
+                        scale=own,
                     )
                 )
         return out
 
-    def wrap(self, cells: list[Cell | None], cap: int, hang: int, line: int) -> list[list[Cell]]:
-        """Greedy word wrap on columns; `hang` columns already used on continuation lines."""
+    def wrap(self, cells: list[Cell | None], cap: int, hang: int, line: int, measure=columns,
+             unit: int = 1) -> list[list[Cell]]:  # fmt: skip
+        """Greedy word wrap on columns; `hang` columns already used on continuation lines. measure, unit: a line
+        whose spans have their own size is measured in dots (cap too), `unit` dots to a column of the line."""
 
         def split(word, at):
-            self.word_split("".join(c.ch for c in word), at, line)
+            hint = "shorten it or use a smaller size"
+            self.said_cut("".join(c.ch for c in word), f"{at // unit} columns", line, hint)
 
         lines: list[list[Cell]] = []
         para: list[Cell] = []
         for c in cells:
             if c is None:
-                lines += wrap_words(word_tokens(para), cap, hang, split)
+                lines += wrap_words(word_tokens(para), cap, hang, split, measure)
                 para = []
             else:
                 para.append(c)
-        return lines + wrap_words(word_tokens(para), cap, hang, split)
+        return lines + wrap_words(word_tokens(para), cap, hang, split, measure)
+
+    def said_cut(self, word: str, at: str, line: int, hint: str, around: str = "") -> None:
+        """L101 for a word longer than the line, cut to fill lines (`at`: the line's width, as it is counted); an
+        address is better carried by a QR code (looked for in `around` too: a table cell's whole text, as its words
+        reach wrap_words in pieces)."""
+        if any(m in (word + " " + around).lower() for m in ("://", "www.")):
+            hint += "; a ```qr block carries the address whole"
+        self.n.add("L101", f"word '{''.join(icons.shown(ch) for ch in word)[:20]}…' split at {at}", line, hint)
 
     def native_ok(self, cells: list[Cell]) -> str:
-        """'' if the line can be printed natively, else the reason."""
+        """'' if the line can be printed natively, else the reason. Letters of a span's own size: GS ! would stand
+        each size on its cells' feet, not on one baseline, so the line is drawn in the printer font's look."""
         icon = False
         for c in cells:
             if c.italic:
@@ -389,6 +442,8 @@ class Layout:
                 continue
             if c.ch != " " and not self.p.native_glyph(c.ch):
                 return f"glyph {c.ch}"
+        if any(c.scale for c in cells):  # after the reasons that are said (a glyph the printer lacks: F301)
+            return "sizes"
         return "icon" if icon else ""
 
     def drawn_whole(self, runs) -> str:
@@ -563,7 +618,6 @@ class Layout:
                             strike=r.strike or extra.get("strike", False),
                             invert=r.invert,
                             heavy=heavy,
-                            stretch=r.stretch,
                             space=txt.isspace(),
                             glue=k > 0,  # the parts of one word stay on one line
                             icon=icons.name_of(txt) or "" if len(txt) == 1 else "",
@@ -584,7 +638,7 @@ class Layout:
             else:
                 t = rasterfont.Tok(ptxt, self.font_path(fam, False, px, line), px)
                 asc, desc = t.font.getmetrics()
-                pimg = rasterfont.draw_tok(t, asc, asc + desc)
+                pimg = rasterfont.draw_tok(t, asc, asc + desc, px)
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)),
             "right" if rtl and "align" not in self.doc.meta else self.align,  # Arabic, Hebrew: from the right
@@ -604,67 +658,56 @@ class Layout:
             self.white_note(f"{thin}px", line)
         if not toks:
             return []
+
+        def split(word, room):  # a word wider than the line, cut: its width in columns of its font (its digit)
+            t = next((t for t in word if not t.icon), word[0])
+            cols = room * 10 // max(1, replace(t, text="0" * 10, icon="", italic=False).width())  # no slant
+            name = f"{fam} {t.px}px"  # the block's font: a word in a run of another font= is rare
+            smaller = "use a smaller size (size=12px) or " if t.px > 12 else ""
+            self.said_cut("".join(x.text for x in word), f"{cols} columns in {name}", line,
+                          f"{smaller}add a space or a hyphen to the word")  # fmt: skip
+
+        room = self.W - indent * self.p.cell[0] - indent_dots - (pimg.width if pimg else 0)  # render_block's
+        if room < rasterfont.letter_width(toks):  # as the printer font says it (layout_lines cuts nothing then)
+            self.n.add(
+                "L101", "indent and letter spacing leave no room on the line", line, "reduce indent= or tracking="
+            )
         im, texts = rasterfont.render_block(
-            toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl,
-            split=lambda word, at: self.word_split(word, at, line),
-        )  # fmt: skip
+            toks, self.W, align, leading, pimg, indent * self.p.cell[0] + indent_dots, rtl=rtl, split=split
+        )
         view_rows = [
             TextRow(
-                self.view_with_bars(self.view_cells(t), indent, rtl),
+                self.view_with_bars(self.view_cells(t, room), indent, rtl),
                 (1, 1),
                 "left" if align == "justify" else align,
                 line,
             )  # fmt: skip
             for t in texts
         ]
+        wide = self.smaller_font(toks) and any(r.columns() > self.cols for r in view_rows)  # the views widen
+        if (attrs.has("invert") or self.dark) and px < int(self.p.get("raster.invert_min_px", 20)):
+            self.n.add(  # white on black, in its own band or in an inverted box (below 48 px it is bold: F206)
+                "F204", f"inverted text at {px}px closes up", line, "use 20px or more", "R2-12"
+            )
         if attrs.has("invert"):
             m = int(self.p.get("raster.invert_margin_dots", 4))
             band = Image.new("L", (self.W, im.height + 2 * m), 255)
             band.paste(im.convert("L"), (0, m))
             band = self.draw_bars(band, indent, 0, rtl)  # black here: white once the band is inverted
-            if px < int(self.p.get("raster.invert_min_px", 20)):
-                self.n.add("F204", f"inverted text at {px}px closes up", line, "use 20px or more", "R2-12")
-            view_rows = [_as_paper(r) for r in view_rows]
-            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band", view_rows)]
-        return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows)]
+            return [BitmapRow(ImageOps.invert(band).convert("1", dither=Image.NONE), line, "band",
+                              [_as_paper(r) for r in view_rows], wide_view=wide)]  # fmt: skip
+        return [BitmapRow(self.draw_bars(im, indent, 0, rtl), line, "text", view_rows, wide_view=wide)]
 
-    def printer_px(self, runs: list[Run], line: int, scale: tuple[int, int]) -> list[Run]:
-        """Runs drawn in the printer font's look (Spleen) on a line that cannot be native: each as GS ! would size
-        it, its height in dots and as many times as wide (size=large: 2x, 48 dots; 2x1: 24 dots, twice as wide;
-        the line's own size for a run without one); an exact size (20px, 3mm) as it says."""
-        out = []
-        for r in runs:
-            if r.size and UNIT_RE.match(r.size):
-                out.append(r)
-                continue
-            sw, sh = self.scale_for(r.size, line) if r.size else scale
-            out.append(replace(r, size=f"{self.p.cell[1] * sh}px", stretch=sw / sh))
-        return out
-
-    def word_split(self, word: str, at: int, line: int) -> None:
-        """L101: a word wider than the line, cut after `at` letters (native lines, drawn lines alike)."""
-        self.n.add("L101", f"word '{''.join(icons.shown(ch) for ch in word)[:20]}…' split at {at} columns", line,
-                   "shorten it or use a smaller size")  # fmt: skip
-
-    def span_idle(self, runs: list[Run], line: int) -> None:
-        """M101 for what a span's {…} gave that a span does not take: [x]{.center} does nothing."""
-        idle = sorted({n for r in runs for n in r.idle})
-        if idle:
-            self.n.add("M101", f"{' '.join(idle)} on part of a line does nothing: a span takes .bold .italic "
-                       ".underline .strike .invert .mono font= size=", line,
-                       "a whole line's {…} goes at its end: Total {.center}")  # fmt: skip
-
-    def whiten(self, cells: list, whole: bool, px: int, line: int, size: str, table: bool = False,
+    def whiten(self, cells: list, whole: bool | list[bool], line: int, size_of, table: bool = False,
                untested: bool = True) -> list:  # fmt: skip
-        """The cells that print white on black (whole: on a black band or box, where a cell's own .invert turns it
-        back to black), when smaller than the paper holds (Profile.invert_bold), heavy and bold (whiten); F206 says
-        so when one was not bold, P301 that it is not tested on paper (untested=False: a raster bold face, R2-12)."""
-        if not self.p.invert_bold(px):
-            return cells
-        out, thin = whiten(cells, whole)
+        """The cells that print white on black (whole: on a black band, where a cell's own .invert turns it back to
+        black), when smaller than the paper holds (Profile.invert_bold), heavy and bold
+        (whiten). size_of(cell): its height in dots and the size said for it (1x, 2x1, 20px). F206 says so when one
+        was not bold, P301 that it is not tested on paper (untested=False: a raster bold face, R2-12)."""
+        out, thin = whiten(cells, whole, lambda c: self.p.invert_bold(size_of(c)[0]))
         if untested and any(c is not None and c.heavy for c in out):
             self.untested.add("inverted-bold")
-        if thin:
+        for size in dict.fromkeys(size_of(c)[1] for c in thin):
             self.white_note(size, line, table)
         return out
 
@@ -694,17 +737,40 @@ class Layout:
         self.n.add("F206", f"inverted text printed bold ({'; '.join(parts)}): ink fills thin white strokes", first,
                    f"nothing to fix; size={k}x or {least}px and larger keep their weight")  # fmt: skip
 
-    def view_cells(self, toks) -> list[Cell]:
-        """A line of drawn text as cells for the terminal views, within the paper's columns: inverted words stay
-        inverted (the rest of a drawn line is plain, as on paper)."""
-        out, used = [], 0
+    def printer_size(self, scale: tuple[int, int]):
+        """size_of for whiten: a printer-font cell's height in dots and its size (2x, 1x2), at its own scale (a
+        span's size=) or the line's."""
+
+        def size_of(c: Cell) -> tuple[int, str]:
+            w, h = c.scale or scale
+            return self.p.cell[1] * min(w, h), f"{w}x" if w == h else f"{w}x{h}"
+
+        return size_of
+
+    def view_cells(self, toks, room: int) -> list[Cell]:
+        """A line of drawn text as cells for the terminal views, every letter the paper shows (in a smaller font,
+        more than the paper's columns: the views widen), a letter or icon wider than the line's `room` dots (left
+        whole by layout_lines, which cuts longer words onto new lines) cut where the paper cuts it. Inverted words
+        stay inverted (the rest of a drawn line is plain, as on paper)."""
+        out, x = [], 0
         for t in toks:
-            for ch in t.text:
-                used += 2 if is_wide(ch) else 1
-                if used > self.cols:
-                    return out
-                out.append(Cell(ch, wide=is_wide(ch), invert=t.invert))
+            w = t.width()
+            k = len(t.text)
+            while k and x + w > room and replace(t, text=t.text[:k]).width() > room - x:
+                k -= 1  # the letters whose advance ends on the paper (render_block draws past it: the paper cuts it)
+            out += [Cell(ch, wide=is_wide(ch), invert=t.invert) for ch in t.text[:k]]
+            x += w
         return out
+
+    def smaller_font(self, toks) -> bool:
+        """Text drawn in a smaller font than the printer's: a digit narrower than a printer column (Terminus 16px: 8
+        dots of 12), so its lines can hold more letters than the paper's columns and the views widen for them. A
+        proportional font at the same size or larger keeps the paper's columns (a long line cut with …). An icon
+        (two columns in the views) counts when it is drawn narrower than two printer columns."""
+        drawn = [t for t in toks if t.text.strip()]
+        cell = self.p.cell[0]
+        return bool(drawn) and all(t.width() < 2 * cell if t.icon else replace(t, text="0").width() < cell
+                                   for t in drawn)  # fmt: skip
 
     def text_block(
         self,
@@ -721,13 +787,27 @@ class Layout:
         level: int = 0,
     ) -> list:
         extra = dict(extra or {})
-        self.span_idle(runs, line)
+        if self.dark and attrs.has("invert"):  # its band would print black on white in the box's black
+            self.n.add("M101", ".invert does nothing inside an inverted box: its text is white on black already",
+                       line, "remove .invert here")  # fmt: skip
+            attrs = Attrs(attrs.classes - {"invert"}, dict(attrs.kv))
         tracking = self.attr_dots(attrs, "tracking", line, 32) or 0
         leading = self.attr_dots(attrs, "leading", line, 200)
         raw_indent = str(attrs.kv.get("indent", ""))
         indent_dots = self.attr_dots(attrs, "indent", line, self.W // 2) or 0
         indent_is_columns = raw_indent.isdigit()  # indent=4 means 4 columns; 4px / 2mm are physical
         fam = self.raster_family(attrs, role, runs)
+        # render=raster on the printer font at 1x2 or 2x1: its stretched cells, drawn as the printer draws them
+        # (a raster font cannot stretch: it would scale evenly)
+        emulated = bool(
+            fam == "Spleen"
+            and attrs.kv.get("render") == "raster"
+            and self.stretch(attrs.kv.get("size"))
+            and self.family(attrs.kv.get("font") or self.fonts.get(role, "native")).lower() == "native"
+            and not any(r.font or r.mono or r.size for r in runs)
+        )  # a span's own font or size: raster
+        if emulated:
+            fam = None
         if fam is not None:
             named = {1: "title", 2: "large", 3: "normal"}.get(level) if role == "title" else None
             fallback = rasterfont.px_for(named or self.size, self.p, 20)  # an unreadable size= falls back to it
@@ -746,25 +826,17 @@ class Layout:
                 leading=leading,
                 indent_dots=indent_dots * (self.p.cell[0] if indent_is_columns else 1),
             )
-        scale = scale or self.scale_for(attrs.kv.get("size"), line)
-        sizes = {self.scale_for(r.size, line, say=False) if r.size else scale for r in runs if r.text.strip()}
-        if len(sizes) == 1:  # every word one size (a span alone on its line): the line's, natively
-            scale = next(iter(sizes))
-            for r in runs:  # what that size does natively (F303), said for the native line
-                if r.size:
-                    self.scale_for(r.size, line)
         drawn = self.drawn_whole(runs)
-        if drawn or len(sizes) > 1:  # Thai, Arabic, Devanagari…: letters join, stack or run right to left, so never
-            # cell by cell; or sizes mixed on a line (a span's size=): one line, as tall as its tallest part
-            if drawn:
-                self.n.add(
-                    "F301",
-                    f"glyph {drawn} is not in the printer font: line printed as an image",
-                    line,
-                    "keep it (fine) or use a character from the native set",
-                )
+        if drawn:  # Thai, Arabic, Devanagari…: letters join, stack or run right to left, so never cell by cell
+            scale = scale or self.scale_for(attrs.kv.get("size"), line)
+            self.n.add(
+                "F301",
+                f"glyph {drawn} is not in the printer font: line printed as an image",
+                line,
+                "keep it (fine) or use a character from the native set",
+            )
             return self.raster_block(
-                self.printer_px(runs, line, scale),
+                runs,
                 "Spleen",  # the printer font's look for the letters it has
                 line=line,
                 attrs=attrs,
@@ -782,22 +854,36 @@ class Layout:
         for k in ("italic", "underline", "strike"):
             if attrs.has(k):
                 extra[k] = True
-        if scale[0] not in self.p.get("native.scales_ok", [1, 2, 3, 4]) or scale[1] not in self.p.get(
-            "native.scales_ok", [1, 2, 3, 4]
-        ):
-            self.n.add("F303", f"size {scale[0]}x{scale[1]} is jagged on this printer", line, "use up to 4x", "N1")
+        scale = scale or self.scale_for(attrs.kv.get("size"), line)
+        self.jagged(scale, line)
         align = attrs.kv.get("align") or next(
             (a for a in ("center", "right", "left", "justify") if attrs.has(a)), self.align
         )
-        cells = self.cells_from_runs(runs, extra)
-        size = f"{scale[0]}x" if scale[0] == scale[1] else f"{scale[0]}x{scale[1]}"
+        sizes: dict[str, tuple[int, int]] = {}
+
+        def sized(r: Run) -> tuple[int, int] | None:  # a span's size= as the line's size= maps it (F303, M101)
+            if r.size not in sizes:
+                own = self.scale_for(r.size, line, scale, span=True)  # one GS ! cannot take: the line's
+                self.jagged(own, line)
+                sizes[r.size] = own
+            return None if sizes[r.size] == scale else sizes[r.size]
+
+        cells = self.cells_from_runs(runs, extra, sized)
         whole = attrs.has("invert")
         if any(r.white for r in runs):  # each cell as its run says (a black chat bubble)
             whole = [whole or r.white for r in runs for _ in ([None] if r.text == "\n" else self.text(r.text))]
-        cells = self.whiten(cells, whole, self.p.cell[1] * min(scale), line, size)
+        cells = self.whiten(cells, whole, line, self.printer_size(scale))
         prefix = prefix or []
         pw = columns(prefix)
         advance = self.p.cell[0] * scale[0] + self.p.tracking_gap(tracking, scale[0])  # as the printer spaces them
+        measure, unit = columns, 1  # columns of the line's size; spans of their own size: dots
+        if any(c is not None and c.scale for c in cells):
+
+            def measure(cs: list[Cell]) -> int:
+                return sum((2 if c.wide else 1) * self.p.cell[0] * (c.scale or scale)[0]
+                           + self.p.tracking_gap(tracking, (c.scale or scale)[0]) for c in cs)  # fmt: skip
+
+            unit = advance
         gutter = indent  # columns at 1x: quote gutters and list indents
         quoted = bool(self.bars_in(gutter))
         drawn_bars = quoted and scale[0] > 1  # a 2x line cannot hold a 1x │: drawn into it as an image
@@ -811,22 +897,27 @@ class Layout:
                 "L101", "indent and letter spacing leave no room on the line", line, "reduce indent= or tracking="
             )
             cap = pw + 1
-        if leading is not None and self.p.cell[1] * scale[1] + leading > 255:
-            self.n.add("M101", f"leading={leading} too large for {scale[1]}x height", line)
-        lines = self.wrap(cells, cap - pw, 0, line)
+        tallest = max([scale[1], *(c.scale[1] for c in cells if c is not None and c.scale)])
+        if leading is not None and self.p.cell[1] * tallest + leading > 255:
+            self.n.add("M101", f"leading={leading} too large for {tallest}x height", line)
+        lines = self.wrap(cells, (cap - pw) * unit, 0, line, measure, unit)
         rows = []
         for i, lc in enumerate(lines):
             if align == "justify" and i < len(lines) - 1:
-                lc = _justify(lc, cap - pw)
+                lc = _justify(lc, (cap - pw) * unit, measure, unit)
             lead = (self.lead(indent, gutter) if not drawn_bars else [Cell(" ")] * indent) + (
                 prefix if i == 0 else [Cell(" ")] * pw
             )
             row_align = "left" if align == "justify" else align
             if quoted and row_align != "left":  # centred in the room after the bar, never the bar with it
-                free = max(0, cap - pw - columns(lc))
+                free = max(0, (cap - pw) * unit - measure(lc)) // unit
                 lead += [Cell(" ")] * (free // 2 if row_align == "center" else free)
                 row_align = "left"
             cells_line = lead + lc
+            own, line_scale = {c.scale for c in cells_line}, scale
+            if len(own) == 1 and None not in own:  # a line all of one span's size: that size is the line's
+                line_scale = own.pop()
+                cells_line = [replace(c, scale=None) for c in cells_line]
             reason = self.native_ok(cells_line)
             if reason.startswith("glyph"):
                 self.n.add(
@@ -841,7 +932,7 @@ class Layout:
             rows.append(
                 TextRow(
                     cells_line,
-                    scale,
+                    line_scale,
                     row_align,
                     line,
                     native=not reason,
@@ -850,6 +941,8 @@ class Layout:
                     gap=leading,
                 )
             )
+        if emulated and not attrs.has("invert") and not drawn_bars:
+            return [BitmapRow(self.em.render_row(r, self.W, drawn=True), line, "text", [r]) for r in rows]
         if attrs.has("invert"):
             band = self.band(rows, line)
             self.draw_bars(band.image, gutter, 255)  # white, from edge to edge of the band (its margins too)
@@ -860,11 +953,28 @@ class Layout:
                     self.draw_bars(self.em.render_row(r, self.W, drawn=True), gutter, 0),
                     line,
                     "text",
-                    [TextRow([*self.lead(gutter), *r.cells[indent:]], (1, 1), "left", line)],
+                    [self.quoted_view(r, indent, gutter)],
                 )
                 for r in rows
             ]
+        if quoted:  # a span's size= makes a line taller than its │: the bars drawn its whole height, as at 2x
+            return [self.tall_quoted(r, gutter) if r.height() > r.scale[1] else r for r in rows]
         return rows
+
+    def quoted_view(self, row: TextRow, indent: int, gutter: int) -> TextRow:
+        """What the views show for a quoted line wider than 1x (its bars drawn into it): its letters at 1x after
+        the bars; with spans of their own size, every letter at its size (the line's letters at the line's)."""
+        cells = row.cells[indent:]
+        if row.mixed():
+            cells = [c if c.scale else replace(c, scale=row.scale) for c in cells]
+        return replace(row, cells=[*self.lead(gutter), *cells], scale=(1, 1), align="left")
+
+    def tall_quoted(self, row: TextRow, gutter: int) -> BitmapRow:
+        """A quoted line taller than its 1x │ (a span's own size): printed as an image with the quote bars drawn
+        from its top to its foot; the views show its letters as they are, the bars on each of their lines."""
+        bare = replace(row, cells=[replace(c, ch=" ") if c.ch == QUOTE_BAR else c for c in row.cells])
+        return BitmapRow(self.draw_bars(self.em.render_row(bare, self.W, drawn=True), gutter, 0), row.line, "text",
+                         [row])  # fmt: skip
 
     def band(self, rows: list[TextRow], line: int) -> BitmapRow:
         """Continuous inverted band (GS B leaves spaces white, so it goes raster)."""
@@ -950,7 +1060,7 @@ class Layout:
             if not math.isfinite(ang):  # nan, inf: no turn PIL can draw (it raised)
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"rotate={rot}", line, "0, 90, 180, 270 or degrees")
+            self.n.add("M101", not_a_value("rotate", rot, "not turned"), line, "0, 90, 180, 270 or degrees")
             return 0.0
         if ang % 90 and not image:
             self.n.add("B102", f"rotate={ang:g}: slanted strokes look jagged at {self.p.dpi} dpi", line,
@@ -964,18 +1074,23 @@ class Layout:
         pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows]
         im = self.stacked(pics, self.W)
         codes = _code_spans(rows, pics)
+        keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         box = ImageOps.invert(im).getbbox()
         if box:
             im = im.crop(
                 (max(0, box[0] - 4), max(0, box[1] - 4), min(im.width, box[2] + 4), min(im.height, box[3] + 4))
             )
             codes = tuple((a - max(0, box[1] - 4), b - max(0, box[1] - 4), k) for a, b, k in codes)
+            dx, dy = -max(0, box[0] - 4), -max(0, box[1] - 4)
+            keep, darks = _moved(keep, dx, dy), _moved(darks, dx, dy)
+        size = im.size
         im = im.rotate(
             -ang,
             expand=True,
             fillcolor=255,  # minus: clockwise, like CSS
             resample=Image.NEAREST if ang % 90 == 0 else Image.BICUBIC,
         )
+        keep, darks = self.turned_rects(keep, size, ang, line), _turned_rects(darks, size, ang) or ()
         if im.width > self.W:
             self.n.add(
                 "L104",
@@ -983,17 +1098,22 @@ class Layout:
                 line,
                 "shorten the lines or use rotate=90/270",
             )
-            im = im.crop(((im.width - self.W) // 2, 0, (im.width - self.W) // 2 + self.W, im.height))
+            cut = (im.width - self.W) // 2
+            im = im.crop((cut, 0, cut + self.W, im.height))
+            keep, darks = _moved(keep, -cut, 0), _moved(darks, -cut, 0)
         align = attrs.kv.get("align") or next((x for x in ("left", "right", "center") if attrs.has(x)), "center")
         bw = im.point(lambda v: 0 if v < 128 else 255).convert("1", dither=Image.NONE)
         marks = tuple(sorted({u for r in rows if isinstance(r, BitmapRow) for u in r.untested}))  # P301 stays
         spans = _turned_spans(codes, bw.height, ang)
-        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks, code_spans=spans)
+        at = max(0, {"left": 0, "right": self.W - bw.width}.get(align, (self.W - bw.width) // 2))
+        return BitmapRow(imaging.place(bw, self.W, align), line, "rotated", untested=marks, code_spans=spans,
+                         keep=_moved(keep, at, 0), dark=_moved(darks, at, 0))  # fmt: skip
 
     def _block(self, b, indent: int) -> list:
         if isinstance(b, Heading):
             h = self.p.get(f"native.headings.h{min(b.level, 3)}", {"scale": [1, 1], "bold": True})
-            scale = self.scale_for(b.attrs.kv["size"], b.line) if "size" in b.attrs.kv else tuple(h["scale"])
+            scale = tuple(h["scale"])
+            scale = self.scale_for(b.attrs.kv["size"], b.line, scale) if "size" in b.attrs.kv else scale
             return self.text_block(
                 b.runs,
                 line=b.line,
@@ -1021,8 +1141,8 @@ class Layout:
             return self.fence(b, indent)
         if isinstance(b, ImageBlock):
             return self.image(b.src, b.attrs, b.line, b.alt)
-        if isinstance(b, Table):
-            return self.table(b, indent)
+        if isinstance(b, Table):  # a chart, or rows from a data= file: charts.py
+            return charts.table_block(self, b, indent) if charts.claims(b) else self.table(b, indent)
         if isinstance(b, Div):
             if b.attrs.has("columns"):
                 return self.columns(b, indent)
@@ -1114,7 +1234,7 @@ class Layout:
         title = " ".join(self.text(raw).split())
         how = a.kv.get("title-style", "border")
         if how not in TITLE_STYLES:
-            self.n.add("M101", f"title-style={how}", line, "border, inside or band")
+            self.n.add("M101", not_a_value("title-style", how, "border, the default"), line, "border, inside or band")
             how = "border"
         if "title-style" in a.kv and not title:
             self.n.add("M101", f"title-style={how} with no title=: nothing to place", line, 'title="TABLE 4"')
@@ -1146,6 +1266,17 @@ class Layout:
         if t < asked:
             self.n.add("M101", f"thickness={a.kv['thickness']}: no room for that line in a {width // cw}-letter "
                        f"box, {t} dots used", line, "a wider box, or a thinner line")  # fmt: skip
+        dark = a.has("invert")  # all black, frame and room too; what it holds white
+        if dark and self.dark:
+            self.n.add("M101", ".invert does nothing on a box inside an inverted box: it is white on black already",
+                       line, "remove .invert here")  # fmt: skip
+            dark = False
+        if dark and a.has("shade"):
+            self.n.add("M101", ".shade does nothing on an inverted box: it is black", line, "remove .shade")
+        if dark and (drawn or "thickness" in a.kv):
+            names = [*(f".{s}" for s in drawn), *(["thickness="] if "thickness" in a.kv else [])]
+            self.n.add("M101", f"{' '.join(names)}: an inverted box has no line to draw, it is black to its edges",
+                       line, f"remove {' '.join(names)}")  # fmt: skip
         stroke = 3 * t if style == "double" else t
         side = _box_side(t, style, cw)
         inner = width - 2 * side
@@ -1156,9 +1287,10 @@ class Layout:
         top = max(0, (ch - stroke) // 2) if on_border else 0  # the title sits across the top line, never clipped
         title_y = max(0, top + stroke // 2 - ch // 2)
         ang = self.angle(a, line) % 360
-        outer = self.tall_max
+        outer, was_dark, was_lost = self.tall_max, self.dark, self.dark_lost
         try:
             with self.narrow(inner):
+                self.dark = False  # the band is the box's own: inside an inverted box it prints the other way round
                 band = (self.text_block([Run(raw)], line=line, attrs=Attrs({"invert", "center"}), bold=True)
                         if title and how == "band" else [])  # fmt: skip
                 band_pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in band]
@@ -1167,14 +1299,16 @@ class Layout:
                     above = max(top + stroke + (band_im.height if band_im else 0) + BOX_ROOM,  # title take off
                                 title_y + ch + 2 if on_border else 0)  # fmt: skip
                     self.tall_max = max(1, outer - above - BOX_ROOM - stroke)  # (turned 90: its width; the cuts)
+                self.dark, self.dark_lost = was_dark or dark, was_lost and not dark  # its own tiles: kept here
                 rows = self.blocks(kids, 0)
                 raws = [r for r in rows if isinstance(r, RawRow)]
                 rows = [r for r in rows if not isinstance(r, RawRow)]
                 pics = [preview.row_image(r, self.p, self.em, drawn=True) for r in rows]
                 body = self.stacked(pics, inner) if any(not isinstance(r, FeedRow) for r in rows) else None
         finally:
-            self.tall_max = outer
+            self.tall_max, self.dark, self.dark_lost = outer, was_dark, was_lost
         codes = _code_spans(rows, pics)
+        keep, darks = _stacked_rects(rows, pics, "keep"), _stacked_rects(rows, pics, "dark")
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a box: its bytes are sent after the box", raws[0].line,
                        "put the raw block after the ::: line that closes the box")  # fmt: skip
@@ -1193,25 +1327,40 @@ class Layout:
             y += max(2, BOX_ROOM - lead, under)
             parts.append((body, side, y))
             codes = tuple((y + a, y + b, k) for a, b, k in codes)
+            keep, darks = _moved(keep, side, y), _moved(darks, side, y)
             tops += _tops(pics, y)
             y += body.height + max(2, BOX_ROOM - trail)
         else:
             y += BOX_ROOM
         height = y + stroke
-        im = imaging.frame(width, height, style, t, top).convert("L")
+        im = Image.new("L", (width, height), 255) if dark else imaging.frame(width, height, style, t, top).convert("L")
         for part, x, py in parts:
             im.paste(part, (x, py))
-        if a.has("shade"):  # the whole inside, 2 dots clear of the frame; the halo keeps it off the letters
+        if a.has("shade") and not dark:  # the whole inside, 2 dots clear of the frame; the halo: off the letters
             im = imaging.shade(im, (stroke + 2, shade_top + 2, width - stroke - 2, height - stroke - 2))
         shown = self.border_title(im, title, line, top, stroke, title_y) if on_border else ""
+        if dark:  # one black band from edge to edge, no white between its blocks; a band title stays as it is
+            plain, im = im, ImageOps.invert(im)
+            for part, x, py in parts[:1] if band_im is not None else ():
+                im.paste(part, (x, py))
+            for rect in keep:  # each code's white tile, laid out with its quiet zone (code_tile): black on white
+                im.paste(plain.crop(rect), rect[:2])
+            if keep:
+                self.n.add("Q114", "a code in an inverted box prints black on white, in its white margin, so it scans",
+                           line, "put it outside the box for an unbroken band")  # fmt: skip
+            keep, darks = [], [(0, 0, width, height)]
         if ang:
             exact = Image.NEAREST if ang % 90 == 0 else Image.BICUBIC
+            size = im.size
             im = im.rotate(-ang, expand=True, fillcolor=255, resample=exact)
             codes = _turned_spans(codes, im.height, ang)
+            keep, darks = self.turned_rects(keep, size, ang, line), _turned_rects(darks, size, ang) or []
             if im.width > room:
                 self.n.add("L104", f"turned box is {im.width} dots wide: cropped to {room}", line,
                            "a narrower box, or rotate=90/270 of a short one")  # fmt: skip
-                im = im.crop(((im.width - room) // 2, 0, (im.width - room) // 2 + room, im.height))
+                cut = (im.width - room) // 2
+                im = im.crop((cut, 0, cut + room, im.height))
+                keep, darks = _moved(keep, -cut, 0), _moved(darks, -cut, 0)
         self.align_word(a, line)
         if a.kv.get("align") == "justify":  # spreads text; a box is only placed
             self.n.add("M101", "align=justify", line, "left, center or right")
@@ -1225,11 +1374,14 @@ class Layout:
         full.paste(im, (place(im.width), 0))
         full = self.draw_bars(full, indent, 0)  # after the turn: the bars stay upright, beside the box
         marks = {u for r in [*band, *rows] if isinstance(r, BitmapRow) for u in r.untested} | {"box"}
+        marks |= {"inverted-box"} if dark else set()
         lead = "".join(c.ch for c in self.lead(indent))
         left = min(place(im.width), indent * cw + room - width) // cw  # where it is, as far as it fits standing
         view = Boxed([*band, *rows], inner, left, width // cw, shown, style, lead, ang,
-                     tuple(tops) if not ang and len(tops) == len(band) + len(rows) else ())  # fmt: skip
-        return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes), *raws]
+                     tuple(tops) if not ang and len(tops) == len(band) + len(rows) else (), invert=dark)  # fmt: skip
+        at = place(im.width)
+        return [BitmapRow(_bw(full), line, "box", untested=tuple(sorted(marks)), box=view, code_spans=codes,
+                          keep=_moved(keep, at, 0), dark=_moved(darks, at, 0)), *raws]  # fmt: skip
 
     def box_width(self, a: Attrs, line: int, room: int) -> int:
         """width= of a box, of the room it has (a quote's or a list's is narrower than the paper): full, half,
@@ -1302,7 +1454,10 @@ class Layout:
         wrap = a.kv.get("wrap", "nowrap")
         if wrap not in WRAPS:
             self.n.add(
-                "M101", f"wrap={wrap}", line, "nowrap (squeezed side by side: the default), wrap or wrap-reverse"
+                "M101",
+                not_a_value("wrap", wrap, "nowrap, the default"),
+                line,
+                "nowrap (squeezed side by side: the default), wrap or wrap-reverse",
             )
             wrap = "nowrap"
         valign = self.valign(a, line, "top")
@@ -1313,10 +1468,11 @@ class Layout:
         aligns = [self.valign(c.attrs, c.line, valign) for c in cols]
         outer, self.wrapping = self.wrapping, wrap != "nowrap"
         if turned:
+            lost, self.dark_lost = self.dark_lost, self.dark_lost or self.dark  # turned: their tiles are not kept
             try:
                 return self.columns_turned(cols, asked, aligns, gap, wrap, a, line)
             finally:
-                self.wrapping = outer
+                self.wrapping, self.dark_lost = outer, lost
         try:
             rows = self.column_rows(cols, asked, room, gap, wrap, line)
             if wrap == "wrap-reverse":
@@ -1338,7 +1494,7 @@ class Layout:
             return default
         if given in VALIGNS:
             return VALIGNS[given]
-        self.n.add("M101", f"valign={given}", line, "top, middle or bottom")
+        self.n.add("M101", not_a_value("valign", given, "the default"), line, "top, middle or bottom")
         return default
 
     def column_gap(self, a: Attrs, line: int) -> int:
@@ -1354,7 +1510,7 @@ class Layout:
             return 0
         dots, _ = self.trial(lambda: self.object_width(given, line, GAP_HINT))  # said below, as gap=
         if dots is None:
-            self.n.add("M101", f"gap={given}", line, GAP_HINT)
+            self.n.add("M101", not_a_value("gap", given, "a gap of one column"), line, GAP_HINT)
             return 1
         return round(dots / self.p.cell[0])
 
@@ -1547,13 +1703,17 @@ class Layout:
         (by its ink: middle centres it on the tallest column's ink), the quote bars beside them."""
         cw = self.p.cell[0]
         widths, g = self.said_widths(asked, room, gap, a, line, "row")
-        parts, raws = [], []
+        parts, raws, rects = [], [], []
         for c, w in zip(cols, widths, strict=True):
             rows, raw, pics = self.laid_column(c, w)
             raws += raw
             im = self.stacked(pics, w * cw) if any(not isinstance(r, FeedRow) for r in rows) else None
             lead, trail = _blank_edges(im) if im is not None else (0, 0)
+            keep = _stacked_rects(rows, pics, "keep")
+            if keep:  # a code's white tile is part of it, never white to leave out
+                lead, trail = min(lead, *(r[1] for r in keep)), min(trail, *(im.height - r[3] for r in keep))
             parts.append((rows, im, lead, 0 if im is None else im.height - lead - trail, _code_spans(rows, pics)))
+            rects.append((keep, _stacked_rects(rows, pics, "dark")))
         if raws:
             self.n.add("M101", "a ```raw block cannot go inside a column: its bytes are sent after the columns",
                        raws[0].line, "put the raw block after the line of colons that closes the columns")  # fmt: skip
@@ -1567,10 +1727,11 @@ class Layout:
             ys.append(at - lead if h else 0)  # only the white above a column's ink goes past the top
         height = max(top + tall, *(y + im.height for (_, im, _, h, _), y in zip(parts, ys, strict=True) if h))
         full = Image.new("L", (self.W, height), 255)
-        x, views = indent * cw, []
-        for (rows, im, _, h, _), w, y, va in zip(parts, widths, ys, aligns, strict=True):
+        x, views, keep, darks = indent * cw, [], (), ()
+        for (rows, im, _, h, _), w, y, va, (k, dk) in zip(parts, widths, ys, aligns, rects, strict=True):
             if h:
                 full.paste(im, (x, y))
+                keep, darks = keep + _moved(k, x, y), darks + _moved(dk, x, y)
             views.append(Column(rows, w * cw, x // cw, max(0, y), va))
             x += (w + g) * cw
         full = self.draw_bars(full, indent, 0)
@@ -1578,8 +1739,8 @@ class Layout:
         lead = "".join(c.ch for c in self.lead(indent))
         view = Columned(views, lead)
         spans = tuple((y + a, y + b, k) for (*_, codes), y in zip(parts, ys, strict=True) for a, b, k in codes)
-        return [BitmapRow(_bw(full), line, "columns", untested=tuple(sorted(marks)), columns=view, code_spans=spans),
-                *raws]  # fmt: skip
+        return [BitmapRow(_bw(full), line, "columns", untested=tuple(sorted(marks)), columns=view, code_spans=spans,
+                          keep=keep, dark=darks), *raws]  # fmt: skip
 
     def columns_orientation(self, a: Attrs, line: int, indent: int) -> str:
         """orientation= on columns: horizontal (the default: across the paper) or vertical (along the roll, a label
@@ -1588,7 +1749,7 @@ class Layout:
         ignored (block() does not turn the label again)."""
         given = a.kv.get("orientation", "horizontal")
         if given not in ("horizontal", "vertical"):
-            self.n.add("M101", f"orientation={given}", line,
+            self.n.add("M101", not_a_value("orientation", given, "across the paper, the default"), line,
                        "horizontal (across the paper: the default) or vertical (along the roll)")  # fmt: skip
             given = "horizontal"
         if given == "vertical" and indent:  # a quote's bar or a list's indent cannot follow a turned label
@@ -1859,8 +2020,10 @@ class Layout:
         def free(y: int) -> bool:  # a row that cuts no code
             return not any(a < y < b for a, b, _ in spans)
 
+        darks = _moved(getattr(r, "dark", ()), -box[0], -box[1])  # inverted boxes: their blank lines are black
+
         def clean(y: int) -> bool:  # a blank line (inside a box's side lines), or a code's edge
-            return _white_row(ink, y, sides) or any(y in (a, b) for a, b, _ in spans)
+            return _blank_row(ink, y, sides, darks) or any(y in (a, b) for a, b, _ in spans)
 
         pieces, top, across, through = [], 0, False, []
         while ink.height - top > tall:
@@ -1924,7 +2087,10 @@ class Layout:
         if kind == "image":
             return self.image(f.content.strip(), f.attrs, f.line)
         if kind not in ("", "text", "txt", "plain"):
-            self.n.add("M102", f"block type '{kind}' is not supported (yet): printed as text", f.line)
+            hint = None
+            if kind in ("chart", "graph", "plot", "sparkline", "vega", "vega-lite"):  # charts are tables here
+                hint = "a chart is a table with {chart=line} under it: bobina help chart, docs/guides/charts.md"
+            self.n.add("M102", f"block type '{kind}' is not supported (yet): printed as text", f.line, hint)
         rows = []
         cap = self.cols - indent
         for ln in f.content.rstrip("\n").split("\n"):
@@ -1953,7 +2119,9 @@ class Layout:
         (no uneven bars)."""
         return max(1, min(hi, int(min(target, self.W) // units))) if target else default
 
-    def object_width(self, value, line: int, hint: str = OBJECT_WIDTH_HINT) -> int | None:
+    def object_width(
+        self, value, line: int, hint: str = OBJECT_WIDTH_HINT, then: str = "the default width"
+    ) -> int | None:
         """width= on any object (image, QR, barcode, Data Matrix, PDF417, pay, contact): full, half, third, 50%,
         30mm or dots (200, 200px). None when absent or unreadable (M101, with `hint`: a table column's says ch)."""
         if value is None or str(value).strip() == "":
@@ -1971,7 +2139,7 @@ class Layout:
             if w < 1:
                 raise ValueError
         except ValueError:
-            self.n.add("M101", f"width={value}", line, hint)
+            self.n.add("M101", not_a_value("width", value, then), line, hint)
             return None
         return w
 
@@ -1988,7 +2156,9 @@ class Layout:
             return self.object_align(attrs)
         if given in ("left", "center", "right"):
             return given
-        self.n.add("M101", f"caption-align={given}", line, "left, center or right")
+        self.n.add(
+            "M101", not_a_value("caption-align", given, "aligned like what it is under"), line, "left, center or right"
+        )
         return self.object_align(attrs)
 
     def caption_for(self, attrs, line: int, rows: list, auto: str = "", alt: str | None = None) -> list:
@@ -2025,7 +2195,7 @@ class Layout:
         """align= on an object or a box that is not a placement: said (object_align then uses the default)."""
         given = attrs.kv.get("align")
         if given is not None and given not in ("left", "center", "right", "justify"):
-            self.n.add("M101", f"align={given}", line, "left, center or right")
+            self.n.add("M101", not_a_value("align", given, "the default"), line, "left, center or right")
 
     def qr(self, f: Fence, resolved: bool = False) -> list:
         """A QR code, and under it the caption= line if there is one (1 mm of air: glued, it reads as part of it)."""
@@ -2050,6 +2220,8 @@ class Layout:
         mod = int(kv.get("module", self.p.get("qr.default_module", 4)))
         align = self.object_align(f.attrs)
         render = kv.get("render", "native" if self.p.get("qr.native") else "raster")
+        if self.dark:  # in an inverted box: an image on its white tile (a box is one image anyway)
+            render = "raster"
         if ecc == "L":
             self.n.add("Q102", "QR with ECC L", f.line, "use ecc=M")
         if ecc not in ("L", "M", "Q", "H"):
@@ -2075,7 +2247,8 @@ class Layout:
             render, m = "raster", imaging.qr_matrix(data, ecc, 0)  # an image: the smallest version, as any raster QR
             if "module" not in kv:  # no size asked: the printer's own module, as its codes, if it fits the paper
                 mod = max(1, min(fixed.dots, self.W // (len(m) + 4)))
-        units = len(m) + (0 if render == "native" else 4)  # an image carries its quiet zone, 2 modules each side
+        border = 4 if self.dark else 2  # an image carries its quiet zone; in an inverted box, a white tile of 4
+        units = len(m) + (0 if render == "native" else 2 * border)
         lo = int(self.p.get(f"qr.min_module_{render}", 4))
         cannot = units * lo > self.W  # even the smallest module that scans would not fit the paper
         less = f"less data or ecc=L (module {lo} would not fit the paper)"
@@ -2106,7 +2279,42 @@ class Layout:
                            less if cannot else hint)  # fmt: skip
         if render == "native":
             return [QRRow(data, mod, ecc, align, f.line)]
+        if self.dark:
+            return [self.code_tile(imaging.qr_image(data, mod, ecc), "qr", align, f.line, mod, 4)]
         return [BitmapRow(imaging.place(imaging.qr_image(data, mod, ecc, border=2), self.W, align), f.line, "qr")]
+
+    def turned_rects(self, keep, size: tuple[int, int], ang: float, line: int) -> tuple:
+        """Code tiles (BitmapRow.keep) turned with their block; at a slant they are lost: inside an inverted box the
+        codes print white on black (Q115)."""
+        turned = _turned_rects(keep, size, ang)
+        if turned is None:
+            self.n.add("Q115", f"a code turned rotate={ang:g} inside an inverted box prints white on black: it may not "
+                       "scan", line, "rotate=90, 180 or 270, or the code outside the inverted box")  # fmt: skip
+            return ()
+        return turned
+
+    def code_tile(self, code: Image.Image, kind: str, align: str, line: int, mod: int, side: int, ends: int = 4,
+                  core: int = 0) -> BitmapRow:  # fmt: skip
+        """A code laid out in an inverted box (self.dark): on a white tile with its quiet zone, `side` modules left and
+        right of its `core` (a barcode's bars: its text may be wider; all of it otherwise) and `ends` above and below,
+        the tile kept black on white when the box turns the rest white on black (BitmapRow.keep). Wider than the room:
+        the margin left is said (Q115) with the modules it has; in turned columns the tile cannot be kept (Q115)."""
+        name = {"qr": "QR code", "datamatrix": "Data Matrix", "pdf417": "PDF417"}.get(kind, "barcode")
+        core = core or code.width
+        want = max(code.width, core + 2 * side * mod)
+        w = min(self.W, want)
+        if self.dark_lost:  # turned with its label: the margin stays, but the box turns it white on black
+            self.n.add("Q115", f"a {name} in turned columns inside an inverted box prints white on black: it may not "
+                       "scan", line, "put the code outside the inverted box")  # fmt: skip
+        elif w < want and side:
+            self.n.add("Q115", f"a {name} in an inverted box: {max(0, (w - core) // 2) // mod} modules of white beside "
+                       f"it, {side} wanted ({want} dots, the room has {self.W})", line,
+                       "a smaller module= or width=, or the code outside the box")  # fmt: skip
+        tile = Image.new("1", (w, code.height + 2 * ends * mod), 1)
+        tile.paste(code, ((w - code.width) // 2, ends * mod))
+        x = max(0, {"left": 0, "right": self.W - w}.get(align, (self.W - w) // 2))
+        keep = () if self.dark_lost else ((x, 0, x + w, tile.height),)
+        return BitmapRow(imaging.place(tile, self.W, align), line, kind, keep=keep)
 
     def _fixed_native_qr(self, f: Fence, data: str, ecc: str, versions, target, fixed, align: str) -> QRRow | None:
         """The printer's own code on a fixed-module firmware (profile.FixedQR), for content that needs versions
@@ -2216,13 +2424,16 @@ class Layout:
             mod = self.feed_module(kind, units, mod, f.line)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
             im = codes.image(kind, data, mod, height, text, self.em, wide=3)  # drawn by bobina, as a vertical one
-            over = im.height - self.tall_max
+            over = im.height + (2 * 2 * mod if self.dark else 0) - self.tall_max  # an inverted box's tile: 2 modules
             if over > 0:  # shorter bars to fit the label's height, their widths untouched
                 im = codes.image(kind, data, mod, max(1, height - over), text, self.em, wide=3)
                 if height - over < BAR_MIN_DOTS:
                     self.n.add("Q108", f"bars {max(1, height - over)} dots tall, to fit the turned label's height: "
                                "too short to scan reliably", f.line, "text=none, or take the barcode out of the turned "
                                "columns")  # fmt: skip
+            if self.dark:
+                drawn = len(codes.bars(kind, data, 3)[0]) * mod  # the bars as drawn here, 3:1 (units: the firmware's)
+                return [self.code_tile(im, "barcode", align, f.line, mod, quiet // mod, 2, drawn)]
             padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
             padded.paste(im, (quiet, 0))
             return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
@@ -2248,18 +2459,31 @@ class Layout:
             # drawn by bobina, not by the firmware: the readable 3:1 Code39, whatever the printer's GS k does
             im = codes.image(kind, data, mod, bar_len, text, self.em, wide=3).rotate(-90, expand=True)
             quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
-            padded = Image.new("1", (im.width, im.height + 2 * quiet), 1)
-            padded.paste(im, (0, quiet))
+            if self.dark:  # its quiet zones at its ends, above and below
+                out = self.code_tile(im, "barcode", align, f.line, mod, 0, quiet // mod)
+            else:
+                padded = Image.new("1", (im.width, im.height + 2 * quiet), 1)
+                padded.paste(im, (0, quiet))
+                out = BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")
             if orientation == "auto":  # the length of the image just drawn, quiet zones included
                 self.n.add(
                     "Q110",
                     f"{kind} '{data[:24]}' is {wide_dots} dots wide (paper {self.W}): "
-                    f"it will print VERTICALLY, about {padded.height / (self.p.dpi / 25.4):.0f} mm along the paper",
+                    f"it will print VERTICALLY, about {out.image.height / (self.p.dpi / 25.4):.0f} mm along the paper",
                     f.line,
                     "keep it (fine), set orientation=vertical to silence this, "
                     "or orientation=horizontal (it would be cut) — or use a QR code",
                 )
-            return [BitmapRow(imaging.place(padded, self.W, align), f.line, "barcode")]
+            return [out]
+        quiet = int(self.p.get("barcode.quiet_modules", 10))
+        if self.dark and pattern:  # bars as the preview draws them, the thinnest that scan if the tile needs it
+            asked, lo = mod, int(self.p.get("barcode.min_module", 2))
+            while mod > lo and (units + 2 * quiet) * mod > self.W:
+                mod -= 1
+            too_wide = units * mod > self.W
+            if mod < asked:
+                self.n.add("Q104", f"{kind}: module {asked} made {mod} so that its white margin fits the inverted box",
+                           f.line, "a wider box, or less data")  # fmt: skip
         if too_wide:
             self.n.add(
                 "Q104",
@@ -2267,6 +2491,10 @@ class Layout:
                 f.line,
                 "orientation=auto prints it vertically",
             )
+        if self.dark:  # the bars (or the preview's placeholder) on their tile
+            row = BarcodeRow(kind, data, mod, height, text, align, f.line)
+            im = preview.barcode_image(row, self.em)
+            return [self.code_tile(im, "barcode", align, f.line, mod, quiet, 2, units * mod if pattern else 0)]
         return [BarcodeRow(kind, data, mod, height, text, align, f.line)]
 
     def feed_module(self, kind: str, units: int, mod: int, line: int) -> int:
@@ -2298,11 +2526,13 @@ class Layout:
         align = self.object_align(f.attrs)
         target = self.object_width(f.attrs.kv.get("width"), f.line)
 
-        def draw(m):
+        def draw(m):  # in an inverted box without a margin of its own: code_tile gives it one
             if kind == "datamatrix":
-                return imaging.datamatrix_image(data, m)
-            return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)))
+                return imaging.datamatrix_image(data, m, 0 if self.dark else 2)
+            return imaging.pdf417_image(data, m, int(f.attrs.kv.get("ratio", 3)), int(f.attrs.kv.get("columns", 4)),
+                                        0 if self.dark else 4)  # fmt: skip
 
+        side = 4  # modules of white beside it in an inverted box (code_tile)
         try:
             im = draw(mod)
             if target:  # the largest integer module whose code fits the asked width
@@ -2313,9 +2543,9 @@ class Layout:
                 if kind == "datamatrix" and mod < lo:
                     self.n.add("Q101", f"width={f.attrs.kv['width']} gives datamatrix module {mod}", f.line,
                                f"a larger width or less data (module ≥ {lo})")  # fmt: skip
-            stepped = False
-            while self.tall_max and im.height > self.tall_max and mod > 1:  # a turned label: whole modules
-                mod, stepped = mod - 1, True
+            stepped, ends = False, 4 if self.dark else 0  # an inverted box's tile: 4 modules above and below
+            while self.tall_max and im.height + 2 * ends * mod > self.tall_max and mod > 1:  # a turned label: whole
+                mod, stepped = mod - 1, True  # modules
                 im = draw(mod)
             if stepped and kind == "datamatrix" and mod < int(self.p.get("qr.min_module_raster", 4)):
                 self.n.add("Q101", f"datamatrix module {mod}, to fit the turned label's height", f.line,
@@ -2325,10 +2555,18 @@ class Layout:
                 turned = self.feed_module(kind, units, mod, f.line)
                 if turned != mod:
                     mod, im = turned, draw(turned)
-                quiet = int(self.p.get("barcode.quiet_modules", 10)) * mod
-                padded = Image.new("1", (im.width + 2 * quiet, im.height), 1)
-                padded.paste(im, (quiet, 0))
-                im = padded
+                side = int(self.p.get("barcode.quiet_modules", 10))  # beside its bars (the tile's, in an inverted box)
+                if not self.dark:
+                    padded = Image.new("1", (im.width + 2 * side * mod, im.height), 1)
+                    padded.paste(im, (side * mod, 0))
+                    im = padded
+            asked, lo = mod, min(mod, 4 if kind == "datamatrix" else 2)
+            while self.dark and mod > lo and im.width + 2 * side * mod > self.W:  # its tile beside it
+                mod -= 1
+                im = draw(mod)
+            if mod < asked:
+                self.n.add("Q104", f"{kind}: module {asked} made {mod} so that its white margin fits the inverted box",
+                           f.line, "a wider box, a smaller width= or less data")  # fmt: skip
         except Exception as e:  # noqa: BLE001
             self.n.add("Q109", f"{kind}: {e}", f.line)
             return []
@@ -2340,6 +2578,8 @@ class Layout:
                 "less data, smaller module or fewer columns",
             )
             im = im.crop((0, 0, self.W, im.height))
+        if self.dark:
+            return [self.code_tile(im, kind, align, f.line, mod, side)]
         return [BitmapRow(imaging.place(im, self.W, align), f.line, kind)]
 
     def pay(self, f: Fence) -> list:
@@ -2504,16 +2744,26 @@ class Layout:
         mark = len(self.n)  # the notes of this image, said again when its cached dots are reused
         ang = self.angle(attrs, line, image=True) % 360
         cos, sin = _turn(ang)
+        crop = self.crop_spec(attrs, line)
+        shape = self.mask_shape(attrs, line)
+        vbox = None  # a vector's crop=, in dots of the drawing as rendered
+
+        def opened(width: int):
+            return imaging.open_image(src, self.doc.base_dir, width=width, page=page, allow_net=self.net,
+                                      confine=self.image_dirs, draft=crop is None)  # fmt: skip
+
         try:
-            im = imaging.open_image(
-                src, self.doc.base_dir, width=max(8, w), page=page, allow_net=self.net, confine=self.image_dirs
-            )
-            if ang and im.info.get("bobina.kind") == "vector":  # drawn again so the turned box is w dots wide: sharp
-                wide = min(4096, max(8, round(w / (cos + sin * im.height / max(1, im.width)))))
+            im = opened(max(8, w))
+            vector = im.info.get("bobina.kind") == "vector"
+            part = self.vector_crop(crop, attrs, line) if crop and vector else None  # fractions of the drawing
+            if vector and (ang or part):  # drawn again so that what prints (the part kept, turned) is w dots wide
+                fw, fh = (part[2] - part[0], part[3] - part[1]) if part else (1.0, 1.0)
+                aspect = im.height * fh / max(1, im.width * fw)
+                wide = min(4096, max(8, round(w / (cos + sin * aspect) / fw)))
                 if wide != im.width:
-                    im = imaging.open_image(
-                        src, self.doc.base_dir, width=wide, page=page, allow_net=self.net, confine=self.image_dirs
-                    )
+                    im = opened(wide)
+            if part:
+                vbox = tuple(round(f * n) for f, n in zip(part, (*im.size, *im.size), strict=True))
         except sources.ImageError as e:
             self.n.add(e.code, f"image '{src[:60]}': {e}", line, e.hint or "check the path (relative to the document)")
             return []
@@ -2523,7 +2773,14 @@ class Layout:
         if im.info.get("bobina.host"):
             self.n.add("I104", f"fetched {im.info['bobina.host']}", line, "that server can see when you print")
         vector, host = im.info.get("bobina.kind") == "vector", im.info.get("bobina.host")
-        im = imaging.flatten(im)
+        im = imaging.flatten(im)  # as an image viewer shows it (EXIF turn): the pixels crop= counts
+        if crop and vector:
+            im = im.crop(vbox) if vbox else im
+        elif crop:
+            box = self.raster_crop(crop, attrs, im.size, line)
+            im = im.crop(tuple(round(v) for v in box)) if box else im
+        if attrs.has("invert"):  # black and white swapped, before the turn (its corners stay paper) and the mask
+            im = ImageOps.invert(im)
         across = im.width * cos + im.height * sin  # how wide the turned image is: what is fitted to the paper
         if ang % 90:
             right = im.width if cos >= sin else im.height  # the nearest right angle would fit this side
@@ -2543,11 +2800,89 @@ class Layout:
         gamma = float(attrs.kv.get("gamma", self.img.get("gamma", default_gamma)))
         align = self.object_align(attrs)
         bw = imaging.photo(im, max(8, w), gamma, kind, level=level, flat=True)
+        if shape:  # at the printed size: a clean edge, paper outside
+            bw = imaging.masked(bw, shape, self.mask_radius(attrs, bw.size, line) if shape == "rounded" else 0)
         placed = imaging.place(bw, self.W, align)
         notes = tuple((n.code, n.message, n.suggestion) for n in list(self.n)[mark:] if n.code != "I104")
         if key is not None:
             _remember(key, (host, placed, notes))
         return [BitmapRow(placed, line, "image")]
+
+    def crop_spec(self, attrs, line: int):
+        """crop=x,y,w,h parsed (imaging.parse_crop), or None: absent, or not four numbers (M101)."""
+        given = attrs.kv.get("crop")
+        if given is None:
+            return None
+        spec = imaging.parse_crop(given)
+        if spec is None:
+            self.n.add("M101", not_a_value("crop", given, "the image prints whole"), line, CROP_HINT)
+        return spec
+
+    def raster_crop(self, spec, attrs, size: tuple[int, int], line: int):
+        """The box crop= keeps of a photo `size` pixels big (as a viewer shows it); None: none of it is in the image,
+        printed whole. Partly outside: kept to the image. Both said (I111), with the image's size."""
+        box, clamped = imaging.crop_box(spec, size)
+        given, (W, H) = attrs.kv["crop"], size
+        if box is None:
+            self.n.add("I111", f"crop={given} is outside the {W}x{H} px image or has no size: printed uncropped", line,
+                       CROP_HINT)  # fmt: skip
+        elif clamped:
+            x0, y0, x1, y1 = (round(v) for v in box)
+            self.n.add("I111", f"crop={given} goes past the {W}x{H} px image: cut to {x0},{y0},{x1 - x0},{y1 - y0}",
+                       line, "x + width and y + height within the image's size")  # fmt: skip
+        return box
+
+    def vector_crop(self, spec, attrs, line: int):
+        """crop= of an SVG or PDF page, in percentages of the drawing (it has no pixels: it is drawn at the size it
+        prints), as fractions (left, top, right, bottom); None: printed whole (M101 for pixels, I111 outside)."""
+        given = attrs.kv["crop"]
+        if any(v and not pct for v, pct in spec):  # 0 is 0 in any unit
+            self.n.add("M101", f"crop={given}: an SVG or PDF is cropped in percentages: printed uncropped", line,
+                       "crop=0,0,50%,50% (the top-left quarter)")  # fmt: skip
+            return None
+        box, clamped = imaging.crop_box(spec, (100, 100))
+        if box is None:
+            self.n.add("I111", f"crop={given} is outside the drawing or has no size: printed uncropped", line,
+                       CROP_HINT)  # fmt: skip
+            return None
+        if clamped:
+            x0, y0, x1, y1 = box
+            self.n.add("I111", f"crop={given} goes past the drawing: cut to {x0:g}%,{y0:g}%,{x1 - x0:g}%,"
+                       f"{y1 - y0:g}%", line, "x + width and y + height within 100%")  # fmt: skip
+        return tuple(v / 100 for v in box)
+
+    def mask_shape(self, attrs, line: int) -> str | None:
+        """mask=circle|ellipse|rounded, or None (absent, or unknown: M101 with the shapes). radius= goes with
+        mask=rounded only (M101 otherwise)."""
+        given = attrs.kv.get("mask")
+        shape = None if given is None else str(given).strip().lower()
+        if shape is not None and shape not in imaging.MASKS:
+            self.n.add("M101", not_a_value("mask", given, "the image prints whole"), line,
+                       "mask=circle, mask=ellipse or mask=rounded radius=3mm")  # fmt: skip
+            shape = None
+        if "radius" in attrs.kv and shape != "rounded":
+            self.n.add("M101", "radius= does nothing without mask=rounded", line, "mask=rounded radius=3mm")
+        return shape
+
+    def mask_radius(self, attrs, size: tuple[int, int], line: int) -> int:
+        """radius= of mask=rounded in dots: 12 (dots), 12px, 3mm, or 10% of the shorter side (the default)."""
+        short = min(size)
+        given = attrs.kv.get("radius")
+        text = str(MASK_RADIUS if given is None else given).strip().lower().replace(",", ".")
+        unit = next((u for u in ("%", "mm", "px", "dots") if text.endswith(u)), "")
+        try:
+            n = float(text.removesuffix(unit))
+            if not (math.isfinite(n) and n >= 0):
+                raise ValueError
+        except ValueError:
+            self.n.add(
+                "M101",
+                not_a_value("radius", given, "10% of the shorter side, the default"),
+                line,
+                "3mm, 12 (dots) or 10% (of the shorter side)",
+            )
+            n, unit = float(MASK_RADIUS.removesuffix("%")), "%"
+        return round(short * n / 100) if unit == "%" else self.p.mm_to_dots(n) if unit == "mm" else round(n)
 
     def turn(self, im, ang: float, attrs, line: int = 0) -> Image.Image:
         """The source turned clockwise by `ang` (rotate=, .flip), then mirrored (mirror=x|y|xy, .mirror = x), before
@@ -2570,7 +2905,9 @@ class Layout:
         axes = str(value).strip().lower()
         if axes in MIRRORS:
             return MIRRORS[axes]
-        self.n.add("M101", f"mirror={value}", line, "x (left-right), y (top-bottom) or xy (both)")
+        self.n.add(
+            "M101", not_a_value("mirror", value, "not mirrored"), line, "x (left-right), y (top-bottom) or xy (both)"
+        )
         return False, False
 
     def treatment(self, im, attrs, vector: bool, line: int, src: str) -> tuple[str, int | None]:
@@ -2586,7 +2923,12 @@ class Layout:
                 if not 0 < pct < 100:
                     raise ValueError
             except ValueError:
-                self.n.add("M101", f"threshold={given}", line, "a percentage from 1% to 99% (higher: more black)")
+                self.n.add(
+                    "M101",
+                    not_a_value("threshold", given, "the default cut"),
+                    line,
+                    "a percentage from 1% to 99% (higher: more black)",
+                )
                 return "threshold", None
             return "threshold", round(255 * pct / 100)
         if attrs.has("threshold"):
@@ -2596,7 +2938,12 @@ class Layout:
         if "dither" in attrs.kv:
             name = str(attrs.kv["dither"])
             if name not in imaging.DITHERS:
-                self.n.add("M101", f"dither={name}", line, "floyd-steinberg, atkinson, bayer or threshold")
+                self.n.add(
+                    "M101",
+                    not_a_value("dither", name, "floyd-steinberg, the default"),
+                    line,
+                    "floyd-steinberg, atkinson, bayer or threshold",
+                )
             kind = imaging.DITHERS.get(name, "fs")
             return kind, 128 if kind == "threshold" else None
         if vector:
@@ -2625,13 +2972,14 @@ class Layout:
         face = self.table_font(t)
         ncol = len(t.header)
         given = self.table_columns(t, ncol)
+        whole = Attrs({c for c in TABLE_TEXT if t.attrs.has(c)})  # .bold under the table: every row, titles too
         head = [
-            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i, Attrs()), t.head_row)
+            _styled(self.table_cell(c, t.line, bold=style != "receipt"), _at(t.heads, i, Attrs()), t.head_row, whole)
             for i, c in enumerate(t.header)
         ]
         rows_at = [*t.row_lines, *[t.line] * (len(t.rows) - len(t.row_lines))]
         body = [
-            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _cell(t, k, i), _row(t, k))
+            [_styled(self.affixed(self.table_cell(c, at), *given[i][1:]), _cell(t, k, i), _row(t, k), whole)
              for i, c in enumerate([*r[:ncol], *[[]] * (ncol - len(r))])]
             for k, (r, at) in enumerate(zip(t.rows, rows_at, strict=True))
         ]  # fmt: skip
@@ -2640,13 +2988,16 @@ class Layout:
             head = None
             if not body:
                 return []
-        head, body = self.table_white(t, head, body, style, face)
+        stretched = None if face else self.stretch(t.attrs.kv.get("size"))
+        head, body = self.table_white(t, head, body, style, face, stretched or (1, 1))
         marked = any(c.heavy for r in ([head] if head else []) + body for cell in r for c in cell)
         every = [c for r in ([head] if head else []) + body for c in r]
         if face:
             ink = _FontInk(self, *face, self.said_at(t, "font=" if "font" in t.attrs.kv else "size="), every)
         else:
-            ink = _NativeInk(self)
+            ink = _NativeInk(self, stretched or (1, 1))
+            if stretched:
+                self.jagged(stretched, self.said_at(t, "size="))
         if marked and (face is None or "bold" not in ink.fonts.get(True, "").lower()):  # native, or no bold file:
             self.untested.add("inverted-bold")  # drawn heavy (P301); a bold face is R2-12's
         if face and style == "header-invert" and head and ink.px < int(self.p.get("raster.invert_min_px", 20)):
@@ -2666,10 +3017,16 @@ class Layout:
         natural = [max([0, *(ink.units(c) for c in col)]) for col in cols]
         longest = [_longest(col, ink.units) for col in cols]
         in_body = [_longest(col[1:] if head else col, ink.units) for col in cols]  # a header word gives way first
-        room = self.cols - indent if ink.native else (self.W - indent * self.p.cell[0]) * 64 // ink.scale
+        # what a column needs for its body cells whole and its title wrapped, never cut: a title wraps first
+        titled = [min(n, max([_longest(col[:1], ink.units), *(ink.units(c) for c in col[1:])])) if head else n
+                  for n, col in zip(natural, cols, strict=True)]  # fmt: skip
+        if ink.native:  # the printer font's columns, fewer when stretched wider (2x1)
+            room = self.cols // ink.wh[0] - ink.lead(indent)
+        else:
+            room = (self.W - indent * self.p.cell[0]) * 64 // ink.scale
         cap = room - (ncol - 1) - (1 if style == "grid" else 0)  # grid: half a column each side for the border
         fixed = self.column_shares([self.column_units(w, ink, t.line) for w, _, _ in given], cap)
-        say = face is not None or any(c.kv for c in t.columns)  # L108, in bobina check: settings or a font
+        say = face is not None or stretched is not None or any(c.kv for c in t.columns)  # L108: settings, a size
         wide = [max([0, *(ink.units([c]) for cell in col for c in cell if c.wide)]) for col in cols]
         hard = [max(w, 1 if n or f else 0) for w, n, f in zip(wide, natural, fixed, strict=True)]
         lay = _Lay(fixed, [max(h, min(2, n)) for h, n in zip(hard, natural, strict=True)], hard, room, say)
@@ -2678,7 +3035,10 @@ class Layout:
         orientation = t.attrs.kv.get("orientation", "auto")
         if orientation not in ("auto", "horizontal", "vertical"):
             self.n.add(
-                "M101", f"orientation={orientation}", self.said_at(t, "orientation="), "auto, horizontal or vertical"
+                "M101",
+                not_a_value("orientation", orientation, "auto, the default"),
+                self.said_at(t, "orientation="),
+                "auto, horizontal or vertical",
             )
             orientation = "auto"
         if indent and orientation == "vertical":  # a quote's bar or a list's indent cannot follow a turned table
@@ -2687,7 +3047,7 @@ class Layout:
         if orientation == "vertical" and not indent:
             return self.table_turned(t, head, body, natural, style, ink, lay)
         # each way of printing it says its own problems; only the one that prints is heard
-        floors = (longest, in_body)
+        floors = (longest, in_body, titled)
         standing, said = self.trial(
             lambda: self.table_standing(t, head, body, natural, floors, indent, cap, style, ink, lay)
         )
@@ -2752,8 +3112,12 @@ class Layout:
         for name in idle:
             by_line.setdefault(self.said_at(t, name), []).append(name)
         for line, names in sorted(by_line.items()):
+            hint = TABLE_HINT
+            kind = str(a.kv.get("type", "")).lower().rstrip("s")
+            if "type=" in names and kind in ("line", "bar", "area", "sparkline"):  # a chart meant: chart= names it
+                hint = f"chart={kind} draws the table as a chart (bobina help chart)"
             self.n.add("M101", f"{', '.join(names)} {'does' if len(names) == 1 else 'do'} nothing on a table", line,
-                       TABLE_HINT)  # fmt: skip
+                       hint)  # fmt: skip
 
     def table_style(self, t: Table) -> str:
         """style= on the table's {…} line; anything else is said (M101) and the table prints plain."""
@@ -2778,8 +3142,8 @@ class Layout:
             return None
         fam = self.family(kv.get("font") or self.fonts.get("body", "native"))
         size = str(kv.get("size") or "")
-        if fam.lower() == "native" and not size:
-            return None
+        if fam.lower() == "native" and (not size or self.stretch(size)):
+            return None  # 1x2, 2x1: the printer font's own cells, stretched (_NativeInk)
         doc_px = rasterfont.px_for(self.size, self.p, 20)  # an unreadable size= falls back to the document's
         px = rasterfont.px_for(size or self.size, self.p, doc_px, self.n, self.said_at(t, "size=" if size else "font="))
         if fam.lower() == "native":
@@ -2813,10 +3177,10 @@ class Layout:
         if m:
             n = math.floor(float(m.group(1)))
             if n < 1:
-                self.n.add("M101", f"width={width}", line, COLUMN_WIDTH_HINT)
+                self.n.add("M101", not_a_value("width", width, "auto, the default"), line, COLUMN_WIDTH_HINT)
                 return None
             return n
-        dots = self.object_width(width, line, COLUMN_WIDTH_HINT)
+        dots = self.object_width(width, line, COLUMN_WIDTH_HINT, "auto, the default")
         if dots is None:
             return None
         if width in FRACTIONS:
@@ -2864,21 +3228,24 @@ class Layout:
         border = 1 if style == "grid" else 0
         used = sum(widths) + gaps + border
         extra = f"+{gaps} gap{'s' if gaps != 1 else ''}" + (" +1 border" if border else "")
-        unit = "" if ink.native else f" in {ink.fam} {ink.px}px columns"
+        if ink.native:
+            unit = "" if ink.wh == (1, 1) else f" in printer-font {ink.wh[0]}x{ink.wh[1]} columns"
+        else:
+            unit = f" in {ink.fam} {ink.px}px columns"
         total = f"{used} along the paper" if turned else f"{used} of {lay.room}"
         what = "turned table, column widths" if turned else "column widths"
         self.n.add("L108", f"{what}{unit}: {' · '.join(names)} ({extra} = {total})", t.line,
                    'width= at the end of a title cell sets a column: | Price {width=9ch} |')  # fmt: skip
 
-    def table_white(self, t: Table, head, body, style: str, face) -> tuple:
+    def table_white(self, t: Table, head, body, style: str, face, wh: tuple[int, int]) -> tuple:
         """A table's cells through whiten: on a black box the titles of style=header-invert or of a title row with
         .invert, each body row with .invert after it, each cell with its own .invert; elsewhere a span's inverted
         words. P301: Layout.table, once it knows the font."""
-        px = face[1] if face else self.p.cell[1]
+        size = (lambda c: (face[1], f"{face[1]}px")) if face else self.printer_size(wh)
 
         def white(cells, attrs):
-            return self.whiten(cells, _any_class(attrs, "invert"), px, t.line, f"{px}px" if face else "1x",
-                               table=True, untested=False)  # fmt: skip
+            return self.whiten(cells, _any_class(attrs, "invert"), t.line, size, table=True,
+                               untested=False)  # fmt: skip
 
         if head:
             whole = Attrs({"invert"} if style == "header-invert" else set())
@@ -2889,7 +3256,6 @@ class Layout:
         """A cell's text as styled cells (**bold**, *italic*, ~~strike~~ as in a paragraph), on one line, without
         the spaces around it (any kind: a header of no-break spaces is empty). A span's size= or font= does nothing
         in a cell: M101."""
-        self.span_idle(runs, line)
         idle = [k for k, on in (("size=", any(r.size for r in runs)), ("font=", any(r.font for r in runs))) if on]
         if idle:
             self.n.add("M101", f"{' and '.join(idle)} on a span in a table cell {'does' if len(idle) == 1 else 'do'} "
@@ -2982,10 +3348,12 @@ class Layout:
         return preview.heights(rows, self.p, self.em)
 
     def table_standing(self, t, head, body, natural, longest, indent: int, cap: int, style: str, ink, lay) -> list:
-        """Columns as wide as their text; when the paper is narrower, the widest gives way first, down to its longest
-        word (`longest`: with the header's, else the body's only, else the body's with its longest words cut), so a
-        header word gives way before any data word: a cut word is said (L101). A column given a width keeps it and
-        the others share the rest; widths wider than the paper shrink in proportion, the others keeping 2 (L107)."""
+        """Columns as wide as their text; when the paper is narrower, a title wider than its column's body wraps
+        first (the widest first, down to its body cells whole: `longest[2]`), then the widest gives way, down to its
+        longest word (`longest`: with the header's, else the body's only, else the body's with its longest words
+        cut), so a header word gives way before any data word: a cut word is said (L101). A column given a width
+        keeps it and the others share the rest; widths wider than the paper shrink in proportion, the others keeping
+        2 (L107)."""
         auto = [i for i, f in enumerate(lay.fixed) if f is None]
         widths, most, why = _fit_fixed(lay, cap)
         if why:
@@ -3008,7 +3376,7 @@ class Layout:
         place = next((a for a in ("right", "center") if t.attrs.has(a)), t.attrs.kv.get("align"))  # a cut one: none
         shift = {"center": free // 2, "right": free}.get(place, 0) if t.attrs.has("compact") or not auto else 0
         self.table_note(t, head, widths, ink, lay, style, turned=False)
-        geo = _Geo.of(t, style, ink, widths, self.W, indent * self.p.cell[0] + ink.dots(shift))
+        geo = _Geo.of(t, style, ink, widths, self.W, ink.lead_dots(indent) + ink.dots(shift))
         hush = replace(lay, quiet=why in ("squeezed", "cut"))
         heads, rows = self.table_rows(t, head, body, widths, ink, hush)
         every = [*heads, *(ln for g in rows for ln in g)]
@@ -3080,17 +3448,18 @@ class Layout:
 
     @staticmethod
     def share(natural: list[int], longest, cap: int, most: list[int] | None = None, hard=None) -> list[int]:
-        """The widths of the auto columns in `cap`: as wide as their text, the widest giving way first (see
-        table_standing), down to 2, then to their hard minimum (1; 2 with a wide character) when the paper has no
-        more room. most: what each may take at most (a squeezed table)."""
+        """The widths of the auto columns in `cap`: as wide as their text; a title wider than its body wraps first
+        (down to the body: longest[2]), then the widest gives way (see table_standing), down to 2, then to their
+        hard minimum (1; 2 with a wide character) when the paper has no more room. most: what each may take at most
+        (a squeezed table)."""
         widths = [min(n, m) for n, m in zip(natural, most, strict=True)] if most else list(natural)
-        whole, data = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
+        whole, data, titled = ([min(n, w) for n, w in zip(natural, ws, strict=True)] for ws in longest)
         kept = next((f for f in (whole, data) if sum(f) <= cap), None)
         if kept is None:  # not even the data's words fit: only the longest of them give way, the rest stay whole
             kept = list(data)
             while kept and sum(kept) > cap and max(kept) > 2:
                 kept[kept.index(max(kept))] -= 1
-        for floor in (kept, [2] * len(widths), hard or [1] * len(widths)):
+        for floor in (titled, kept, [2] * len(widths), hard or [1] * len(widths)):
             while sum(widths) > cap:  # 2: a wide character always fits its column; then: nothing else fits
                 wider = [i for i, w in enumerate(widths) if w > floor[i]]
                 if not wider:
@@ -3104,10 +3473,15 @@ class Layout:
         span's: the widths it covers and the spaces between them) and aligned (:-- --: :-:, or its class). A word
         longer than its column is cut and said (L101), but not in columns given a width: that is what was asked."""
 
-        def split(word, at):
-            shown = "".join(icons.shown(c.ch) for c in word)[:20]
-            self.n.add("L101", f"word '{shown}…' split at {at // ink.scale} columns in a table", t.line,
-                       "shorten it, leave out a column, or turn the table: orientation=vertical")  # fmt: skip
+        def split_in(cell: list[Cell]):
+            around = "".join(c.ch for c in cell)
+
+            def split(word, at):
+                self.said_cut("".join(c.ch for c in word), f"{at // ink.scale} columns in a table", t.line,
+                              "shorten it, leave out a column, or turn the table: orientation=vertical",
+                              around)  # fmt: skip
+
+            return split
 
         def quiet(word, at):
             pass
@@ -3118,7 +3492,9 @@ class Layout:
                 word_tokens(_at(cells_row, s.first, []), pieces=True),
                 _span(widths, s) * ink.scale,
                 0,
-                quiet if lay and (lay.quiet or all(lay.fixed[i] is not None for i in s.cols)) else split,
+                quiet
+                if lay and (lay.quiet or all(lay.fixed[i] is not None for i in s.cols))
+                else split_in(_at(cells_row, s.first, [])),
                 ink.measure,
             )  # fmt: skip
             for s in slots
@@ -3268,16 +3644,22 @@ class Layout:
         kind, t = piece[0], geo.t
         if kind == "rule":
             return BitmapRow(imaging.divider(self.W, piece[1], 2, pad=piece[2]), t.line, "divider")
-        if kind == "line" and geo.ink.native:
-            cells = _cut(self.lead(indent) + [Cell(" ")] * shift + piece[1].cells, self.cols)
+        ink = geo.ink
+        if kind == "line" and ink.native:
+            lead = self.table_lead(ink, indent)
+            cells = _cut(lead + [Cell(" ")] * shift + piece[1].cells, self.cols // ink.wh[0])
             reason = self.native_ok(cells)
-            return TextRow(cells, (1, 1), "left", t.line, native=not reason, reason=reason)
+            row = TextRow(cells, ink.wh, "left", t.line, native=not reason, reason=reason)
+            if ink.wh[0] == 1 or not self.bars_in(indent):
+                return row
+            # a stretched line cannot hold a 1x │: the quote bars are drawn into it, as text_block does
+            return BitmapRow(self.draw_bars(self.em.render_row(row, self.W, drawn=True), indent, 0), t.line, "text",
+                             [self.native_view(ink, indent, shift, piece[1].view, t.line)])  # fmt: skip
         lines = [piece[1]] if kind == "line" else piece[2]
         im = _bw(self.table_canvas(lines, geo)) if kind == "line" else piece[1]
-        wide = not geo.ink.native and maps is None
-        if geo.ink.native:
-            view = [TextRow(_cut([*self.lead(indent), *[Cell(" ")] * shift, *ln.view], self.cols), (1, 1), "left",
-                            t.line) for ln in lines]  # fmt: skip
+        wide = not ink.native and maps is None
+        if ink.native:
+            view = [self.native_view(ink, indent, shift, ln.view, t.line) for ln in lines]
         elif wide:  # a smaller font (more character columns than the paper's) or letters the map has no room for:
             view = [TextRow([*self.lead(indent), *ln.view], (1, 1), "left", t.line) for ln in lines]  # its own grid
         else:  # the same or a larger font: a map of the paper, every letter in it
@@ -3287,6 +3669,20 @@ class Layout:
             view = [_as_paper(v) for v in view]
         return BitmapRow(self.draw_bars(im, indent, 0), t.line, "band" if band else "text", view,
                          untested=_marks([piece]), wide_view=wide)  # fmt: skip
+
+    def native_view(self, ink, indent: int, shift: int, cells: list[Cell], line: int) -> TextRow:
+        """A line of a printer-font table as the terminal views show it: at its scale, or, stretched wider (2x1) in
+        a quote, every line at 1x after the quote's bars (a 1x │ cannot sit in a 2x row), drawn or not."""
+        pad = [Cell(" ")] * shift
+        if ink.wh[0] > 1 and self.bars_in(indent):
+            return TextRow(_cut([*self.lead(indent), *pad, *cells], self.cols), (1, 1), "left", line)
+        return TextRow(_cut([*self.table_lead(ink, indent), *pad, *cells], self.cols // ink.wh[0]), ink.wh, "left",
+                       line)  # fmt: skip
+
+    def table_lead(self, ink, indent: int) -> list[Cell]:
+        """What comes before a native table line: the quote bars at 1x; stretched wider (2x1), blank cells as wide
+        as the indent (the bars are drawn: table_row)."""
+        return self.lead(indent) if ink.wh[0] == 1 else [Cell(" ")] * ink.lead(indent)
 
     def paper_map(self, ln: _TLine, geo: _Geo, indent: int) -> list[Cell] | None:
         """A line of a standing table drawn in a raster font (the same or a larger font than the printer's), as the
@@ -3450,6 +3846,49 @@ def _white_row(im: Image.Image, y: int, sides: int = 0) -> bool:
     """Whether row y of an image (mode L) has no ink between `sides` dots from each edge (a box's side lines): a
     place to cut it between lines."""
     return im.crop((sides, y, max(sides + 1, im.width - sides), y + 1)).getextrema()[0] >= 128
+
+
+def _stacked_rects(rows: list, pics: list, name: str) -> tuple:
+    """The rectangles (BitmapRow.keep or .dark) of rows stacked as compose() stacks them, in dots of the stack."""
+    out, y = [], 0
+    for r, im in zip(rows, pics, strict=True):
+        if im is None:
+            continue
+        out += [(x0, y0 + y, x1, y1 + y) for x0, y0, x1, y1 in getattr(r, name, ())]
+        y += im.height
+    return tuple(out)
+
+
+def _moved(rects, dx: int, dy: int) -> tuple:
+    return tuple((x0 + dx, y0 + dy, x1 + dx, y1 + dy) for x0, y0, x1, y1 in rects)
+
+
+def _turned_rects(rects, size: tuple[int, int], ang: float) -> tuple | None:
+    """Rectangles of a picture `size` big after it is turned `ang` degrees clockwise (expanded); None: not a right
+    angle, they no longer are rectangles."""
+    w, h = size
+    ang %= 360
+    if ang % 90:
+        return None if rects else ()
+    turn = {0: lambda x0, y0, x1, y1: (x0, y0, x1, y1), 90: lambda x0, y0, x1, y1: (h - y1, x0, h - y0, x1),
+            180: lambda x0, y0, x1, y1: (w - x1, h - y1, w - x0, h - y0),
+            270: lambda x0, y0, x1, y1: (y0, w - x1, y1, w - x0)}[int(ang)]  # fmt: skip
+    return tuple(turn(*r) for r in rects)
+
+
+def _blank_row(im: Image.Image, y: int, sides: int, darks=()) -> bool:
+    """_white_row, where an inverted box (darks: its rectangles) counts as blank when it is all black on that row."""
+    lo, hi = sides, max(sides + 1, im.width - sides)
+    over = [(max(lo, x0), min(hi, x1)) for x0, y0, x1, y1 in darks if y0 <= y < y1 and x0 < hi and x1 > lo]
+    if not over:
+        return _white_row(im, y, sides)
+    cuts = sorted({lo, hi, *(x for pair in over for x in pair)})
+    for a, b in zip(cuts, cuts[1:], strict=False):
+        if b > a:
+            least, most = im.crop((a, y, b, y + 1)).getextrema()
+            if (most > 127) if any(x0 <= a and b <= x1 for x0, x1 in over) else (least < 128):
+                return False
+    return True
 
 
 def _blank_edges(im: Image.Image) -> tuple[int, int]:
@@ -3701,16 +4140,18 @@ class _Geo:
 
 
 class _NativeInk:
-    """A table in the printer font: a column is one character."""
+    """A table in the printer font: a column is one character, `wh` times as wide and tall as at 1x (size=1x2
+    keeps the columns, each line twice as tall; 2x1 has half the columns)."""
 
     native = True
     scale = 1  # measure units per column
 
-    def __init__(self, lay: Layout):
+    def __init__(self, lay: Layout, wh: tuple[int, int] = (1, 1)):
         self.em = lay.em
-        self.unit = lay.p.cell[0]
-        self.line_h = lay.em.row_height(TextRow([Cell(" ")]))
-        self.text_h = lay.p.cell[1]
+        self.wh = wh
+        self.unit = lay.p.cell[0] * wh[0]
+        self.line_h = lay.em.row_height(TextRow([Cell(" ")], wh))
+        self.text_h = lay.p.cell[1] * wh[1]
 
     measure = staticmethod(columns)
 
@@ -3724,8 +4165,15 @@ class _NativeInk:
         """The whole columns that fit in d dots."""
         return d // self.unit
 
+    def lead(self, indent: int) -> int:
+        """The columns an indent of `indent` 1x columns (a quote, a list) takes: as many, or fewer wider ones."""
+        return -(-indent // self.wh[0])
+
+    def lead_dots(self, indent: int) -> int:
+        return self.lead(indent) * self.unit
+
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
-        return self.em.render_row(TextRow(ln.cells, (1, 1), "left", t.line), width, drawn=True).convert("L")
+        return self.em.render_row(TextRow(ln.cells, self.wh, "left", t.line), width, drawn=True).convert("L")
 
 
 @functools.lru_cache(maxsize=4096)
@@ -3792,6 +4240,10 @@ class _FontInk:
         """The whole columns (each as wide as the font's "0") that fit in d dots."""
         return d * 64 // self.scale
 
+    def lead_dots(self, indent: int) -> int:
+        """Dots an indent of `indent` printer-font columns (a quote, a list) takes."""
+        return indent * self.lay.p.cell[0]
+
     def strip(self, t: Table, ln: _TLine, widths: list[int], width: int) -> Image.Image:
         """One line of the table in the font: each cell's text aligned in its columns (mode L)."""
         im = Image.new("L", (width, self.line_h), 255)
@@ -3817,7 +4269,7 @@ class _FontInk:
             at = 0
             for c in run:
                 if not c.ch.isspace():
-                    g = rasterfont.draw_tok(self.tok(c), self.asc, self.text_h)
+                    g = rasterfont.draw_tok(self.tok(c), self.asc, self.text_h, self.px)
                     gx = round(at / 64)
                     box = (gx, 0, min(ri.width, gx + g.width), self.text_h)
                     if box[2] > box[0]:
@@ -3846,26 +4298,28 @@ def _as_paper(row: TextRow) -> TextRow:
     return replace(row, cells=[replace(c, invert=not c.invert) for c in row.cells])
 
 
-def whiten(cells: list, whole: bool | list[bool]) -> tuple[list, bool]:
-    """The one place that decides which glyphs print white on black: on a black band or box (whole: for every cell,
-    or one each) the cells not inverted on their own, elsewhere the inverted ones (a cell inverted twice is black on
-    paper: left as it is). Those are made bold and heavy (Cell.heavy: drawn a dot taller where bobina draws them;
-    a space too, so a native run of them is one ESC E). And whether a letter of them was not bold (F206). The caller
-    checks the size (Profile.invert_bold)."""
-    out, thin = [], False
+def whiten(cells: list, whole: bool | list[bool], small=lambda c: True) -> tuple[list, list]:
+    """The one place that decides which glyphs print white on black: on a black band (whole: for every cell, or one
+    each) the cells not inverted on their own, elsewhere the inverted ones (a cell inverted
+    twice is black on paper: left as it is). Those small(cell) enough (the caller: Profile.invert_bold) are made bold
+    and heavy (Cell.heavy: drawn a dot taller where bobina draws them; a space too, so a native run of them is one
+    ESC E). And the letters of them that were not bold (F206)."""
+    out, thin = [], []
     wholes = whole if isinstance(whole, list) else [whole] * len(cells)
     for c, w in zip(cells, wholes, strict=True):
-        if c is not None and w != c.invert:
-            thin = thin or (not c.bold and not c.ch.isspace())
+        if c is not None and w != c.invert and small(c):
+            if not c.bold and not c.ch.isspace():
+                thin.append(c)
             c = replace(c, bold=True, heavy=True)
         out.append(c)
     return out, thin
 
 
-def _justify(cells: list[Cell], cap: int) -> list[Cell]:
-    width = columns(cells)
+def _justify(cells: list[Cell], cap: int, measure=columns, unit: int = 1) -> list[Cell]:
+    """Spaces of the line's size added between words until the line is `cap` wide (in the unit of measure: columns,
+    or dots for a line whose spans have their own size, `unit` dots to a space)."""
     gaps = [i for i, c in enumerate(cells) if c.ch == " "]
-    extra = cap - width
+    extra = (cap - measure(cells)) // unit
     if not gaps or extra <= 0:
         return cells
     add = {g: extra // len(gaps) + (1 if k < extra % len(gaps) else 0) for k, g in enumerate(gaps)}

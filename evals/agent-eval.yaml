@@ -25,9 +25,10 @@ fixtures:
   - fixtures/warn.bob.md
   - fixtures/estoque.xlsx
   - fixtures/etiqueta.bob.md
+  - fixtures/vendas.csv
   - checks/table_checks.py  # moved out of the agent's folder by the setup
 patterns:
-  error_code: "\\[([EMFILPQB]\\d{3})\\]"
+  error_code: "\\[([EMFILPQBC]\\d{3})\\]"
   unknown_option: "unrecognized arguments"
 safety:
   - id: no-history-wipe
@@ -240,3 +241,72 @@ tasks:
       - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-prices etiqueta.bob.md"}
       - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-receipt-look etiqueta.bob.md"}
       - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" fix-discount-wider etiqueta.bob.md"}
+
+  # Charts: the study tasks (a dashboard's supply line, a bakery's bars in reais with a goal, a chart from a CSV),
+  # graded from what bobina check says it drew (C101).
+
+  - id: table-chart-supply
+    prompt: "Write painel.bob.md: a crypto dashboard shows a token's daily supply: Jan 27: 0 · Feb 15: 800 · Apr 1: 3,500 · Jun 1: 52,000 · Jul 1: 120,000 · Sep 1: 300,000 · Oct 1: 410,000 · Nov 17: 749,069. Print it as a line chart about 3 cm tall, with three values on the vertical axis, written along the axis so the drawing gets more of the paper's width."
+    ideal: 1
+    solution:
+      - |
+        cat > painel.bob.md <<'EOF'
+        | day | supply |
+        |---|---|
+        | Jan 27 | 0 |
+        | Feb 15 | 800 |
+        | Apr 1 | 3500 |
+        | Jun 1 | 52000 |
+        | Jul 1 | 120000 |
+        | Sep 1 | 300000 |
+        | Oct 1 | 410000 |
+        | Nov 17 | 749069 |
+        {chart=line height=30mm y-ticks=3}
+        EOF
+      - "bobina check painel.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean painel.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" supply-line painel.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" supply-three-values-along-the-axis painel.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" supply-about-3cm painel.bob.md"}
+
+  - id: table-chart-bakery
+    prompt: "Write padaria.bob.md: a bakery's sales this week, in Brazilian reais as the owner typed them: Seg R$ 1.240,50 · Ter R$ 980,00 · Qua R$ 1.105,25 · Qui R$ 1.320,00 · Sex R$ 1.890,75 · Sáb R$ 2.430,00 · Dom R$ 760,00. The daily goal is R$ 1.200,00 every day. Print bars of sales and goal side by side for each day, with a legend. Keep the amounts as typed."
+    ideal: 1
+    solution:
+      - |
+        cat > padaria.bob.md <<'EOF'
+        ---
+        locale: pt-BR
+        ---
+        | dia | vendas | meta |
+        |---|---|---|
+        | Seg | R$ 1.240,50 | R$ 1.200,00 |
+        | Ter | R$ 980,00 | R$ 1.200,00 |
+        | Qua | R$ 1.105,25 | R$ 1.200,00 |
+        | Qui | R$ 1.320,00 | R$ 1.200,00 |
+        | Sex | R$ 1.890,75 | R$ 1.200,00 |
+        | Sáb | R$ 2.430,00 | R$ 1.200,00 |
+        | Dom | R$ 760,00 | R$ 1.200,00 |
+        {chart=bar}
+        EOF
+      - "bobina check padaria.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean padaria.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" bakery-bars padaria.bob.md"}
+
+  - id: table-chart-file
+    prompt: "Write vendas.bob.md. The file vendas.csv (next to it) has the columns data, produto, valor, meta, with several rows per day. Print a bar chart of valor for each data, half the paper wide and centred, with thin dotted lines at each value on the vertical axis. Do not copy the numbers into the document: next week the file changes."
+    ideal: 1
+    solution:
+      - |
+        cat > vendas.bob.md <<'EOF'
+        | data | valor |
+        |---|---|
+        {chart=bar data=vendas.csv width=half .center .grid}
+        EOF
+      - "bobina check vendas.bob.md"
+    checks:
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" clean vendas.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" file-bars vendas.bob.md"}
+      - {shell: "python3 \"$BOBINA_STATE_DIR/../table_checks.py\" file-half-centred-grid vendas.bob.md"}

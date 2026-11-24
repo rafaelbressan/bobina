@@ -250,9 +250,9 @@ def _parts(res) -> list[dict]:
     seen, out = set(), []
     for m in getattr(res, "label_meta", []) or []:
         key = (m["part"], m["file"])
-        if key not in seen:
+        if key not in seen:  # --per-row: the files of the part took turns, row by row
             seen.add(key)
-            out.append({"part": m["part"], "file": m["file"]})
+            out.append({"part": m["part"], "file": m["file"], **({"per_row": True} if m.get("per_row") else {})})
     return out
 
 
