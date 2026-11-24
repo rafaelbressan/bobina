@@ -3,8 +3,8 @@ class Bobina < Formula
 
   desc "Print Markdown on thermal roll printers"
   homepage "https://github.com/rafaelbressan/bobina"
-  url "https://files.pythonhosted.org/packages/63/80/61bafa3d8644bd66658a80adc945f3a6cb48a36e7cfa2cb1421282a96432/bobina-0.1.5.tar.gz"
-  sha256 "7db640c4e106424a47d039ba7cca883a9f0be48c8b77d2f19175958e66f33b34"
+  url "https://files.pythonhosted.org/packages/42/e2/3befc8fb0d2d3b4899c876ef3703507c6d9506f7a757971004db43c0fda1/bobina-0.1.6.tar.gz"
+  sha256 "75f26d1329d21c6dd490d0ee74bbc389e44c1632d11fa718c00c91f0d2b5c0ac"
   license "MIT"
 
   depends_on "libyaml"
@@ -67,8 +67,8 @@ class Bobina < Formula
   end
 
   resource "pyyaml" do
-    url "https://files.pythonhosted.org/packages/05/8e/961c0007c59b8dd7729d542c61a4d537767a59645b82a0b521206e1e25c2/pyyaml-6.0.3.tar.gz"
-    sha256 "d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f"
+    url "https://files.pythonhosted.org/packages/76/b8/c0b780928e2fb1c87e9e375818c6f121da2398b071012d1747be300b83f4/pyyaml-6.0.4.tar.gz"
+    sha256 "e24bf71af8a432d7808fabff134d38dfe16d3cbb41f2873bb4b1e42422de0a1a"
   end
 
   resource "segno" do
@@ -77,8 +77,8 @@ class Bobina < Formula
   end
 
   resource "wcwidth" do
-    url "https://files.pythonhosted.org/packages/ea/01/e5ac23733628a6bbb91913a765fcf55ee8070d8d991bc88fdaaf805052c7/wcwidth-0.9.4.tar.gz"
-    sha256 "fd8d57d3cdfe570e3265c8fab1885c24e34ef40889c0759c0c304a19e9835954"
+    url "https://files.pythonhosted.org/packages/8e/da/d59374b2c893ae70a41fdb064637ccef218f25df8c67e5431a96708235d9/wcwidth-0.9.5.tar.gz"
+    sha256 "713534e2ecb16e0fc39f19e0a5dda997da76d010953e9e8f803e7971f8accd80"
   end
 
   def install
