@@ -553,3 +553,38 @@ def test_a_half_width_chart_with_small_labels_points_to_width_not_height():
     assert "width=" in n.suggestion and "height" not in n.suggestion
     chosen = build(src.replace("height=40mm", "height=40mm size=12px"))
     assert not [n for n in chosen.nudges if n.code == "C105"]  # the small labels chosen: no note
+
+
+COLD = """| hora | temp |
+|---|--:|
+| 00h | 2.5 |
+| 06h | -0.5 |
+| 09h | -1.5 |
+| 12h | 0.5 |
+| 18h | 4.5 |
+| 21h | 3.5 |
+"""
+
+
+def drawn_chart(monkeypatch, src: str):
+    seen = []
+    draw = charts.Chart.draw
+    monkeypatch.setattr(charts.Chart, "draw", lambda self, pts: (seen.append(self), draw(self, pts))[1])
+    build(src)
+    return seen[-1]
+
+
+@pytest.mark.parametrize("y_labels", ["rotated", "horizontal"])
+def test_x_labels_keep_out_of_the_y_labels_corner(monkeypatch, y_labels):
+    """The first X label starts at the Y axis, not under the Y labels: the corner below the axis is theirs, so the
+    lowest Y label sits on its tick instead of being pushed up against the next one (paper, 24/11)."""
+    c = drawn_chart(monkeypatch, COLD + f"{{chart=area height=20mm x-labels=ends y-labels={y_labels}}}\n")
+    ys = [lab for lab in c.labels_drawn if lab.kind == "y"]
+    xs = [lab for lab in c.labels_drawn if lab.kind == "x"]
+    axis_left = max(lab.box[0] + lab.box[2] for lab in ys)  # the Y axis is right of every Y label
+    assert xs and min(lab.box[0] for lab in xs) >= axis_left
+    low = max(ys, key=lambda lab: lab.box[1])  # the lowest Y label: the bottom tick, at the X axis
+    assert low.box[1] + low.box[3] > c.axis_y + charts.STROKE  # it reaches into the corner, centred on its tick
+    down = sorted(ys, key=lambda lab: lab.box[1])
+    for a, b in zip(down, down[1:], strict=False):
+        assert a.box[1] + a.box[3] <= b.box[1]  # and no two touch

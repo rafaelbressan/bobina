@@ -444,6 +444,7 @@ class Geo:
     title_h: int = 0
     legend_h: int = 0
     legend: list = field(default_factory=list)  # rows of (x, item) of the legend
+    x_h: int = 0  # the X labels' row under the axis: its left corner, under the Y labels, is theirs
 
 
 class Chart:
@@ -694,9 +695,9 @@ class Chart:
             plot = (STROKE, top, W - 1 - STROKE, bottom + STROKE - 1)
         ok = plot[3] - plot[1] >= (MIN_PLOT if self.kind != "sparkline" else 0) and plot[2] - plot[0] >= MIN_PLOT
         if ok and tv:
-            spans = self.y_label_spans(font, texts, tv, lo, hi, plot)
+            spans = self.y_label_spans(font, texts, tv, lo, hi, plot, x_h)
             ok = all(b[0] >= a[1] + (2 * GAP if self.turned else 2) for a, b in zip(spans, spans[1:], strict=False))
-        return Geo(font, nticks, tv, lo, hi, left, plot, ok, title_h, legend_h, legend)
+        return Geo(font, nticks, tv, lo, hi, left, plot, ok, title_h, legend_h, legend, x_h=x_h)
 
     def room(self, g: Geo) -> bool:
         """Whether the drawing has any room: a stroke's height beside the axes, a dot without them."""
@@ -707,15 +708,16 @@ class Chart:
         x0, y0, x1, y1 = g.plot
         return y1 - (v - g.lo) / (g.hi - g.lo) * (y1 - y0)
 
-    def y_label_spans(self, font: Font, texts: list[str], tv: list[float], lo: float, hi: float, plot) -> list:
-        """(top, bottom) of each Y label, bottom first, centred on its tick and kept between the plot's ends."""
+    def y_label_spans(self, font: Font, texts: list[str], tv: list[float], lo: float, hi: float, plot, x_h=0) -> list:
+        """(top, bottom) of each Y label, bottom first, centred on its tick: kept below the top, and above the X
+        labels' row (its corner left of the axis is free: X labels start at the axis)."""
         g = Geo(font, len(tv), tv, lo, hi, 0, plot, True)
         out = []
         for s, v in sorted(zip(texts, tv, strict=True), key=lambda p: -p[1]):
             size = font.width(s) if self.turned else font.h
             c = self.y(g, v)
             top = round(c - size / 2)
-            top = max(0, min(top, plot[3] + STROKE - size)) if self.turned else max(0, top)
+            top = max(0, min(top, plot[3] + STROKE + x_h - size))
             out.append((top, top + size))
         return sorted(out)
 
@@ -946,10 +948,10 @@ class Chart:
             pic = f.image(s)
             if self.turned:
                 pic = pic.rotate(90, expand=True)
-                top = max(0, min(round(c - pic.height / 2), axis + STROKE - pic.height))
+                top = max(0, min(round(c - pic.height / 2), axis + STROKE + g.x_h - pic.height))
                 im.paste(pic, (0, top))
             else:
-                top = max(0, round(c - f.h / 2))
+                top = max(0, min(round(c - f.h / 2), axis + STROKE + g.x_h - f.h))
                 im.paste(pic, (g.left - TICK - GAP - pic.width, top))
             self.labels_drawn.append(Label(s, (0 if self.turned else g.left - TICK - GAP - pic.width, top, pic.width,
                                                pic.height), self.turned))  # fmt: skip
@@ -957,7 +959,7 @@ class Chart:
             s = self.shorten(f, points[i].label, im.width)
             self.cut["x"] += s != points[i].label
             w = f.width(s)
-            left = max(0, min(round(xs[i] - w / 2), im.width - w))
+            left = max(g.left, min(round(xs[i] - w / 2), im.width - w))  # never under the Y labels
             d.rectangle((round(xs[i]) - 1, axis + STROKE, round(xs[i]), axis + STROKE + 2), fill=0)
             im.paste(f.image(s), (left, axis + STROKE + GAP - 2))
             self.labels_drawn.append(Label(s, (left, axis + STROKE + GAP - 2, w, f.h), kind="x"))
@@ -974,7 +976,7 @@ class Chart:
             right = -GAP * 2
             for i in idx:
                 w = f.width(self.shorten(f, points[i].label, W))
-                left = max(0, min(round(xs[i] - w / 2), W - w))
+                left = max(g.left, min(round(xs[i] - w / 2), W - w))
                 if left < right + GAP * 2:
                     return False
                 right = left + w
