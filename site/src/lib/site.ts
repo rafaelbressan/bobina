@@ -29,7 +29,7 @@ export const githubUrl = (rel: string, dir = false) => `${release.repo}/${dir ? 
 export function slugOf(rel: string): string | null {
   if (rel === 'README.md') return '';
   if (rel === 'CHANGELOG.md') return 'changelog';
-  if (!rel.startsWith('docs/') || !rel.endsWith('.md')) return null;
+  if (!rel.startsWith('docs/') || !rel.endsWith('.md') || rel.endsWith('.bob.md')) return null; // .bob.md: a document to print, linked on GitHub
   return rel.slice(5, -3).replace(/(^|\/)README$/, '').toLowerCase();
 }
 

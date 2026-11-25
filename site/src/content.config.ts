@@ -6,7 +6,7 @@ import { TREE } from './lib/site';
 const docs = defineCollection({
   loader: glob({
     base: TREE,
-    pattern: ['README.md', 'CHANGELOG.md', 'docs/**/*.md'],
+    pattern: ['README.md', 'CHANGELOG.md', 'docs/**/*.md', '!docs/**/*.bob.md'],
     generateId: ({ entry }) => entry, // the repository path, e.g. docs/CLI.md
   }),
 });
